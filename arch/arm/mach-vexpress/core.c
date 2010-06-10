@@ -581,7 +581,7 @@ static int vexpress_clcd_setup(struct clcd_fb *fb)
 	dma_addr_t dma;
 
 	/* XVGA, 16bpp */
-	framesize = 1024 * 768 * 2;
+	framesize = 1024 * 768 * 2 * 2;
 
 	fb->panel = vexpress_clcd_panel();
 

@@ -36,6 +36,8 @@ extern void vexpress_adjust_zones(int node, unsigned long *size,
 	vexpress_adjust_zones(node, size, hole)
 #endif
 
+#define CONSISTENT_DMA_SIZE SZ_4M
+
 /*
  * Sparsemem definitions, only valid for high PHYS_OFFSET.
  *
