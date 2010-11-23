@@ -235,6 +235,19 @@ static int mmc_read_ext_csd(struct mmc_card *card)
 			ext_csd[EXT_CSD_SEC_CNT + 2] << 16 |
 			ext_csd[EXT_CSD_SEC_CNT + 3] << 24;
 
+#ifdef ANDROID
+        /*
+         * Merged from Android patches of 2.6.35.
+         * Deducts from the card->ext_csd.sectors the bootsectors size.
+         */
+		if (card->ext_csd.sectors) {
+			unsigned boot_sectors;
+            /* size is in 256K chunks, i.e. 512 sectors each */
+            boot_sectors = ext_csd[EXT_CSD_BOOT_SIZE_MULTI] * 512;
+            card->ext_csd.sectors -= boot_sectors;
+        }
+#endif
+
 		/* Cards with density > 2GiB are sector addressed */
 		if (card->ext_csd.sectors > (2u * 1024 * 1024 * 1024) / 512)
 			mmc_card_set_blockaddr(card);
