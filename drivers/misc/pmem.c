@@ -99,6 +99,21 @@ struct pmem_region_node {
 #define DLOG(x...) do {} while (0)
 #endif
 
+#if __LINUX_ARM_ARCH__ < 7
+pgprot_t phys_mem_access_prot(struct file *file, unsigned long pfn,
+			      unsigned long size, pgprot_t vma_prot)
+{
+	if (!pfn_valid(pfn))
+		return pgprot_noncached(vma_prot);
+	else if (file->f_flags & O_SYNC)
+		return pgprot_writecombine(vma_prot);
+	return vma_prot;
+}
+#else
+extern pgprot_t phys_mem_access_prot(struct file *file, unsigned long pfn,
+				     unsigned long size, pgprot_t vma_prot);
+#endif
+
 struct pmem_info {
 	struct miscdevice dev;
 	/* physical start address of the remaped pmem space */
@@ -438,6 +453,7 @@ static int pmem_allocate(int id, unsigned long len)
 	return best_fit;
 }
 
+/*
 static pgprot_t phys_mem_access_prot(struct file *file, pgprot_t vma_prot)
 {
 	int id = get_id(file);
@@ -451,6 +467,7 @@ static pgprot_t phys_mem_access_prot(struct file *file, pgprot_t vma_prot)
 #endif
 	return vma_prot;
 }
+*/
 
 static unsigned long pmem_start_addr(int id, struct pmem_data *data)
 {
@@ -628,7 +645,9 @@ static int pmem_mmap(struct file *file, struct vm_area_struct *vma)
 	}
 
 	vma->vm_pgoff = pmem_start_addr(id, data) >> PAGE_SHIFT;
-	vma->vm_page_prot = phys_mem_access_prot(file, vma->vm_page_prot);
+	vma->vm_page_prot = phys_mem_access_prot(file, vma->vm_pgoff, 
+						vma_size,
+						 vma->vm_page_prot);
 
 	if (data->flags & PMEM_FLAGS_CONNECTED) {
 		struct pmem_region_node *region_node;
