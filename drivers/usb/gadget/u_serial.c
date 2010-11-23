@@ -27,6 +27,7 @@
 
 #include "u_serial.h"
 
+#include <linux/sched.h>
 
 /*
  * This component encapsulates the TTY layer glue needed to provide basic
