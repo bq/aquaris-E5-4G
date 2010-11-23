@@ -23,3 +23,6 @@
 #define PHYS_OFFSET		UL(0x60000000)
 
 #endif
+
+#define CONSISTENT_DMA_SIZE SZ_4M
+

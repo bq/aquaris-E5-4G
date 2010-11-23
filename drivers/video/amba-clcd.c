@@ -195,6 +195,38 @@ static int clcdfb_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 	return ret;
 }
 
+struct fb_var_screeninfo cached_fb_var;
+int is_fb_var_cached = 0;
+
+static int clcdfb_is_fb_changed(struct clcd_fb *fb)
+{
+    if (!is_fb_var_cached ||
+        fb->fb.var.xres != cached_fb_var.xres ||
+        fb->fb.var.yres != cached_fb_var.yres ||
+        fb->fb.var.xres_virtual != cached_fb_var.xres_virtual ||
+        fb->fb.var.yres_virtual != cached_fb_var.yres_virtual ||
+        fb->fb.var.bits_per_pixel != cached_fb_var.bits_per_pixel ||
+        fb->fb.var.grayscale != cached_fb_var.grayscale ||
+        fb->fb.var.green.length != cached_fb_var.green.length ||
+        fb->fb.var.left_margin != cached_fb_var.left_margin ||
+        fb->fb.var.right_margin != cached_fb_var.right_margin ||
+        fb->fb.var.upper_margin != cached_fb_var.upper_margin ||
+        fb->fb.var.lower_margin != cached_fb_var.lower_margin ||
+        fb->fb.var.hsync_len != cached_fb_var.hsync_len ||
+        fb->fb.var.vsync_len != cached_fb_var.vsync_len ||
+        fb->fb.var.sync != cached_fb_var.sync ||
+        fb->fb.var.rotate != cached_fb_var.rotate) {
+
+        cached_fb_var = fb->fb.var;
+        is_fb_var_cached = 1;
+
+        return 1;
+    }
+    else
+
+        return 0;
+}
+
 static int clcdfb_set_par(struct fb_info *info)
 {
 	struct clcd_fb *fb = to_clcd(info);
@@ -208,22 +240,26 @@ static int clcdfb_set_par(struct fb_info *info)
 	else
 		fb->fb.fix.visual = FB_VISUAL_TRUECOLOR;
 
-	fb->board->decode(fb, &regs);
 
-	clcdfb_disable(fb);
+    	if (clcdfb_is_fb_changed(fb)) {
 
-	writel(regs.tim0, fb->regs + CLCD_TIM0);
-	writel(regs.tim1, fb->regs + CLCD_TIM1);
-	writel(regs.tim2, fb->regs + CLCD_TIM2);
-	writel(regs.tim3, fb->regs + CLCD_TIM3);
+		fb->board->decode(fb, &regs);
 
-	clcdfb_set_start(fb);
+		clcdfb_disable(fb);
 
-	clk_set_rate(fb->clk, (1000000000 / regs.pixclock) * 1000);
+		writel(regs.tim0, fb->regs + CLCD_TIM0);
+		writel(regs.tim1, fb->regs + CLCD_TIM1);
+		writel(regs.tim2, fb->regs + CLCD_TIM2);
+		writel(regs.tim3, fb->regs + CLCD_TIM3);
 
-	fb->clcd_cntl = regs.cntl;
+		clcdfb_set_start(fb);
 
-	clcdfb_enable(fb, regs.cntl);
+		clk_set_rate(fb->clk, (1000000000 / regs.pixclock) * 1000);
+
+		fb->clcd_cntl = regs.cntl;
+
+		clcdfb_enable(fb, regs.cntl);
+	}
 
 #ifdef DEBUG
 	printk(KERN_INFO
@@ -291,6 +327,20 @@ clcdfb_setcolreg(unsigned int regno, unsigned int red, unsigned int green,
 	return regno > 255;
 }
 
+static int clcdfb_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
+{
+	struct clcd_fb *fb = NULL;
+
+	info->var = *var;
+
+	fb = to_clcd(info);
+
+	clcdfb_set_start(fb);
+
+	return 0;
+}
+
+
 /*
  *  Blank the screen if blank_mode != 0, else unblank. If blank == NULL
  *  then the caller blanks by setting the CLUT (Color Look Up Table) to all
@@ -334,6 +384,7 @@ static struct fb_ops clcdfb_ops = {
 	.fb_check_var	= clcdfb_check_var,
 	.fb_set_par	= clcdfb_set_par,
 	.fb_setcolreg	= clcdfb_setcolreg,
+	.fb_pan_display	= clcdfb_pan_display,
 	.fb_blank	= clcdfb_blank,
 	.fb_fillrect	= cfb_fillrect,
 	.fb_copyarea	= cfb_copyarea,
@@ -386,14 +437,14 @@ static int clcdfb_register(struct clcd_fb *fb)
 	fb->fb.fix.type		= FB_TYPE_PACKED_PIXELS;
 	fb->fb.fix.type_aux	= 0;
 	fb->fb.fix.xpanstep	= 0;
-	fb->fb.fix.ypanstep	= 0;
+	fb->fb.fix.ypanstep	= 1;
 	fb->fb.fix.ywrapstep	= 0;
 	fb->fb.fix.accel	= FB_ACCEL_NONE;
 
 	fb->fb.var.xres		= fb->panel->mode.xres;
 	fb->fb.var.yres		= fb->panel->mode.yres;
 	fb->fb.var.xres_virtual	= fb->panel->mode.xres;
-	fb->fb.var.yres_virtual	= fb->panel->mode.yres;
+	fb->fb.var.yres_virtual	= fb->panel->mode.yres * 2;
 	fb->fb.var.bits_per_pixel = fb->panel->bpp;
 	fb->fb.var.grayscale	= fb->panel->grayscale;
 	fb->fb.var.pixclock	= fb->panel->mode.pixclock;

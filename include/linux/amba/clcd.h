@@ -233,7 +233,8 @@ static inline void clcdfb_decode(struct clcd_fb *fb, struct clcd_regs *regs)
 static inline int clcdfb_check(struct clcd_fb *fb, struct fb_var_screeninfo *var)
 {
 	var->xres_virtual = var->xres = (var->xres + 15) & ~15;
-	var->yres_virtual = var->yres = (var->yres + 1) & ~1;
+	var->yres = (var->yres + 1) & ~1;
+	var->yres_virtual = var->yres * 2;
 
 #define CHECK(e,l,h) (var->e < l || var->e > h)
 	if (CHECK(right_margin, (5+1), 256) ||	/* back porch */

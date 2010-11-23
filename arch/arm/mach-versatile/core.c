@@ -671,7 +671,10 @@ static void versatile_clcd_enable(struct clcd_fb *fb)
 #endif
 }
 
-static unsigned long framesize = SZ_1M;
+/*
+ * Larger memory allocation to support double buffering and page flip
+ */
+static unsigned long framesize = 640 * 480 * 2 * 2 ;
 
 static int versatile_clcd_setup(struct clcd_fb *fb)
 {
