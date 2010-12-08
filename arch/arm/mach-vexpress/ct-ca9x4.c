@@ -9,13 +9,13 @@
 #include <linux/amba/bus.h>
 #include <linux/amba/clcd.h>
 
+#include <asm/cacheflush.h>
 #include <asm/clkdev.h>
-#include <asm/pgtable.h>
 #include <asm/hardware/arm_timer.h>
 #include <asm/hardware/cache-l2x0.h>
 #include <asm/hardware/gic.h>
-#include <asm/mach-types.h>
 #include <asm/pmu.h>
+#include <asm/smp_scu.h>
 #include <asm/smp_twd.h>
 
 #include <mach/clkdev.h>
@@ -23,7 +23,6 @@
 
 #include <plat/timer-sp.h>
 
-#include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 #include <asm/mach/time.h>
 
@@ -57,7 +56,7 @@ static void __init ct_ca9x4_map_io(void)
 #ifdef CONFIG_LOCAL_TIMERS
 	twd_base = MMIO_P2V(A9_MPCORE_TWD);
 #endif
-	v2m_map_io(ct_ca9x4_io_desc, ARRAY_SIZE(ct_ca9x4_io_desc));
+	iotable_init(ct_ca9x4_io_desc, ARRAY_SIZE(ct_ca9x4_io_desc));
 }
 
 void __iomem *gic_cpu_base_addr;
@@ -246,16 +245,80 @@ static void __init ct_ca9x4_init(void)
 	platform_device_register(&pmu_device);
 }
 
-MACHINE_START(VEXPRESS, "ARM-Versatile Express CA9x4")
-	.phys_io	= V2M_UART0 & SECTION_MASK,
-	.io_pg_offst	= (__MMIO_P2V(V2M_UART0) >> 18) & 0xfffc,
-	.boot_params	= PHYS_OFFSET + 0x00000100,
+#ifdef CONFIG_SMP
+static unsigned int ct_ca9x4_get_core_count(void)
+{
+	return scu_get_core_count(MMIO_P2V(A9_MPCORE_SCU));
+}
+
+static void ct_ca9x4_smp_enable(void)
+{
+	scu_enable(MMIO_P2V(A9_MPCORE_SCU));
+}
+#endif
+
+#ifdef CONFIG_HOTPLUG_CPU
+static void ct_ca9x4_enter_lowpower(void)
+{
+	unsigned int v;
+
+	flush_cache_all();
+	dsb();
+	asm volatile(
+	/*
+	* Turn off coherency
+	*/
+	"       mrc     p15, 0, %0, c1, c0, 1\n"
+	"       bic     %0, %0, #0x40\n"
+	"       mcr     p15, 0, %0, c1, c0, 1\n"
+	"       dsb\n"
+	/* Disable D-cache */
+	"       mrc     p15, 0, %0, c1, c0, 0\n"
+	"       bic     %0, %0, #0x04\n"
+	"       mcr     p15, 0, %0, c1, c0, 0\n"
+	  : "=&r" (v)
+	  : "r" (0)
+	  : "memory");
+	isb();
+}
+
+static void ct_ca9x4_leave_lowpower(void)
+{
+	unsigned int v;
+
+	flush_cache_all();
+	dsb();
+	asm volatile(   "mrc    p15, 0, %0, c1, c0, 0\n"
+	"       orr     %0, %0, #0x04\n"
+	"       mcr     p15, 0, %0, c1, c0, 0\n"
+	"       mrc     p15, 0, %0, c1, c0, 1\n"
+	"       orr     %0, %0, #0x40\n"
+	"       mcr     p15, 0, %0, c1, c0, 1\n"
+	  : "=&r" (v)
+	  :
+	  : "memory");
+	isb();
+}
+
+static int ct_ca9x4_do_lowpower(void)
+{
+	return -ENODEV;
+}
+#endif
+
+struct ct_desc ct_ca9x4_desc = {
+	.id		= V2M_CT_ID_CA9,
+	.name		= "CA9x4",
 	.map_io		= ct_ca9x4_map_io,
 	.init_irq	= ct_ca9x4_init_irq,
-#if 0
-	.timer		= &ct_ca9x4_timer,
-#else
-	.timer		= &v2m_timer,
+	.init_tile	= ct_ca9x4_init,
+#ifdef CONFIG_SMP
+	.get_core_count	= ct_ca9x4_get_core_count,
+	.smp_enable	= ct_ca9x4_smp_enable,
 #endif
-	.init_machine	= ct_ca9x4_init,
-MACHINE_END
+#ifdef CONFIG_HOTPLUG_CPU
+	.enter_lowpower	= ct_ca9x4_enter_lowpower,
+	.do_lowpower	= ct_ca9x4_do_lowpower,
+	.leave_lowpower	= ct_ca9x4_leave_lowpower,
+#endif
+};

@@ -540,12 +540,14 @@ unsigned long arch_randomize_brk(struct mm_struct *mm)
 
 int vectors_user_mapping(void)
 {
+#ifdef CONFIG_MMU
 	struct mm_struct *mm = current->mm;
 	return install_special_mapping(mm, 0xffff0000, PAGE_SIZE,
 				       VM_READ | VM_EXEC |
 				       VM_MAYREAD | VM_MAYEXEC |
 				       VM_ALWAYSDUMP | VM_RESERVED,
 				       NULL);
+#endif
 }
 
 const char *arch_vma_name(struct vm_area_struct *vma)

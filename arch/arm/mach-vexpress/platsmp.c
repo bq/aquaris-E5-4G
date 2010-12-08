@@ -18,10 +18,8 @@
 
 #include <asm/cacheflush.h>
 #include <asm/localtimer.h>
-#include <asm/smp_scu.h>
 #include <asm/unified.h>
 
-#include <mach/ct-ca9x4.h>
 #include <mach/motherboard.h>
 #define V2M_PA_CS7 0x10000000
 
@@ -34,11 +32,6 @@ extern void vexpress_secondary_startup(void);
  * boot "holding pen"
  */
 volatile int __cpuinitdata pen_release = -1;
-
-static void __iomem *scu_base_addr(void)
-{
-	return MMIO_P2V(A9_MPCORE_SCU);
-}
 
 static DEFINE_SPINLOCK(boot_lock);
 
@@ -118,10 +111,9 @@ int __cpuinit boot_secondary(unsigned int cpu, struct task_struct *idle)
  */
 void __init smp_init_cpus(void)
 {
-	void __iomem *scu_base = scu_base_addr();
 	unsigned int i, ncores;
 
-	ncores = scu_base ? scu_get_core_count(scu_base) : 1;
+	ncores = ct_desc->get_core_count();
 
 	/* sanity check */
 	if (ncores == 0) {
@@ -175,7 +167,7 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 		 */
 		percpu_timer_setup();
 
-		scu_enable(scu_base_addr());
+		ct_desc->smp_enable();
 
 		/*
 		 * Write the address of secondary startup into the
