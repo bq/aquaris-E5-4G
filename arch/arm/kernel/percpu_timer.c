@@ -9,10 +9,13 @@
  * published by the Free Software Foundation.
  */
 
+#include <linux/irq.h>
+#include <linux/seq_file.h>
 #include <linux/interrupt.h>
 #include <linux/clockchips.h>
 
 #include <asm/localtimer.h>
+#include <asm/smp_twd.h>
 
 #ifdef CONFIG_GENERIC_CLOCKEVENTS_BROADCAST
 static void broadcast_timer_set_mode(enum clock_event_mode mode,
@@ -37,6 +40,44 @@ static void broadcast_timer_setup(struct clock_event_device *evt)
 
 	clockevents_register_device(evt);
 }
+
+static struct local_timer_ops broadcast_timer_ops = {
+	.setup	= broadcast_timer_setup,
+};
+
+static struct local_timer_ops *timer_ops;
+
+int __attribute__ ((weak)) local_timer_setup(struct clock_event_device *evt)
+{
+	return -ENXIO;
+}
+
+void percpu_timer_register(struct local_timer_ops *ops)
+{
+	timer_ops = ops;
+}
+
+/*
+ * local_timer_ack: checks for a local timer interrupt.
+ *
+ * If a local timer interrupt has occurred, acknowledge and return 1.
+ * Otherwise, return 0.
+ *
+ * This can be overloaded by platform code that doesn't provide its
+ * timer in timer_fns way (msm at the moment). Once all platforms have
+ * migrated, the weak alias can be removed.
+ * If no ack() function has been registered, consider the acknowledgement
+ * to be done.
+ */
+static int percpu_timer_ack(void)
+{
+	if (timer_ops->ack)
+		return timer_ops->ack();
+
+	return 1;
+}
+
+int local_timer_ack(void) __attribute__ ((weak, alias("percpu_timer_ack")));
 
 /*
  * Timer (local or broadcast) support
@@ -63,14 +104,32 @@ void percpu_timer_run(void)
 
 void __cpuinit percpu_timer_setup(void)
 {
+	int ret = 0;
 	unsigned int cpu = smp_processor_id();
 	struct clock_event_device *evt = &per_cpu(percpu_clockevent, cpu);
 
-	evt->cpumask = cpumask_of(cpu);
-	evt->broadcast = smp_timer_broadcast;
+	/*
+	 * All this can go away once we've migrated all users to
+	 * properly register the timer they use, and broadcast can
+	 * become the fallback.
+	 */
+	if (!timer_ops)
+		timer_ops = local_timer_get_twd_ops();
+	if (!timer_ops)
+		timer_ops = &broadcast_timer_ops;
+	if (!timer_ops->plat_setup)
+		timer_ops->plat_setup = local_timer_setup;
 
-	if (local_timer_setup(evt))
-		broadcast_timer_setup(evt);
+	evt->cpumask = cpumask_of(cpu);
+
+	if (timer_ops->pre_setup)
+		timer_ops->pre_setup(evt);
+	if (timer_ops->plat_setup)
+		ret = timer_ops->plat_setup(evt);
+	if (ret)	/* Fallback to broadcast */
+		timer_ops = &broadcast_timer_ops;
+	if (timer_ops->setup)
+		timer_ops->setup(evt);
 }
 
 #ifdef CONFIG_HOTPLUG_CPU
@@ -85,5 +144,7 @@ void percpu_timer_stop(void)
 	struct clock_event_device *evt = &per_cpu(percpu_clockevent, cpu);
 
 	evt->set_mode(CLOCK_EVT_MODE_UNUSED, evt);
+	if (timer_ops->plat_teardown)
+		timer_ops->plat_teardown(evt);
 }
 #endif
