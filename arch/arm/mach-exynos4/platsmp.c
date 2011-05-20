@@ -152,6 +152,7 @@ void __init smp_init_cpus(void)
 void __init platform_smp_prepare_cpus(unsigned int max_cpus)
 {
 	int i;
+	void __iomem *sysram_evt0;
 
 	/*
 	 * Initialise the present map, which describes the set of CPUs
@@ -169,4 +170,17 @@ void __init platform_smp_prepare_cpus(unsigned int max_cpus)
 	 * secondary CPU branches to this address.
 	 */
 	__raw_writel(BSYM(virt_to_phys(exynos4_secondary_startup)), S5P_VA_SYSRAM);
+
+	/*
+	 * EVT0 has the system-wide flags register at a different address.
+	 * Poke it as well, in case we're running on an old SoC revision.
+	 */
+	sysram_evt0 = ioremap(EXYNOS4_PA_SYSRAM_EVT0, SZ_4K);
+	if (!sysram_evt0) {
+		pr_err("Unable to remap EXYNOS4_PA_SYSRAM_EVT0\n");
+		return;
+	}
+
+	__raw_writel(BSYM(virt_to_phys(exynos4_secondary_startup)), sysram_evt0);
+	iounmap(sysram_evt0);
 }
