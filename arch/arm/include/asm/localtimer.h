@@ -24,6 +24,11 @@ void percpu_timer_setup(void);
  */
 irqreturn_t percpu_timer_handler(int irq, void *dev_id);
 
+/*
+ * Kick per-cpu timer event_handler
+ */
+void percpu_timer_run(void);
+
 #ifdef CONFIG_LOCAL_TIMERS
 
 #ifdef CONFIG_HAVE_ARM_TWD
@@ -41,6 +46,10 @@ irqreturn_t percpu_timer_handler(int irq, void *dev_id);
 int local_timer_ack(void);
 
 #endif
+/*
+ * Stop a per-cpu timer
+ */
+void percpu_timer_stop(void);
 
 /*
  * Setup a local timer interrupt for a CPU.
