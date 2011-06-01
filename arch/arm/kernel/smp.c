@@ -363,12 +363,6 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 
 	if (max_cpus > 1) {
 		/*
-		 * Enable the local timer or broadcast device for the
-		 * boot CPU, but only if we have more than one CPU.
-		 */
-		percpu_timer_setup();
-
-		/*
 		 * Initialise the SCU if there are more than one CPU
 		 * and let them know where to start.
 		 */

@@ -28,6 +28,7 @@
 #include <linux/mc146818rtc.h>
 
 #include <asm/leds.h>
+#include <asm/localtimer.h>
 #include <asm/thread_info.h>
 #include <asm/sched_clock.h>
 #include <asm/stacktrace.h>
@@ -160,6 +161,18 @@ static int __init timer_init_sysfs(void)
 
 device_initcall(timer_init_sysfs);
 
+void (* __initdata arm_late_time_init)(void);
+
+static void __init __arm_late_time_init(void)
+{
+	if (arm_late_time_init)
+		arm_late_time_init();
+#ifdef CONFIG_LOCAL_TIMERS
+	/* Init the local timer on the boot CPU */
+	percpu_timer_setup();
+#endif
+}
+
 void __init time_init(void)
 {
 	system_timer = machine_desc->timer;
@@ -167,5 +180,6 @@ void __init time_init(void)
 #ifdef CONFIG_HAVE_SCHED_CLOCK
 	sched_clock_postinit();
 #endif
+	late_time_init = __arm_late_time_init;
 }
 

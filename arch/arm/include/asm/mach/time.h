@@ -44,5 +44,6 @@ struct sys_timer {
 };
 
 extern void timer_tick(void);
+extern void (* __initdata arm_late_time_init)(void);
 
 #endif

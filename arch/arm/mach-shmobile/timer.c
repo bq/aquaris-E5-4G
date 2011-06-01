@@ -38,7 +38,7 @@ static void __init shmobile_late_time_init(void)
 
 static void __init shmobile_timer_init(void)
 {
-	late_time_init = shmobile_late_time_init;
+	arm_late_time_init = shmobile_late_time_init;
 }
 
 struct sys_timer shmobile_timer = {
