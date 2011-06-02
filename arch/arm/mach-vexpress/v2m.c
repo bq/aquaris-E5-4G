@@ -28,6 +28,7 @@
 #include <mach/motherboard.h>
 
 #include <plat/sched_clock.h>
+#include <plat/localtimer.h>
 
 #include "core.h"
 
@@ -49,6 +50,9 @@ static struct map_desc v2m_io_desc[] __initdata = {
 static void __init v2m_timer_init(void)
 {
 	u32 scctrl;
+
+	/* twd_base is assigned in the tile code */
+	versatile_local_timer_init(NULL);
 
 	/* Select 1MHz TIMCLK as the reference clock for SP804 timers */
 	scctrl = readl(MMIO_P2V(V2M_SYSCTL + SCCTRL));
