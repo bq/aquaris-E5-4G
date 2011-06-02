@@ -14,9 +14,13 @@
 #include <linux/sysdev.h>
 #include <linux/usb/isp1760.h>
 #include <linux/clkdev.h>
+#include <linux/interrupt.h>
+#include <linux/clockchips.h>
 
 #include <asm/mach-types.h>
 #include <asm/sizes.h>
+#include <asm/localtimer.h>
+#include <asm/arch_timer.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/flash.h>
 #include <asm/mach/map.h>
@@ -24,6 +28,7 @@
 #include <asm/hardware/arm_timer.h>
 #include <asm/hardware/timer-sp.h>
 #include <asm/hardware/sp810.h>
+#include <asm/hardware/gic.h>
 
 #include <mach/ct-ca9x4.h>
 #include <mach/motherboard.h>
@@ -51,12 +56,45 @@ static struct map_desc v2m_io_desc[] __initdata = {
 	},
 };
 
+static int __cpuinit v2m_arch_timer_setup(struct clock_event_device *evt)
+{
+	int err;
+
+	evt->irq = gic_ppi_to_vppi(IRQ_LOCALTIMER);
+
+	err = request_irq(gic_ppi_to_vppi(30), percpu_timer_handler,
+			  IRQF_PERCPU | IRQF_NOBALANCING | IRQF_TIMER,
+			  "arch-timer-ns", evt);
+	if (err) {
+		pr_err("timer: can't register interrupt %d on cpu %d (%d)\n",
+		       gic_ppi_to_vppi(30), smp_processor_id(), err);
+		return err;
+	}
+
+	return 0;
+}
+
+static void v2m_arch_timer_teardown(struct clock_event_device *evt)
+{
+	free_irq(gic_ppi_to_vppi(30), evt);
+}
+
 static void __init v2m_timer_init(void)
 {
 	u32 scctrl;
 
+	/*
+	 * Try architected timers first. If they are not available,
+	 * fallback to TWD and versatile sched_clock.
+	 */
+	if (!arch_timer_register_setup(v2m_arch_timer_setup,
+				       v2m_arch_timer_teardown))
+		return;
+
 	/* vexpress_twd_base is assigned in the tile code */
 	versatile_local_timer_init(vexpress_twd_base);
+
+	versatile_sched_clock_init(MMIO_P2V(V2M_SYS_24MHZ), 24000000);
 
 	/* Select 1MHz TIMCLK as the reference clock for SP804 timers */
 	scctrl = readl(MMIO_P2V(V2M_SYSCTL + SCCTRL));
