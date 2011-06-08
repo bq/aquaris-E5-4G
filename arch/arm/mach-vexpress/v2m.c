@@ -38,6 +38,8 @@
 #define V2M_PA_CS3	0x4c000000
 #define V2M_PA_CS7	0x10000000
 
+void __iomem *vexpress_twd_base = NULL;
+
 static struct map_desc v2m_io_desc[] __initdata = {
 	{
 		.virtual	= __MMIO_P2V(V2M_PA_CS7),
@@ -51,8 +53,8 @@ static void __init v2m_timer_init(void)
 {
 	u32 scctrl;
 
-	/* twd_base is assigned in the tile code */
-	versatile_local_timer_init(NULL);
+	/* vexpress_twd_base is assigned in the tile code */
+	versatile_local_timer_init(vexpress_twd_base);
 
 	/* Select 1MHz TIMCLK as the reference clock for SP804 timers */
 	scctrl = readl(MMIO_P2V(V2M_SYSCTL + SCCTRL));

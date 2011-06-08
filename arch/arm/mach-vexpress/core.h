@@ -17,3 +17,5 @@ struct amba_device name##_device = {		\
 	.irq		= IRQ_##base,		\
 	/* .dma		= DMA_##base,*/		\
 }
+
+extern void __iomem *vexpress_twd_base;

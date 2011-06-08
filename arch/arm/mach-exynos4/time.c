@@ -292,14 +292,13 @@ static int __cpuinit exynos4_local_timer_setup(struct clock_event_device *evt)
 	evt->irq = gic_ppi_to_vppi(IRQ_LOCALTIMER);
 	return 0;
 }
+#else
+#define exynos4_local_timer_setup	NULL
 #endif
 
 static void __init exynos4_timer_init(void)
 {
-#ifdef CONFIG_LOCAL_TIMERS
-	twd_base = S5P_VA_TWD;
-	twd_timer_register_setup(exynos4_local_timer_setup);
-#endif
+	twd_timer_register_setup(S5P_VA_TWD, exynos4_local_timer_setup);
 
 	exynos4_timer_resources();
 	exynos4_clockevent_init();

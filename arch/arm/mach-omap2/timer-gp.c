@@ -261,10 +261,10 @@ static void __init omap2_gp_timer_init(void)
 {
 #ifdef CONFIG_LOCAL_TIMERS
 	if (cpu_is_omap44xx() && omap_rev() != OMAP4430_REV_ES1_0) {
-		twd_base = ioremap(OMAP44XX_LOCAL_TWD_BASE, SZ_256);
-		BUG_ON(!twd_base);
+		void __iomem *tbase = ioremap(OMAP44XX_LOCAL_TWD_BASE, SZ_256);
+		BUG_ON(!tbase);
 
-		twd_timer_register_setup(omap4_local_timer_setup);
+		twd_timer_register_setup(tbase, omap4_local_timer_setup);
 	}
 #endif
 	omap_dm_timer_init();

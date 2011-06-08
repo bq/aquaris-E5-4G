@@ -23,8 +23,7 @@
 #include <asm/localtimer.h>
 #include <asm/hardware/gic.h>
 
-/* set up by the platform code */
-void __iomem *twd_base;
+static void __iomem *twd_base;
 
 static unsigned long twd_timer_rate;
 static DEFINE_PER_CPU(bool, irq_reqd);
@@ -168,13 +167,15 @@ static struct local_timer_ops twd_timer_ops = {
 	.ack		= twd_timer_ack,
 };
 
-int __init twd_timer_register_setup(int (*setup)(struct clock_event_device *))
+int __init twd_timer_register_setup(void __iomem *base,
+				    int (*setup)(struct clock_event_device *))
 {
-	if (!twd_base) {
+	if (!base) {
 		pr_warn("TWD base address not set\n");
 		return -ENODEV;
 	}
 
+	twd_base = base;
 	percpu_timer_register_setup(&twd_timer_ops, setup, NULL);
 	return 0;
 }

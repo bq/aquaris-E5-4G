@@ -20,12 +20,12 @@
 #define TWD_TIMER_CONTROL_PERIODIC	(1 << 1)
 #define TWD_TIMER_CONTROL_IT_ENABLE	(1 << 2)
 
-extern void __iomem *twd_base;
-
 #ifdef CONFIG_HAVE_ARM_TWD
-int twd_timer_register_setup(int (*setup)(struct clock_event_device *));
+int twd_timer_register_setup(void __iomem *base,
+			     int (*setup)(struct clock_event_device *));
 #else
-static inline int twd_timer_register_setup(int (*setup)(struct clock_event_device *))
+static inline int twd_timer_register_setup(void __iomem *base,
+					   int (*setup)(struct clock_event_device *))
 {
 	return -ENODEV;
 }

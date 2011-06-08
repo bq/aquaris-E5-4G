@@ -2,6 +2,7 @@
 #define __ARCH_MACH_COMMON_H
 
 extern struct sys_timer shmobile_timer;
+extern void __iomem *shmobile_twd_base;
 extern void shmobile_setup_console(void);
 extern void shmobile_secondary_vector(void);
 struct clk;

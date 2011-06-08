@@ -200,6 +200,8 @@ static int __cpuinit tegra_local_timer_setup(struct clock_event_device *evt)
 	evt->irq = gic_ppi_to_vppi(IRQ_LOCALTIMER);
 	return 0;
 }
+#else
+#define tegra_local_timer_setup		NULL
 #endif
 
 static void __init tegra_init_timer(void)
@@ -220,11 +222,8 @@ static void __init tegra_init_timer(void)
 	BUG_ON(IS_ERR(clk));
 	clk_enable(clk);
 
-#ifdef CONFIG_HAVE_ARM_TWD
-	twd_base = IO_ADDRESS(TEGRA_ARM_PERIF_BASE + 0x600);
-
-	twd_timer_register_setup(tegra_local_timer_setup);
-#endif
+	twd_timer_register_setup(IO_ADDRESS(TEGRA_ARM_PERIF_BASE + 0x600),
+				 tegra_local_timer_setup);
 
 	switch (rate) {
 	case 12000000:

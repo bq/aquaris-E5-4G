@@ -130,15 +130,17 @@ static int __cpuinit ux500_local_timer_setup(struct clock_event_device *evt)
 static void __init ux500_timer_init(void)
 {
 #ifdef CONFIG_LOCAL_TIMERS
+	void __iomem *tbase = (void __iomem *)NULL;
+
 	/* Setup the local timer base */
 	if (cpu_is_u5500())
-		twd_base = __io_address(U5500_TWD_BASE);
+		tbase = __io_address(U5500_TWD_BASE);
 	else if (cpu_is_u8500())
-		twd_base = __io_address(U8500_TWD_BASE);
+		tbase = __io_address(U8500_TWD_BASE);
 	else
 		ux500_unknown_soc();
 
-	twd_timer_register_setup(ux500_local_timer_setup);
+	twd_timer_register_setup(tbase, ux500_local_timer_setup);
 #endif
 	if (cpu_is_u5500())
 		mtu_base = __io_address(U5500_MTU0_BASE);

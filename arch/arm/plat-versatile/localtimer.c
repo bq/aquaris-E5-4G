@@ -27,9 +27,5 @@ static int __cpuinit versatile_local_timer_setup(struct clock_event_device *evt)
 
 void __init versatile_local_timer_init(void __iomem *base)
 {
-#ifdef CONFIG_HAVE_ARM_TWD
-	if (base)
-		twd_base = base;
-	twd_timer_register_setup(versatile_local_timer_setup);
-#endif
+	twd_timer_register_setup(base, versatile_local_timer_setup);
 }

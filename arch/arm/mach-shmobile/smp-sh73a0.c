@@ -55,14 +55,22 @@ static void modify_scu_cpu_psr(unsigned long set, unsigned long clr)
 	__raw_writel(tmp, scu_base + 8);
 }
 
+#ifdef CONFIG_HAVE_ARM_TWD
+static int __cpuinit shmobile_local_timer_setup(struct clock_event_device *evt)
+{
+	evt->irq = gic_ppi_to_vppi(29);
+	return 0;
+}
+#else
+#define shmobile_local_timer_setup	NULL
+#endif
+
 unsigned int __init sh73a0_get_core_count(void)
 {
 	void __iomem *scu_base = scu_base_addr();
 
-#ifdef CONFIG_HAVE_ARM_TWD
-	/* twd_base needs to be initialized before percpu_timer_setup() */
-	twd_base = (void __iomem *)0xf0000600;
-#endif
+	twd_timer_register_setup((void __iomem *)0xf0000600,
+				 shmobile_local_timer_setup);
 
 	return scu_get_core_count(scu_base);
 }
