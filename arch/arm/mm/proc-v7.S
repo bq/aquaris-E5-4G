@@ -18,6 +18,7 @@
 #include <asm/pgtable.h>
 
 #include "proc-macros.S"
+#include "proc-v7-macros.S"
 
 #define TTB_S		(1 << 1)
 #define TTB_RGN_NC	(0 << 3)
@@ -32,11 +33,9 @@
 
 /* PTWs cacheable, inner WB not shareable, outer WB not shareable */
 #define TTB_FLAGS_UP	TTB_IRGN_WB|TTB_RGN_OC_WB
-#define PMD_FLAGS_UP	PMD_SECT_WB
 
 /* PTWs cacheable, inner WBWA shareable, outer WBWA not shareable */
 #define TTB_FLAGS_SMP	TTB_IRGN_WBWA|TTB_S|TTB_NOS|TTB_RGN_OC_WBWA
-#define PMD_FLAGS_SMP	PMD_SECT_WBWA|PMD_SECT_S
 
 ENTRY(cpu_v7_proc_init)
 	mov	pc, lr
@@ -446,24 +445,6 @@ cpu_elf_name:
 	/*
 	 * Standard v7 proc info content
 	 */
-.macro __v7_proc initfunc, mm_mmuflags = 0, io_mmuflags = 0, hwcaps = 0
-	ALT_SMP(.long	PMD_TYPE_SECT | PMD_SECT_AP_WRITE | PMD_SECT_AP_READ | \
-			PMD_FLAGS_SMP | \mm_mmuflags)
-	ALT_UP(.long	PMD_TYPE_SECT | PMD_SECT_AP_WRITE | PMD_SECT_AP_READ | \
-			PMD_FLAGS_UP | \mm_mmuflags)
-	.long	PMD_TYPE_SECT | PMD_SECT_XN | PMD_SECT_AP_WRITE | \
-		PMD_SECT_AP_READ | \io_mmuflags
-	W(b)	\initfunc
-	.long	cpu_arch_name
-	.long	cpu_elf_name
-	.long	HWCAP_SWP | HWCAP_HALF | HWCAP_THUMB | HWCAP_FAST_MULT | \
-		HWCAP_EDSP | HWCAP_TLS | \hwcaps
-	.long	cpu_v7_name
-	.long	v7_processor_functions
-	.long	v7wbi_tlb_fns
-	.long	v6_user_fns
-	.long	v7_cache_fns
-.endm
 
 	/*
 	 * ARM Ltd. Cortex A5 processor.

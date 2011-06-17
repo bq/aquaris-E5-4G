@@ -28,6 +28,7 @@
 #include <asm/pgtable.h>
 
 #include "proc-macros.S"
+#include "proc-v7-macros.S"
 
 #define TTB_IRGN_NC	(0 << 8)
 #define TTB_IRGN_WBWA	(1 << 8)
@@ -42,11 +43,9 @@
 
 /* PTWs cacheable, inner WB not shareable, outer WB not shareable */
 #define TTB_FLAGS_UP	(TTB_IRGN_WB|TTB_RGN_OC_WB)
-#define PMD_FLAGS_UP	(PMD_SECT_WB)
 
 /* PTWs cacheable, inner WBWA shareable, outer WBWA not shareable */
 #define TTB_FLAGS_SMP	(TTB_IRGN_WBWA|TTB_S|TTB_RGN_OC_WBWA)
-#define PMD_FLAGS_SMP	(PMD_SECT_WBWA|PMD_SECT_S)
 
 ENTRY(cpu_v7_proc_init)
 	mov	pc, lr
@@ -352,71 +351,12 @@ cpu_elf_name:
 
 	.section ".proc.info.init", #alloc, #execinstr
 
+	/*
+	 * ARM Ltd. Cortex A15 processor.
+	 */
 	.type	__v7_ca15mp_proc_info, #object
 __v7_ca15mp_proc_info:
 	.long	0x410fc0f0		@ Required ID value
 	.long	0xff0ffff0		@ Mask for ID
-	ALT_SMP(.long \
-		PMD_TYPE_SECT | \
-		PMD_SECT_AP_WRITE | \
-		PMD_SECT_AP_READ | \
-		PMD_SECT_AF | \
-		PMD_FLAGS_SMP)
-	ALT_UP(.long \
-		PMD_TYPE_SECT | \
-		PMD_SECT_AP_WRITE | \
-		PMD_SECT_AP_READ | \
-		PMD_SECT_AF | \
-		PMD_FLAGS_UP)
-		/* PMD_SECT_XN is set explicitly in head.S for LPAE */
-	.long   PMD_TYPE_SECT | \
-		PMD_SECT_XN | \
-		PMD_SECT_AP_WRITE | \
-		PMD_SECT_AP_READ | \
-		PMD_SECT_AF
-	b	__v7_ca15mp_setup
-	.long	cpu_arch_name
-	.long	cpu_elf_name
-	.long	HWCAP_SWP|HWCAP_HALF|HWCAP_THUMB|HWCAP_FAST_MULT|HWCAP_EDSP|HWCAP_TLS
-	.long	cpu_v7_name
-	.long	v7_processor_functions
-	.long	v7wbi_tlb_fns
-	.long	v6_user_fns
-	.long	v7_cache_fns
+	__v7_proc __v7_ca15mp_setup, hwcaps = HWCAP_IDIV, mm_mmuflags = PMD_SECT_AF, io_mmuflags = PMD_SECT_AF
 	.size	__v7_ca15mp_proc_info, . - __v7_ca15mp_proc_info
-
-	/*
-	 * Match any ARMv7 processor core.
-	 */
-	.type	__v7_proc_info, #object
-__v7_proc_info:
-	.long	0x000f0000		@ Required ID value
-	.long	0x000f0000		@ Mask for ID
-	ALT_SMP(.long \
-		PMD_TYPE_SECT | \
-		PMD_SECT_AP_WRITE | \
-		PMD_SECT_AP_READ | \
-		PMD_SECT_AF | \
-		PMD_FLAGS_SMP)
-	ALT_UP(.long \
-		PMD_TYPE_SECT | \
-		PMD_SECT_AP_WRITE | \
-		PMD_SECT_AP_READ | \
-		PMD_SECT_AF | \
-		PMD_FLAGS_UP)
-		/* PMD_SECT_XN is set explicitly in head.S for LPAE */
-	.long   PMD_TYPE_SECT | \
-		PMD_SECT_XN | \
-		PMD_SECT_AP_WRITE | \
-		PMD_SECT_AP_READ | \
-		PMD_SECT_AF
-	W(b)	__v7_setup
-	.long	cpu_arch_name
-	.long	cpu_elf_name
-	.long	HWCAP_SWP|HWCAP_HALF|HWCAP_THUMB|HWCAP_FAST_MULT|HWCAP_EDSP|HWCAP_TLS
-	.long	cpu_v7_name
-	.long	v7_processor_functions
-	.long	v7wbi_tlb_fns
-	.long	v6_user_fns
-	.long	v7_cache_fns
-	.size	__v7_proc_info, . - __v7_proc_info
