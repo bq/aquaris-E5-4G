@@ -360,3 +360,13 @@ __v7_ca15mp_proc_info:
 	.long	0xff0ffff0		@ Mask for ID
 	__v7_proc __v7_ca15mp_setup, hwcaps = HWCAP_IDIV, mm_mmuflags = PMD_SECT_AF, io_mmuflags = PMD_SECT_AF
 	.size	__v7_ca15mp_proc_info, . - __v7_ca15mp_proc_info
+
+	/*
+	 * Match any ARMv7 processor core.
+	 */
+	.type	__v7_proc_info, #object
+__v7_proc_info:
+	.long	0x000f0000		@ Required ID value
+	.long	0x000f0000		@ Mask for ID
+	__v7_proc __v7_setup
+	.size	__v7_proc_info, . - __v7_proc_info
