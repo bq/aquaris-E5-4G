@@ -436,7 +436,6 @@ static struct amba_device *v2m_amba_devs[] __initdata = {
 	&uart3_device,
 	&wdt_device,
 	&rtc_device,
-	&clcd_device,
 };
 
 
@@ -591,6 +590,9 @@ static void __init v2m_init(void)
 	arm_pm_restart = v2m_restart;
 
 	ct_desc->init_tile();
+
+	/* Register the onboard CLCD as a fallback display controller */
+	amba_device_register(&clcd_device, &iomem_resource);
 }
 
 static const char *vexpress_dt_match[] __initdata = {
