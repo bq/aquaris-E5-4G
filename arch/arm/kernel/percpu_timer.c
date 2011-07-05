@@ -21,10 +21,6 @@ static void broadcast_timer_set_mode(enum clock_event_mode mode,
 	struct clock_event_device *evt)
 {
 }
-#else
-#define broadcast_timer_set_mode	NULL
-#define smp_timer_broadcast		NULL
-#endif
 
 static void broadcast_timer_setup(struct clock_event_device *evt)
 {
@@ -39,6 +35,9 @@ static void broadcast_timer_setup(struct clock_event_device *evt)
 
 	clockevents_register_device(evt);
 }
+#else
+#define broadcast_timer_setup	NULL
+#endif
 
 static struct local_timer_ops broadcast_timer_ops = {
 	.setup	= broadcast_timer_setup,
