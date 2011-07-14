@@ -699,6 +699,7 @@ EXPORT_SYMBOL_GPL(__sock_recv_ts_and_drops);
 static inline int __sock_recvmsg_nosec(struct kiocb *iocb, struct socket *sock,
 				       struct msghdr *msg, size_t size, int flags)
 {
+	int err;
 	struct sock_iocb *si = kiocb_to_siocb(iocb);
 	int err;
 
