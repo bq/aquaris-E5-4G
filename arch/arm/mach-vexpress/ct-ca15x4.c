@@ -61,7 +61,7 @@ static void ct_ca15x4_clcd_enable(struct clcd_fb *fb)
 
 static int ct_ca15x4_clcd_setup(struct clcd_fb *fb)
 {
-	unsigned long framesize = 1024 * 768 * 2;
+	unsigned long framesize = 1024 * 768 * 2 * 2;
 
 	if (!ct_ca15x4_has_clcdc)
 		return -ENODEV;

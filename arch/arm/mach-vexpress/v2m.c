@@ -361,7 +361,7 @@ static void v2m_clcd_enable(struct clcd_fb *fb)
 
 static int v2m_clcd_setup(struct clcd_fb *fb)
 {
-	unsigned long framesize = 640 * 480 * 2;
+	unsigned long framesize = 640 * 480 * 2 * 2;
 
 	fb->panel = versatile_clcd_get_panel("VGA");
 	if (!fb->panel)

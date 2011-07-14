@@ -431,11 +431,11 @@ static int realview_clcd_setup(struct clcd_fb *fb)
 
 	if (machine_is_realview_eb()) {
 		/* VGA, 16bpp */
-		framesize = 640 * 480 * 2;
+		framesize = 640 * 480 * 2 * 2;
 		vga_panel_name = "VGA";
 	} else {
 		/* XVGA, 16bpp */
-		framesize = 1024 * 768 * 2;
+		framesize = 1024 * 768 * 2 * 2;
 		vga_panel_name = "XVGA";
 	}
 

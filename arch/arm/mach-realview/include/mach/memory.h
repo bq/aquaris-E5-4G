@@ -38,6 +38,8 @@ extern void realview_adjust_zones(unsigned long *size, unsigned long *hole);
 #define MAX_DMA_ADDRESS		(PAGE_OFFSET + SZ_256M)
 #endif
 
+#define CONSISTENT_DMA_SIZE SZ_4M
+
 #ifdef CONFIG_SPARSEMEM
 
 /*
