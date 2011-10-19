@@ -4308,6 +4308,8 @@ int ieee80211_mgd_assoc(struct ieee80211_sub_if_data *sdata,
 	sdata->control_port_no_encrypt = req->crypto.control_port_no_encrypt;
 	sdata->encrypt_headroom = ieee80211_cs_headroom(local, &req->crypto,
 							sdata->vif.type);
+	sdata->drop_group_protected_unicast =
+		req->flags & ASSOC_REQ_DROP_GROUP_PROTECTED_UNICAST;
 
 	/* kick off associate process */
 

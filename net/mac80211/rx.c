@@ -17,8 +17,10 @@
 #include <linux/etherdevice.h>
 #include <linux/rcupdate.h>
 #include <linux/export.h>
+#include <linux/ip.h>
 #include <net/mac80211.h>
 #include <net/ieee80211_radiotap.h>
+#include <net/addrconf.h>
 #include <asm/unaligned.h>
 
 #include "ieee80211_i.h"
@@ -1507,6 +1509,13 @@ ieee80211_rx_h_decrypt(struct ieee80211_rx_data *rx)
 			    !is_multicast_ether_addr(hdr->addr1))
 				rx->key = NULL;
 		}
+
+		if (rx->key && is_multicast_ether_addr(hdr->addr1) &&
+		    rx->sdata->vif.type == NL80211_IFTYPE_STATION &&
+		    rx->sdata->drop_group_protected_unicast &&
+		    rx->key->conf.cipher != WLAN_CIPHER_SUITE_WEP40 &&
+		    rx->key->conf.cipher != WLAN_CIPHER_SUITE_WEP104)
+			rx->flags |= IEEE80211_RX_DROP_IP_UNICAST;
 	}
 
 	if (rx->key) {
@@ -1850,6 +1859,32 @@ __ieee80211_data_to_8023(struct ieee80211_rx_data *rx, bool *port_control)
 		*port_control = true;
 	else if (check_port_control)
 		return -1;
+
+	if (unlikely(rx->flags & IEEE80211_RX_DROP_IP_UNICAST)) {
+		union {
+			struct iphdr hdr4;
+			struct ipv6hdr hdr6;
+		} ip;
+
+		switch (ehdr->h_proto) {
+		case cpu_to_be16(ETH_P_IP):
+			if (rx->skb->len < sizeof(*ehdr) + sizeof(ip.hdr4))
+				return false;
+			skb_copy_bits(rx->skb, sizeof(*ehdr),
+				      &ip.hdr4, sizeof(ip.hdr4));
+			if (!ipv4_is_multicast(ip.hdr4.daddr))
+				return -1;
+			break;
+		case cpu_to_be16(ETH_P_IPV6):
+			if (rx->skb->len < sizeof(*ehdr) + sizeof(ip.hdr6))
+				return false;
+			skb_copy_bits(rx->skb, sizeof(*ehdr),
+				      &ip.hdr6, sizeof(ip.hdr6));
+			if (!ipv6_addr_is_multicast(&ip.hdr6.daddr))
+				return -1;
+			break;
+		}
+	}
 
 	return 0;
 }

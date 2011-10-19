@@ -192,6 +192,8 @@ enum ieee80211_packet_rx_flags {
  * @IEEE80211_RX_CMNTR: received on cooked monitor already
  * @IEEE80211_RX_BEACON_REPORTED: This frame was already reported
  *	to cfg80211_report_obss_beacon().
+ * @IEEE80211_RX_DROP_IP_UNICAST: drop the frame later if it turns
+ *	out it contains IP unicast - it was group protected
  *
  * These flags are used across handling multiple interfaces
  * for a single frame.
@@ -199,6 +201,7 @@ enum ieee80211_packet_rx_flags {
 enum ieee80211_rx_flags {
 	IEEE80211_RX_CMNTR		= BIT(0),
 	IEEE80211_RX_BEACON_REPORTED	= BIT(1),
+	IEEE80211_RX_DROP_IP_UNICAST	= BIT(2),
 };
 
 struct ieee80211_rx_data {
@@ -723,7 +726,8 @@ struct ieee80211_sub_if_data {
 
 	unsigned long state;
 
-	int drop_unencrypted;
+	bool drop_unencrypted;
+	bool drop_group_protected_unicast;
 
 	char name[IFNAMSIZ];
 

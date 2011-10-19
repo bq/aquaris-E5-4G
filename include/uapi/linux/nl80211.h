@@ -1579,6 +1579,10 @@ enum nl80211_commands {
  * @NL80211_ATTR_TDLS_PEER_CAPABILITY: flags for TDLS peer capabilities, u32.
  *	As specified in the &enum nl80211_tdls_peer_capability.
  *
+ * @NL80211_ATTR_DROP_GROUP_PROTECTED_UNICAST: Drop protocol unicast packets
+ *	that were group protected at the wireless level. This flag attribute
+ *	is valid in the association command.
+ *
  * @NL80211_ATTR_MAX: highest attribute number currently defined
  * @__NL80211_ATTR_AFTER_LAST: internal use
  */
@@ -1913,6 +1917,8 @@ enum nl80211_attrs {
 	NL80211_ATTR_MAX_AP_ASSOC_STA,
 
 	NL80211_ATTR_TDLS_PEER_CAPABILITY,
+
+	NL80211_ATTR_DROP_GROUP_PROTECTED_UNICAST,
 
 	/* add attributes here, update the policy in nl80211.c */
 
