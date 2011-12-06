@@ -74,8 +74,8 @@ struct iommu_ops {
 				    unsigned long iova);
 	int (*domain_has_cap)(struct iommu_domain *domain,
 			      unsigned long cap);
-	void (*commit)(struct iommu_domain *domain);
 	int (*device_group)(struct device *dev, unsigned int *groupid);
+	void (*commit)(struct iommu_domain *domain);
 	unsigned long pgsize_bitmap;
 };
 

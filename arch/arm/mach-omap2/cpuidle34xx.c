@@ -25,6 +25,7 @@
 #include <linux/sched.h>
 #include <linux/cpuidle.h>
 #include <linux/module.h>
+#include <linux/export.h>
 
 #include <plat/prcm.h>
 #include <plat/irqs.h>
