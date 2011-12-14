@@ -315,8 +315,8 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 			CPU-intensive style benchmark, and it can vary highly in
 			a microbenchmark depending on workload and compiler.
 
-			1: only for 32-bit processes
-			2: only for 64-bit processes
+			32: only for 32-bit processes
+			64: only for 64-bit processes
 			on: enable for both 32- and 64-bit processes
 			off: disable for both 32- and 64-bit processes
 
@@ -329,6 +329,11 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 				    is a lot of faster
 			off	  - do not initialize any AMD IOMMU found in
 				    the system
+			force_isolation - Force device isolation for all
+					  devices. The IOMMU driver is not
+					  allowed anymore to lift isolation
+					  requirements as needed. This option
+					  does not override iommu=pt
 
 	amijoy.map=	[HW,JOY] Amiga joystick support
 			Map of devices attached to JOY0DAT and JOY1DAT
