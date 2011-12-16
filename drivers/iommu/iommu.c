@@ -341,10 +341,3 @@ int iommu_device_group(struct device *dev, unsigned int *groupid)
 	return -ENODEV;
 }
 EXPORT_SYMBOL_GPL(iommu_device_group);
-
-void iommu_commit(struct iommu_domain *domain)
-{
-	if (domain->ops->commit)
-		domain->ops->commit(domain);
-}
-EXPORT_SYMBOL_GPL(iommu_commit);

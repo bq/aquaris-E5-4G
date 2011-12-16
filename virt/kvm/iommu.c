@@ -197,8 +197,6 @@ int kvm_assign_device(struct kvm *kvm,
 		PCI_SLOT(assigned_dev->host_devfn),
 		PCI_FUNC(assigned_dev->host_devfn));
 
-	iommu_commit(domain);
-
 	return 0;
 out_unmap:
 	kvm_iommu_unmap_memslots(kvm);
@@ -228,8 +226,6 @@ int kvm_deassign_device(struct kvm *kvm,
 		assigned_dev->host_busnr,
 		PCI_SLOT(assigned_dev->host_devfn),
 		PCI_FUNC(assigned_dev->host_devfn));
-
-	iommu_commit(domain);
 
 	return 0;
 }
@@ -262,8 +258,6 @@ int kvm_iommu_map_guest(struct kvm *kvm)
 	r = kvm_iommu_map_memslots(kvm);
 	if (r)
 		goto out_unmap;
-
-	iommu_commit(kvm->arch.iommu_domain);
 
 	return 0;
 
@@ -313,8 +307,6 @@ static void kvm_iommu_put_pages(struct kvm *kvm,
 
 		gfn += unmap_pages;
 	}
-
-	iommu_commit(domain);
 }
 
 static int kvm_iommu_unmap_memslots(struct kvm *kvm)
