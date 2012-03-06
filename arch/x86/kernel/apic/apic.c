@@ -35,6 +35,7 @@
 #include <linux/smp.h>
 #include <linux/mm.h>
 
+#include <asm/intr_remapping.h>
 #include <asm/perf_event.h>
 #include <asm/x86_init.h>
 #include <asm/pgalloc.h>
@@ -1523,7 +1524,7 @@ int __init enable_IR(void)
 		return -1;
 	}
 
-	return enable_intr_remapping();
+	return intr_hardware_enable();
 #endif
 	return -1;
 }
@@ -1532,10 +1533,13 @@ void __init enable_IR_x2apic(void)
 {
 	unsigned long flags;
 	int ret, x2apic_enabled = 0;
-	int dmar_table_init_ret;
+	int hardware_init_ret;
 
-	dmar_table_init_ret = dmar_table_init();
-	if (dmar_table_init_ret && !x2apic_supported())
+	/* Make sure irq_remap_ops are initialized */
+	setup_intr_remapping();
+
+	hardware_init_ret = intr_hardware_init();
+	if (hardware_init_ret && !x2apic_supported())
 		return;
 
 	ret = save_ioapic_entries();
@@ -1551,7 +1555,7 @@ void __init enable_IR_x2apic(void)
 	if (x2apic_preenabled && nox2apic)
 		disable_x2apic();
 
-	if (dmar_table_init_ret)
+	if (hardware_init_ret)
 		ret = -1;
 	else
 		ret = enable_IR();
