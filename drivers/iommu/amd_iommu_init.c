@@ -196,6 +196,8 @@ static u32 rlookup_table_size;	/* size if the rlookup table */
  */
 extern void iommu_flush_all_caches(struct amd_iommu *iommu);
 
+static int __init amd_iommu_enable_interrupts(void);
+
 static inline void update_last_devid(u16 devid)
 {
 	if (devid > amd_iommu_last_bdf)
@@ -1123,8 +1125,9 @@ static int iommu_setup_msi(struct amd_iommu *iommu)
 {
 	int r;
 
-	if (pci_enable_msi(iommu->dev))
-		return 1;
+	r = pci_enable_msi(iommu->dev);
+	if (r)
+		return r;
 
 	r = request_threaded_irq(iommu->dev->irq,
 				 amd_iommu_int_handler,
@@ -1134,27 +1137,36 @@ static int iommu_setup_msi(struct amd_iommu *iommu)
 
 	if (r) {
 		pci_disable_msi(iommu->dev);
-		return 1;
+		return r;
 	}
 
 	iommu->int_enabled = true;
-	iommu_feature_enable(iommu, CONTROL_EVT_INT_EN);
-
-	if (iommu->ppr_log != NULL)
-		iommu_feature_enable(iommu, CONTROL_PPFINT_EN);
 
 	return 0;
 }
 
 static int iommu_init_msi(struct amd_iommu *iommu)
 {
+	int ret;
+
 	if (iommu->int_enabled)
-		return 0;
+		goto enable_faults;
 
 	if (pci_find_capability(iommu->dev, PCI_CAP_ID_MSI))
-		return iommu_setup_msi(iommu);
+		ret = iommu_setup_msi(iommu);
+	else
+		ret = -ENODEV;
 
-	return 1;
+	if (ret)
+		return ret;
+
+enable_faults:
+	iommu_feature_enable(iommu, CONTROL_EVT_INT_EN);
+
+	if (iommu->ppr_log != NULL)
+		iommu_feature_enable(iommu, CONTROL_PPFINT_EN);
+
+	return 0;
 }
 
 /****************************************************************************
@@ -1373,7 +1385,6 @@ static void enable_iommus(void)
 		iommu_enable_ppr_log(iommu);
 		iommu_enable_gt(iommu);
 		iommu_set_exclusion_range(iommu);
-		iommu_init_msi(iommu);
 		iommu_enable(iommu);
 		iommu_flush_all_caches(iommu);
 	}
@@ -1401,6 +1412,8 @@ static void amd_iommu_resume(void)
 
 	/* re-load the hardware */
 	enable_iommus();
+
+	amd_iommu_enable_interrupts();
 }
 
 static int amd_iommu_suspend(void)
@@ -1585,6 +1598,21 @@ free:
 	return ret;
 }
 
+static int __init amd_iommu_enable_interrupts(void)
+{
+	struct amd_iommu *iommu;
+	int ret = 0;
+
+	for_each_iommu(iommu) {
+		ret = iommu_init_msi(iommu);
+		if (ret)
+			goto out;
+	}
+
+out:
+	return ret;
+}
+
 /*
  * This is the core init function for AMD IOMMU hardware in the system.
  * This function is called from the generic x86 DMA layer initialization
@@ -1601,6 +1629,10 @@ static int __init amd_iommu_init(void)
 	ret = amd_iommu_init_hardware();
 	if (ret)
 		goto out;
+
+	ret = amd_iommu_enable_interrupts();
+	if (ret)
+		goto free;
 
 	if (iommu_pass_through)
 		ret = amd_iommu_init_passthrough();
