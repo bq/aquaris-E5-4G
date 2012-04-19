@@ -411,6 +411,9 @@ intel_update_plane(struct drm_plane *plane, struct drm_crtc *crtc,
 
 	old_obj = intel_plane->obj;
 
+	src_w = src_w >> 16;
+	src_h = src_h >> 16;
+
 	/* Pipe must be running... */
 	if (!(I915_READ(PIPECONF(pipe)) & PIPECONF_ENABLE))
 		return -EINVAL;
@@ -501,7 +504,7 @@ intel_update_plane(struct drm_plane *plane, struct drm_crtc *crtc,
 			intel_wait_for_vblank(dev, to_intel_crtc(crtc)->pipe);
 			mutex_lock(&dev->struct_mutex);
 		}
-		i915_gem_object_unpin(old_obj);
+		intel_unpin_fb_obj(old_obj);
 	}
 
 out_unlock:
@@ -528,7 +531,7 @@ intel_disable_plane(struct drm_plane *plane)
 		goto out;
 
 	mutex_lock(&dev->struct_mutex);
-	i915_gem_object_unpin(intel_plane->obj);
+	intel_unpin_fb_obj(intel_plane->obj);
 	intel_plane->obj = NULL;
 	mutex_unlock(&dev->struct_mutex);
 out:
