@@ -72,7 +72,7 @@
 static void irq_remap_modify_chip_defaults(struct irq_chip *chip);
 static inline bool irq_remapped(struct irq_cfg *cfg)
 {
-	return cfg->irq_2_iommu.iommu != NULL;
+	return cfg->remapped;
 }
 #else
 static inline bool irq_remapped(struct irq_cfg *cfg)
