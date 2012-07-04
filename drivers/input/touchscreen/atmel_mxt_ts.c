@@ -1168,7 +1168,8 @@ static int __devinit mxt_probe(struct i2c_client *client,
 	i2c_set_clientdata(client, data);
 
 	error = request_threaded_irq(client->irq, NULL, mxt_interrupt,
-			pdata->irqflags, client->name, data);
+			pdata->irqflags | IRQF_ONESHOT,
+			client->name, data);
 	if (error) {
 		dev_err(&client->dev, "Failed to register interrupt\n");
 		goto err_free_object;
