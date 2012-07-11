@@ -31,6 +31,7 @@
 #include <linux/bug.h>
 #include <linux/compiler.h>
 #include <linux/sort.h>
+#include <linux/debugfs.h>
 
 #include <asm/unified.h>
 #include <asm/cp15.h>
@@ -994,6 +995,16 @@ static int __init proc_cpu_init(void)
 }
 fs_initcall(proc_cpu_init);
 #endif
+
+struct dentry *arch_debugfs_dir;
+EXPORT_SYMBOL(arch_debugfs_dir);
+
+static int __init debugfs_init(void)
+{
+	arch_debugfs_dir = debugfs_create_dir("arm", NULL);
+	return arch_debugfs_dir ? 0 : -ENOMEM;
+}
+arch_initcall(debugfs_init);
 
 static const char *hwcap_str[] = {
 	"swp",
