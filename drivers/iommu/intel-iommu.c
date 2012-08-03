@@ -661,7 +661,7 @@ static struct intel_iommu *device_to_iommu(int segment, u8 bus, u8 devfn)
 			if (drhd->devices[i] &&
 			    drhd->devices[i]->subordinate &&
 			    drhd->devices[i]->subordinate->number <= bus &&
-			    drhd->devices[i]->subordinate->subordinate >= bus)
+			    drhd->devices[i]->subordinate->busn_res.end >= bus)
 				return drhd->iommu;
 		}
 
@@ -2008,6 +2008,7 @@ static struct dmar_domain *get_domain_for_dev(struct pci_dev *pdev, int gaw)
 	if (!drhd) {
 		printk(KERN_ERR "IOMMU: can't find DMAR for device %s\n",
 			pci_name(pdev));
+		free_domain_mem(domain);
 		return NULL;
 	}
 	iommu = drhd->iommu;
