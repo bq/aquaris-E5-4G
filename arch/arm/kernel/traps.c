@@ -22,6 +22,7 @@
 #include <linux/module.h>
 #include <linux/kexec.h>
 #include <linux/bug.h>
+#include <linux/debugfs.h>
 #include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/sched.h>
@@ -596,6 +597,16 @@ do_cache_op(unsigned long start, unsigned long end, int flags)
 	return __do_cache_op(start, end);
 }
 
+static u32 cacheflush_full_threshold = PAGE_SIZE;
+
+static int cacheflush_debugfs_init(void)
+{
+	debugfs_create_u32("cacheflush_full_threshold", S_IRUGO|S_IWUGO,
+			   NULL, &cacheflush_full_threshold);
+	return 0;
+}
+arch_initcall(cacheflush_debugfs_init);
+
 static inline int
 do_cache_op_iov(const struct iovec __user *uiov, unsigned long cnt, int flags)
 {
@@ -613,7 +624,9 @@ do_cache_op_iov(const struct iovec __user *uiov, unsigned long cnt, int flags)
 		goto out_free;
 	}
 
-	for (i = 0; i < cnt; ++i) {
+	if (iov_length(iov, cnt) > cacheflush_full_threshold) {
+		flush_cache_louis();
+	} else for (i = 0; i < cnt; ++i) {
 		unsigned long start = (unsigned long __force)iov[i].iov_base;
 		unsigned long end = start + iov[i].iov_len;
 		ret = do_cache_op(start, end, flags);
