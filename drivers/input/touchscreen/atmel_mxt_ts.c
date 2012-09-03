@@ -361,14 +361,24 @@ static int mxt_bootloader_write(struct mxt_data *data,
 	return ret;
 }
 
-static int mxt_lookup_bootloader_address(struct mxt_data *data)
+static int mxt_lookup_bootloader_address(struct mxt_data *data, u8 retry)
 {
 	u8 appmode = data->client->addr;
 	u8 bootloader;
+	u8 family_id = 0;
+
+	if (data->info)
+		family_id = data->info->family_id;
 
 	switch (appmode) {
 	case 0x4a:
 	case 0x4b:
+		/* 1188S/1664S use different scheme */
+		if ((retry % 2) || family_id == 0xa2) {
+			bootloader = appmode - 0x24;
+			break;
+		}
+		/* Fall through for normal case */
 	case 0x4c:
 	case 0x4d:
 	case 0x5a:
@@ -386,14 +396,14 @@ static int mxt_lookup_bootloader_address(struct mxt_data *data)
 	return 0;
 }
 
-static int mxt_probe_bootloader(struct mxt_data *data)
+static int mxt_probe_bootloader(struct mxt_data *data, u8 retry)
 {
 	struct device *dev = &data->client->dev;
 	int ret;
 	u8 val;
 	bool crc_failure;
 
-	ret = mxt_lookup_bootloader_address(data);
+	ret = mxt_lookup_bootloader_address(data, retry);
 	if (ret)
 		return ret;
 
@@ -1769,10 +1779,13 @@ static int mxt_initialize(struct mxt_data *data)
 retry_probe:
 	error = mxt_read_info_block(data);
 	if (error) {
-		error = mxt_probe_bootloader(data);
+		error = mxt_probe_bootloader(data, retry_count);
 		if (error) {
-			/* Chip is not in appmode or bootloader mode */
-			return error;
+			if (++retry_count > 11)
+				/* Chip is not in appmode or bootloader mode */
+				return error;
+
+			goto retry_probe;
 		} else {
 			if (++retry_count > 10) {
 				dev_err(&client->dev,
@@ -1940,10 +1953,6 @@ static int mxt_load_fw(struct device *dev, const char *fn)
 	if (ret)
 		goto release_firmware;
 
-	ret = mxt_lookup_bootloader_address(data);
-	if (ret)
-		goto release_firmware;
-
 	if (!data->in_bootloader) {
 		/* Change to the bootloader mode */
 		data->in_bootloader = true;
@@ -1954,6 +1963,12 @@ static int mxt_load_fw(struct device *dev, const char *fn)
 			goto release_firmware;
 
 		msleep(MXT_RESET_TIME);
+
+		/* At this stage, do not need to scan since we know
+		 * family ID */
+		ret = mxt_lookup_bootloader_address(data, 0);
+		if (ret)
+			goto release_firmware;
 	}
 
 	mxt_free_object_table(data);
