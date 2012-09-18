@@ -26,7 +26,6 @@
 #include <linux/msi.h>
 #include <linux/amd-iommu.h>
 #include <linux/export.h>
-#include <linux/acpi.h>
 #include <acpi/acpi.h>
 #include <asm/pci-direct.h>
 #include <asm/iommu.h>
@@ -178,7 +177,7 @@ u16 *amd_iommu_alias_table;
 struct amd_iommu **amd_iommu_rlookup_table;
 
 /*
- * AMD IOMMU allows up to 2^16 differend protection domains. This is a bitmap
+ * AMD IOMMU allows up to 2^16 different protection domains. This is a bitmap
  * to know which ones are already in use.
  */
 unsigned long *amd_iommu_pd_alloc_bitmap;
@@ -478,7 +477,7 @@ static int __init find_last_devid_acpi(struct acpi_table_header *table)
 
 /****************************************************************************
  *
- * The following functions belong the the code path which parses the ACPI table
+ * The following functions belong to the code path which parses the ACPI table
  * the second time. In this ACPI parsing iteration we allocate IOMMU specific
  * data structures, initialize the device/alias/rlookup table and also
  * basically initialize the hardware.
@@ -691,7 +690,7 @@ static void __init set_dev_entry_from_acpi(struct amd_iommu *iommu,
 }
 
 /*
- * Reads the device exclusion range from ACPI and initialize IOMMU with
+ * Reads the device exclusion range from ACPI and initializes the IOMMU with
  * it
  */
 static void __init set_device_exclusion_range(u16 devid, struct ivmd_header *m)
@@ -1111,7 +1110,7 @@ static void print_iommu_info(void)
 
 		if (iommu->cap & (1 << IOMMU_CAP_EFR)) {
 			pr_info("AMD-Vi:  Extended features: ");
-			for (i = 0; ARRAY_SIZE(feat_str); ++i) {
+			for (i = 0; i < ARRAY_SIZE(feat_str); ++i) {
 				if (iommu_feature(iommu, (1ULL << i)))
 					pr_cont(" %s", feat_str[i]);
 			}
@@ -1131,9 +1130,6 @@ static int __init amd_iommu_init_pci(void)
 			break;
 	}
 
-	/* Make sure ACS will be enabled */
-	pci_request_acs();
-
 	ret = amd_iommu_init_devices();
 
 	print_iommu_info();
@@ -1144,7 +1140,7 @@ static int __init amd_iommu_init_pci(void)
 /****************************************************************************
  *
  * The following functions initialize the MSI interrupts for all IOMMUs
- * in the system. Its a bit challenging because there could be multiple
+ * in the system. It's a bit challenging because there could be multiple
  * IOMMUs per PCI BDF but we can call pci_enable_msi(x) only once per
  * pci_dev.
  *
@@ -1202,7 +1198,7 @@ enable_faults:
  *
  * The next functions belong to the third pass of parsing the ACPI
  * table. In this last pass the memory mapping requirements are
- * gathered (like exclusion and unity mapping reanges).
+ * gathered (like exclusion and unity mapping ranges).
  *
  ****************************************************************************/
 
@@ -1651,6 +1647,9 @@ static bool detect_ivrs(void)
 	}
 
 	early_acpi_os_unmap_memory((char __iomem *)ivrs_base, ivrs_size);
+
+	/* Make sure ACS will be enabled during PCI probe */
+	pci_request_acs();
 
 	return true;
 }

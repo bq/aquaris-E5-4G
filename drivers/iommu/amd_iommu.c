@@ -296,8 +296,13 @@ static int iommu_init_device(struct device *dev)
 	} else
 		dma_pdev = pci_dev_get(pdev);
 
+	/* Account for quirked devices */
 	swap_pci_ref(&dma_pdev, pci_get_dma_source(dma_pdev));
 
+	/*
+	 * If it's a multifunction device that does not support our
+	 * required ACS flags, add to the same group as function 0.
+	 */
 	if (dma_pdev->multifunction &&
 	    !pci_acs_enabled(dma_pdev, REQ_ACS_FLAGS))
 		swap_pci_ref(&dma_pdev,
@@ -305,14 +310,28 @@ static int iommu_init_device(struct device *dev)
 					  PCI_DEVFN(PCI_SLOT(dma_pdev->devfn),
 					  0)));
 
+	/*
+	 * Devices on the root bus go through the iommu.  If that's not us,
+	 * find the next upstream device and test ACS up to the root bus.
+	 * Finding the next device may require skipping virtual buses.
+	 */
 	while (!pci_is_root_bus(dma_pdev->bus)) {
-		if (pci_acs_path_enabled(dma_pdev->bus->self,
-					 NULL, REQ_ACS_FLAGS))
+		struct pci_bus *bus = dma_pdev->bus;
+
+		while (!bus->self) {
+			if (!pci_is_root_bus(bus))
+				bus = bus->parent;
+			else
+				goto root_bus;
+		}
+
+		if (pci_acs_path_enabled(bus->self, NULL, REQ_ACS_FLAGS))
 			break;
 
-		swap_pci_ref(&dma_pdev, pci_dev_get(dma_pdev->bus->self));
+		swap_pci_ref(&dma_pdev, pci_dev_get(bus->self));
 	}
 
+root_bus:
 	group = iommu_group_get(&dma_pdev->dev);
 	pci_dev_put(dma_pdev);
 	if (!group) {
@@ -665,7 +684,7 @@ static void iommu_poll_ppr_log(struct amd_iommu *iommu)
 
 		/*
 		 * Release iommu->lock because ppr-handling might need to
-		 * re-aquire it
+		 * re-acquire it
 		 */
 		spin_unlock_irqrestore(&iommu->lock, flags);
 
@@ -783,7 +802,7 @@ static void build_inv_iommu_pages(struct iommu_cmd *cmd, u64 address,
 	CMD_SET_TYPE(cmd, CMD_INV_IOMMU_PAGES);
 	if (s) /* size bit - we flush more than one 4kb page */
 		cmd->data[2] |= CMD_INV_IOMMU_PAGES_SIZE_MASK;
-	if (pde) /* PDE bit - we wan't flush everything not only the PTEs */
+	if (pde) /* PDE bit - we want to flush everything, not only the PTEs */
 		cmd->data[2] |= CMD_INV_IOMMU_PAGES_PDE_MASK;
 }
 
@@ -2134,7 +2153,7 @@ static bool pci_pri_tlp_required(struct pci_dev *pdev)
 }
 
 /*
- * If a device is not yet associated with a domain, this function does
+ * If a device is not yet associated with a domain, this function
  * assigns it visible for the hardware
  */
 static int attach_device(struct device *dev,
@@ -2384,7 +2403,7 @@ static struct protection_domain *get_domain(struct device *dev)
 	if (domain != NULL)
 		return domain;
 
-	/* Device not bount yet - bind it */
+	/* Device not bound yet - bind it */
 	dma_dom = find_protection_domain(devid);
 	if (!dma_dom)
 		dma_dom = amd_iommu_rlookup_table[devid]->default_dom;
@@ -2923,7 +2942,7 @@ static void __init prealloc_protection_domains(void)
 			alloc_passthrough_domain();
 			dev_data->passthrough = true;
 			attach_device(&dev->dev, pt_domain);
-			pr_info("AMD-Vi: Using passthough domain for device %s\n",
+			pr_info("AMD-Vi: Using passthrough domain for device %s\n",
 				dev_name(&dev->dev));
 		}
 
