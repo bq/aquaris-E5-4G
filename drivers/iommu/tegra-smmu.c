@@ -39,8 +39,47 @@
 #include <asm/cacheflush.h>
 
 #include <mach/iomap.h>
-#include <mach/smmu.h>
 #include <mach/tegra-ahb.h>
+
+enum smmu_hwgrp {
+	HWGRP_AFI,
+	HWGRP_AVPC,
+	HWGRP_DC,
+	HWGRP_DCB,
+	HWGRP_EPP,
+	HWGRP_G2,
+	HWGRP_HC,
+	HWGRP_HDA,
+	HWGRP_ISP,
+	HWGRP_MPE,
+	HWGRP_NV,
+	HWGRP_NV2,
+	HWGRP_PPCS,
+	HWGRP_SATA,
+	HWGRP_VDE,
+	HWGRP_VI,
+
+	HWGRP_COUNT,
+
+	HWGRP_END = ~0,
+};
+
+#define HWG_AFI		(1 << HWGRP_AFI)
+#define HWG_AVPC	(1 << HWGRP_AVPC)
+#define HWG_DC		(1 << HWGRP_DC)
+#define HWG_DCB		(1 << HWGRP_DCB)
+#define HWG_EPP		(1 << HWGRP_EPP)
+#define HWG_G2		(1 << HWGRP_G2)
+#define HWG_HC		(1 << HWGRP_HC)
+#define HWG_HDA		(1 << HWGRP_HDA)
+#define HWG_ISP		(1 << HWGRP_ISP)
+#define HWG_MPE		(1 << HWGRP_MPE)
+#define HWG_NV		(1 << HWGRP_NV)
+#define HWG_NV2		(1 << HWGRP_NV2)
+#define HWG_PPCS	(1 << HWGRP_PPCS)
+#define HWG_SATA	(1 << HWGRP_SATA)
+#define HWG_VDE		(1 << HWGRP_VDE)
+#define HWG_VI		(1 << HWGRP_VI)
 
 /* bitmap of the page sizes currently supported */
 #define SMMU_IOMMU_PGSIZES	(SZ_4K)
@@ -246,6 +285,12 @@ struct smmu_as {
 	spinlock_t		client_lock; /* for client list */
 };
 
+struct smmu_debugfs_info {
+	struct smmu_device *smmu;
+	int mc;
+	int cache;
+};
+
 /*
  * Per SMMU device - IOMMU device
  */
@@ -267,6 +312,7 @@ struct smmu_device {
 	unsigned long asid_security;
 
 	struct dentry *debugfs_root;
+	struct smmu_debugfs_info *debugfs_info;
 
 	struct device_node *ahb;
 
@@ -920,9 +966,10 @@ static ssize_t smmu_debugfs_stats_write(struct file *file,
 					const char __user *buffer,
 					size_t count, loff_t *pos)
 {
+	struct smmu_debugfs_info *info;
 	struct smmu_device *smmu;
 	struct dentry *dent;
-	int i, cache, mc;
+	int i;
 	enum {
 		_OFF = 0,
 		_ON,
@@ -950,11 +997,10 @@ static ssize_t smmu_debugfs_stats_write(struct file *file,
 		return -EINVAL;
 
 	dent = file->f_dentry;
-	cache = (int)dent->d_inode->i_private;
-	mc = (int)dent->d_parent->d_inode->i_private;
-	smmu = dent->d_parent->d_parent->d_inode->i_private;
+	info = dent->d_inode->i_private;
+	smmu = info->smmu;
 
-	offs = SMMU_CACHE_CONFIG(cache);
+	offs = SMMU_CACHE_CONFIG(info->cache);
 	val = smmu_read(smmu, offs);
 	switch (i) {
 	case _OFF:
@@ -986,21 +1032,21 @@ static ssize_t smmu_debugfs_stats_write(struct file *file,
 
 static int smmu_debugfs_stats_show(struct seq_file *s, void *v)
 {
+	struct smmu_debugfs_info *info;
 	struct smmu_device *smmu;
 	struct dentry *dent;
-	int i, cache, mc;
+	int i;
 	const char * const stats[] = { "hit", "miss", };
 
 	dent = d_find_alias(s->private);
-	cache = (int)dent->d_inode->i_private;
-	mc = (int)dent->d_parent->d_inode->i_private;
-	smmu = dent->d_parent->d_parent->d_inode->i_private;
+	info = dent->d_inode->i_private;
+	smmu = info->smmu;
 
 	for (i = 0; i < ARRAY_SIZE(stats); i++) {
 		u32 val;
 		size_t offs;
 
-		offs = SMMU_STATS_CACHE_COUNT(mc, cache, i);
+		offs = SMMU_STATS_CACHE_COUNT(info->mc, info->cache, i);
 		val = smmu_read(smmu, offs);
 		seq_printf(s, "%s:%08x ", stats[i], val);
 
@@ -1028,16 +1074,22 @@ static const struct file_operations smmu_debugfs_stats_fops = {
 static void smmu_debugfs_delete(struct smmu_device *smmu)
 {
 	debugfs_remove_recursive(smmu->debugfs_root);
+	kfree(smmu->debugfs_info);
 }
 
 static void smmu_debugfs_create(struct smmu_device *smmu)
 {
 	int i;
+	size_t bytes;
 	struct dentry *root;
 
-	root = debugfs_create_file(dev_name(smmu->dev),
-				   S_IFDIR | S_IRWXU | S_IRUGO | S_IXUGO,
-				   NULL, smmu, NULL);
+	bytes = ARRAY_SIZE(smmu_debugfs_mc) * ARRAY_SIZE(smmu_debugfs_cache) *
+		sizeof(*smmu->debugfs_info);
+	smmu->debugfs_info = kmalloc(bytes, GFP_KERNEL);
+	if (!smmu->debugfs_info)
+		return;
+
+	root = debugfs_create_dir(dev_name(smmu->dev), NULL);
 	if (!root)
 		goto err_out;
 	smmu->debugfs_root = root;
@@ -1046,18 +1098,23 @@ static void smmu_debugfs_create(struct smmu_device *smmu)
 		int j;
 		struct dentry *mc;
 
-		mc = debugfs_create_file(smmu_debugfs_mc[i],
-					 S_IFDIR | S_IRWXU | S_IRUGO | S_IXUGO,
-					 root, (void *)i, NULL);
+		mc = debugfs_create_dir(smmu_debugfs_mc[i], root);
 		if (!mc)
 			goto err_out;
 
 		for (j = 0; j < ARRAY_SIZE(smmu_debugfs_cache); j++) {
 			struct dentry *cache;
+			struct smmu_debugfs_info *info;
+
+			info = smmu->debugfs_info;
+			info += i * ARRAY_SIZE(smmu_debugfs_mc) + j;
+			info->smmu = smmu;
+			info->mc = i;
+			info->cache = j;
 
 			cache = debugfs_create_file(smmu_debugfs_cache[j],
 						    S_IWUGO | S_IRUGO, mc,
-						    (void *)j,
+						    (void *)info,
 						    &smmu_debugfs_stats_fops);
 			if (!cache)
 				goto err_out;
