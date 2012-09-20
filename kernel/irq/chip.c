@@ -237,22 +237,50 @@ void irq_disable(struct irq_desc *desc)
 	}
 }
 
-void irq_percpu_enable(struct irq_desc *desc, unsigned int cpu)
+static void __irq_percpu_enable(void *info)
 {
+	struct irq_desc *desc = (struct irq_desc *)info;
+
 	if (desc->irq_data.chip->irq_enable)
 		desc->irq_data.chip->irq_enable(&desc->irq_data);
 	else
 		desc->irq_data.chip->irq_unmask(&desc->irq_data);
-	cpumask_set_cpu(cpu, desc->percpu_enabled);
 }
 
-void irq_percpu_disable(struct irq_desc *desc, unsigned int cpu)
+void irq_percpu_enable(struct irq_desc *desc, const cpumask_t *mask)
 {
+	unsigned int cpu = get_cpu();
+
+	if (cpumask_equal(mask, cpumask_of(cpu)))
+		__irq_percpu_enable(desc);
+	else
+		on_each_cpu_mask(mask, __irq_percpu_enable, desc, 1);
+
+	put_cpu();
+	cpumask_or(desc->percpu_enabled, desc->percpu_enabled, mask);
+}
+
+static void __irq_percpu_disable(void *info)
+{
+	struct irq_desc *desc = (struct irq_desc *)info;
+
 	if (desc->irq_data.chip->irq_disable)
 		desc->irq_data.chip->irq_disable(&desc->irq_data);
 	else
 		desc->irq_data.chip->irq_mask(&desc->irq_data);
-	cpumask_clear_cpu(cpu, desc->percpu_enabled);
+}
+
+void irq_percpu_disable(struct irq_desc *desc, const cpumask_t *mask)
+{
+	unsigned int cpu = get_cpu();
+
+	if (cpumask_equal(mask, cpumask_of(cpu)))
+		__irq_percpu_disable(desc);
+	else
+		on_each_cpu_mask(mask, __irq_percpu_disable, desc, 1);
+
+	put_cpu();
+	cpumask_andnot(desc->percpu_enabled, desc->percpu_enabled, mask);
 }
 
 static inline void mask_ack_irq(struct irq_desc *desc)
@@ -702,7 +730,8 @@ void handle_percpu_devid_irq(unsigned int irq, struct irq_desc *desc)
 {
 	struct irq_chip *chip = irq_desc_get_chip(desc);
 	struct irqaction *action = desc->action;
-	void *dev_id = raw_cpu_ptr(action->percpu_dev_id);
+	unsigned int cpu = smp_processor_id();
+	void *dev_id = per_cpu_ptr(action->percpu_dev_id, cpu);
 	irqreturn_t res;
 
 	kstat_incr_irqs_this_cpu(irq, desc);
@@ -710,9 +739,22 @@ void handle_percpu_devid_irq(unsigned int irq, struct irq_desc *desc)
 	if (chip->irq_ack)
 		chip->irq_ack(&desc->irq_data);
 
-	trace_irq_handler_entry(irq, action);
-	res = action->handler(irq, dev_id);
-	trace_irq_handler_exit(irq, action, res);
+	do {
+		if (cpumask_test_cpu(cpu, action->active_cpus)) {
+			trace_irq_handler_entry(irq, action);
+			res = action->handler(irq, dev_id);
+			trace_irq_handler_exit(irq, action, res);
+			break;
+		}
+
+		action = action->next;
+	} while (action);
+
+	if (!action) {
+		pr_warning("Per CPU IRQ %d fired without handler on CPU %d -- disabling.\n",
+			   irq, cpu);
+		disable_percpu_irq(irq);
+	}
 
 	if (chip->irq_eoi)
 		chip->irq_eoi(&desc->irq_data);

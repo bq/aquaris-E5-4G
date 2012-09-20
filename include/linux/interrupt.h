@@ -93,6 +93,7 @@ typedef irqreturn_t (*irq_handler_t)(int, void *);
  * @name:	name of the device
  * @dev_id:	cookie to identify the device
  * @percpu_dev_id:	cookie to identify the device
+ * @active_cpus: mask of CPUs for which this percpu interrupt can fire
  * @next:	pointer to the next irqaction for shared interrupts
  * @irq:	interrupt number
  * @flags:	flags (see IRQF_* above)
@@ -106,6 +107,7 @@ struct irqaction {
 	irq_handler_t		handler;
 	void			*dev_id;
 	void __percpu		*percpu_dev_id;
+	cpumask_var_t		active_cpus;
 	struct irqaction	*next;
 	irq_handler_t		thread_fn;
 	struct task_struct	*thread;
@@ -136,11 +138,26 @@ request_any_context_irq(unsigned int irq, irq_handler_t handler,
 			unsigned long flags, const char *name, void *dev_id);
 
 extern int __must_check
+request_percpu_irq_mask(unsigned int irq, irq_handler_t handler,
+			const char *devname, void __percpu *percpu_dev_id,
+			const cpumask_t *mask);
+
+static inline int __must_check
 request_percpu_irq(unsigned int irq, irq_handler_t handler,
-		   const char *devname, void __percpu *percpu_dev_id);
+		   const char *devname, void __percpu *percpu_dev_id)
+{
+	return request_percpu_irq_mask(irq, handler, devname, percpu_dev_id,
+				       cpu_possible_mask);
+}
 
 extern void free_irq(unsigned int, void *);
-extern void free_percpu_irq(unsigned int, void __percpu *);
+extern void free_percpu_irq_mask(unsigned int, void __percpu *,
+				 const cpumask_t *);
+
+static inline void free_percpu_irq(unsigned int irq, void __percpu *dev_id)
+{
+	free_percpu_irq_mask(irq, dev_id, cpu_possible_mask);
+}
 
 struct device;
 
@@ -185,9 +202,21 @@ extern void devm_free_irq(struct device *dev, unsigned int irq, void *dev_id);
 
 extern void disable_irq_nosync(unsigned int irq);
 extern void disable_irq(unsigned int irq);
-extern void disable_percpu_irq(unsigned int irq);
+extern void disable_percpu_irq_mask(unsigned int irq, const cpumask_t *mask);
 extern void enable_irq(unsigned int irq);
-extern void enable_percpu_irq(unsigned int irq, unsigned int type);
+extern void enable_percpu_irq_mask(unsigned int irq, unsigned int type,
+				   const cpumask_t *mask);
+
+static inline void disable_percpu_irq(unsigned int irq)
+{
+	disable_percpu_irq_mask(irq, cpumask_of(smp_processor_id()));
+}
+
+static inline void enable_percpu_irq(unsigned int irq, unsigned int type)
+{
+	enable_percpu_irq_mask(irq, type, cpumask_of(smp_processor_id()));
+}
+
 extern void irq_wake_thread(unsigned int irq, void *dev_id);
 
 /* The following three functions are for the core kernel use only. */

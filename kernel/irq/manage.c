@@ -1029,7 +1029,7 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 		set_bit(IRQTF_AFFINITY, &new->thread_flags);
 	}
 
-	if (!alloc_cpumask_var(&mask, GFP_KERNEL)) {
+	if (!zalloc_cpumask_var(&mask, GFP_KERNEL)) {
 		ret = -ENOMEM;
 		goto out_thread;
 	}
@@ -1072,6 +1072,9 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 
 		/* add new interrupt at end of irq queue */
 		do {
+			if (irq_settings_is_per_cpu_devid(desc))
+				cpumask_or(mask, mask, old->active_cpus);
+
 			/*
 			 * Or all existing action->thread_mask bits,
 			 * so we can find the next zero bit for this
@@ -1081,6 +1084,11 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 			old_ptr = &old->next;
 			old = *old_ptr;
 		} while (old);
+
+		if (irq_settings_is_per_cpu_devid(desc) &&
+		    cpumask_intersects(mask, new->active_cpus))
+			goto mismatch;
+
 		shared = 1;
 	}
 
@@ -1566,9 +1574,9 @@ int request_any_context_irq(unsigned int irq, irq_handler_t handler,
 }
 EXPORT_SYMBOL_GPL(request_any_context_irq);
 
-void enable_percpu_irq(unsigned int irq, unsigned int type)
+void enable_percpu_irq_mask(unsigned int irq, unsigned int type,
+			    const cpumask_t *mask)
 {
-	unsigned int cpu = smp_processor_id();
 	unsigned long flags;
 	struct irq_desc *desc = irq_get_desc_lock(irq, &flags, IRQ_GET_DESC_CHECK_PERCPU);
 
@@ -1587,22 +1595,21 @@ void enable_percpu_irq(unsigned int irq, unsigned int type)
 		}
 	}
 
-	irq_percpu_enable(desc, cpu);
+	irq_percpu_enable(desc, mask);
 out:
 	irq_put_desc_unlock(desc, flags);
 }
 EXPORT_SYMBOL_GPL(enable_percpu_irq);
 
-void disable_percpu_irq(unsigned int irq)
+void disable_percpu_irq_mask(unsigned int irq, const cpumask_t *mask)
 {
-	unsigned int cpu = smp_processor_id();
 	unsigned long flags;
 	struct irq_desc *desc = irq_get_desc_lock(irq, &flags, IRQ_GET_DESC_CHECK_PERCPU);
 
 	if (!desc)
 		return;
 
-	irq_percpu_disable(desc, cpu);
+	irq_percpu_disable(desc, mask);
 	irq_put_desc_unlock(desc, flags);
 }
 EXPORT_SYMBOL_GPL(disable_percpu_irq);
@@ -1610,10 +1617,11 @@ EXPORT_SYMBOL_GPL(disable_percpu_irq);
 /*
  * Internal function to unregister a percpu irqaction.
  */
-static struct irqaction *__free_percpu_irq(unsigned int irq, void __percpu *dev_id)
+static struct irqaction *__free_percpu_irq(unsigned int irq, void __percpu *dev_id,
+					   const cpumask_t *mask)
 {
 	struct irq_desc *desc = irq_to_desc(irq);
-	struct irqaction *action;
+	struct irqaction *action, **action_ptr;
 	unsigned long flags;
 
 	WARN(in_interrupt(), "Trying to free IRQ %d from IRQ context!\n", irq);
@@ -1623,26 +1631,39 @@ static struct irqaction *__free_percpu_irq(unsigned int irq, void __percpu *dev_
 
 	raw_spin_lock_irqsave(&desc->lock, flags);
 
-	action = desc->action;
-	if (!action || action->percpu_dev_id != dev_id) {
-		WARN(1, "Trying to free already-free IRQ %d\n", irq);
-		goto bad;
+	action_ptr = &desc->action;
+	for (;;) {
+		action = *action_ptr;
+
+		if (!action) {
+			WARN(1, "Trying to free already-free IRQ %d\n", irq);
+			goto bad;
+		}
+
+		if (action->percpu_dev_id == dev_id &&
+		    cpumask_equal(action->active_cpus, mask))
+			break;
+		action_ptr = &action->next;
 	}
 
-	if (!cpumask_empty(desc->percpu_enabled)) {
+	cpumask_and(action->active_cpus, action->active_cpus, desc->percpu_enabled);
+	if (!cpumask_empty(action->active_cpus)) {
 		WARN(1, "percpu IRQ %d still enabled on CPU%d!\n",
-		     irq, cpumask_first(desc->percpu_enabled));
+		     irq, cpumask_first(action->active_cpus));
 		goto bad;
 	}
 
 	/* Found it - now remove it from the list of entries: */
-	desc->action = NULL;
+	*action_ptr = action->next;
 
 	raw_spin_unlock_irqrestore(&desc->lock, flags);
 
 	unregister_handler_proc(irq, action);
 
 	module_put(desc->owner);
+
+	free_cpumask_var(action->active_cpus);
+
 	return action;
 
 bad:
@@ -1662,13 +1683,14 @@ void remove_percpu_irq(unsigned int irq, struct irqaction *act)
 	struct irq_desc *desc = irq_to_desc(irq);
 
 	if (desc && irq_settings_is_per_cpu_devid(desc))
-	    __free_percpu_irq(irq, act->percpu_dev_id);
+	    __free_percpu_irq(irq, act->percpu_dev_id, act->active_cpus);
 }
 
 /**
  *	free_percpu_irq - free an interrupt allocated with request_percpu_irq
  *	@irq: Interrupt line to free
  *	@dev_id: Device identity to free
+ *	@mask: Mask identifying CPUs on which to free the interrupt
  *
  *	Remove a percpu interrupt handler. The handler is removed, but
  *	the interrupt line is not disabled. This must be done on each
@@ -1677,7 +1699,8 @@ void remove_percpu_irq(unsigned int irq, struct irqaction *act)
  *
  *	This function must not be called from interrupt context.
  */
-void free_percpu_irq(unsigned int irq, void __percpu *dev_id)
+void free_percpu_irq_mask(unsigned int irq, void __percpu *dev_id,
+			  const cpumask_t *mask)
 {
 	struct irq_desc *desc = irq_to_desc(irq);
 
@@ -1685,7 +1708,7 @@ void free_percpu_irq(unsigned int irq, void __percpu *dev_id)
 		return;
 
 	chip_bus_lock(desc);
-	kfree(__free_percpu_irq(irq, dev_id));
+	kfree(__free_percpu_irq(irq, dev_id, mask));
 	chip_bus_sync_unlock(desc);
 }
 
@@ -1716,6 +1739,7 @@ int setup_percpu_irq(unsigned int irq, struct irqaction *act)
  *	@handler: Function to be called when the IRQ occurs.
  *	@devname: An ascii name for the claiming device
  *	@dev_id: A percpu cookie passed back to the handler function
+ *	@mask: A mask identifying the CPUs which the interrupt can target
  *
  *	This call allocates interrupt resources, but doesn't
  *	automatically enable the interrupt. It has to be done on each
@@ -1725,8 +1749,9 @@ int setup_percpu_irq(unsigned int irq, struct irqaction *act)
  *	the handler gets called with the interrupted CPU's instance of
  *	that variable.
  */
-int request_percpu_irq(unsigned int irq, irq_handler_t handler,
-		       const char *devname, void __percpu *dev_id)
+int request_percpu_irq_mask(unsigned int irq, irq_handler_t handler,
+			    const char *devname, void __percpu *dev_id,
+			    const cpumask_t *mask)
 {
 	struct irqaction *action;
 	struct irq_desc *desc;
@@ -1745,14 +1770,21 @@ int request_percpu_irq(unsigned int irq, irq_handler_t handler,
 		return -ENOMEM;
 
 	action->handler = handler;
-	action->flags = IRQF_PERCPU | IRQF_NO_SUSPEND;
+	action->flags = IRQF_PERCPU | IRQF_NO_SUSPEND | IRQF_SHARED;
 	action->name = devname;
 	action->percpu_dev_id = dev_id;
+
+	if (!alloc_cpumask_var(&action->active_cpus, GFP_KERNEL)) {
+		retval = -ENOMEM;
+		goto out_action;
+	}
+	cpumask_copy(action->active_cpus, mask);
 
 	chip_bus_lock(desc);
 	retval = __setup_irq(irq, desc, action);
 	chip_bus_sync_unlock(desc);
 
+out_action:
 	if (retval)
 		kfree(action);
 
