@@ -34,12 +34,10 @@
 #include <linux/of_iommu.h>
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
+#include <linux/tegra-ahb.h>
 
 #include <asm/page.h>
 #include <asm/cacheflush.h>
-
-#include <mach/iomap.h>
-#include <mach/tegra-ahb.h>
 
 enum smmu_hwgrp {
 	HWGRP_AFI,
@@ -1257,7 +1255,7 @@ const struct dev_pm_ops tegra_smmu_pm_ops = {
 };
 
 #ifdef CONFIG_OF
-static struct of_device_id tegra_smmu_of_match[] __devinitdata = {
+static struct of_device_id tegra_smmu_of_match[] = {
 	{ .compatible = "nvidia,tegra30-smmu", },
 	{ },
 };
@@ -1275,7 +1273,7 @@ static struct platform_driver tegra_smmu_driver = {
 	},
 };
 
-static int __devinit tegra_smmu_init(void)
+static int tegra_smmu_init(void)
 {
 	return platform_driver_register(&tegra_smmu_driver);
 }
