@@ -48,13 +48,13 @@ enum {
  */
 struct flat_binder_object {
 	/* 8 bytes for large_flat_header. */
-	unsigned long		type;
-	unsigned long		flags;
+	unsigned int		type;
+	unsigned int		flags;
 
 	/* 8 bytes of data. */
 	union {
 		void __user	*binder;	/* local object */
-		signed long	handle;		/* remote object */
+		unsigned int	handle;		/* remote object */
 	};
 
 	/* extra data associated with local object */
@@ -67,27 +67,27 @@ struct flat_binder_object {
  */
 
 struct binder_write_read {
-	signed long	write_size;	/* bytes to write */
-	signed long	write_consumed;	/* bytes consumed by driver */
+	size_t	write_size;	/* bytes to write */
+	size_t	write_consumed;	/* bytes consumed by driver */
 	unsigned long	write_buffer;
-	signed long	read_size;	/* bytes to read */
-	signed long	read_consumed;	/* bytes consumed by driver */
+	size_t	read_size;	/* bytes to read */
+	size_t	read_consumed;	/* bytes consumed by driver */
 	unsigned long	read_buffer;
 };
 
 /* Use with BINDER_VERSION, driver fills in fields. */
 struct binder_version {
 	/* driver protocol version -- increment with incompatible change */
-	signed long	protocol_version;
+	signed int	protocol_version;
 };
 
 /* This is the current protocol version. */
 #define BINDER_CURRENT_PROTOCOL_VERSION 7
 
 #define BINDER_WRITE_READ		_IOWR('b', 1, struct binder_write_read)
-#define	BINDER_SET_IDLE_TIMEOUT		_IOW('b', 3, s64)
-#define	BINDER_SET_MAX_THREADS		_IOW('b', 5, size_t)
-#define	BINDER_SET_IDLE_PRIORITY	_IOW('b', 6, int)
+#define	BINDER_SET_IDLE_TIMEOUT		_IOW('b', 3, s64) /* Not used anymore */
+#define	BINDER_SET_MAX_THREADS		_IOW('b', 5, int)
+#define	BINDER_SET_IDLE_PRIORITY	_IOW('b', 6, int) /* Not used anymore */
 #define	BINDER_SET_CONTEXT_MGR		_IOW('b', 7, int)
 #define	BINDER_THREAD_EXIT		_IOW('b', 8, int)
 #define BINDER_VERSION			_IOWR('b', 9, struct binder_version)
@@ -265,7 +265,7 @@ enum BinderDriverCommandProtocol {
 	 * Else you have acquired a primary reference on the object.
 	 */
 
-	BC_FREE_BUFFER = _IOW('c', 3, int),
+	BC_FREE_BUFFER = _IOW('c', 3, void *),
 	/*
 	 * void *: ptr to transaction data received on a read
 	 */
@@ -310,13 +310,13 @@ enum BinderDriverCommandProtocol {
 
 	BC_REQUEST_DEATH_NOTIFICATION = _IOW('c', 14, struct binder_ptr_cookie),
 	/*
-	 * void *: ptr to binder
+	 * unsigned int: target binder
 	 * void *: cookie
 	 */
 
 	BC_CLEAR_DEATH_NOTIFICATION = _IOW('c', 15, struct binder_ptr_cookie),
 	/*
-	 * void *: ptr to binder
+	 * unsigned int: target binder
 	 * void *: cookie
 	 */
 
