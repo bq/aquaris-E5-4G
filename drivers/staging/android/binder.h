@@ -326,5 +326,101 @@ enum BinderDriverCommandProtocol {
 	 */
 };
 
+/* Support for 32bit userspace in a 64bit kernel */
+
+#ifdef CONFIG_COMPAT
+struct compat_flat_binder_object {
+	/* 8 bytes for large_flat_header. */
+	unsigned int		type;
+	unsigned int		flags;
+
+	/* 8 bytes of data. */
+	union {
+		unsigned int	binder;	/* local object */
+		unsigned int	handle;	/* remote object */
+	};
+
+	/* extra data associated with local object */
+	unsigned int		cookie;
+};
+
+struct compat_binder_write_read {
+	compat_size_t	write_size;	/* bytes to write */
+	compat_size_t	write_consumed;	/* bytes consumed by driver */
+	unsigned int	write_buffer;
+	compat_size_t	read_size;	/* bytes to read */
+	compat_size_t	read_consumed;	/* bytes consumed by driver */
+	unsigned int	read_buffer;
+};
+
+#define COMPAT_BINDER_WRITE_READ	_IOWR('b', 1, struct compat_binder_write_read)
+
+struct compat_binder_transaction_data {
+	/* The first two are only used for bcTRANSACTION and brTRANSACTION,
+	 * identifying the target and contents of the transaction.
+	 */
+	union {
+		compat_size_t	handle;	/* target descriptor of command transaction */
+		unsigned int	ptr;	/* target descriptor of return transaction */
+	} target;
+	unsigned int		cookie;	/* target object cookie */
+	unsigned int		code;	/* transaction command */
+
+	/* General information about the transaction. */
+	unsigned int	flags;
+	pid_t		sender_pid;
+	uid_t		sender_euid;
+	compat_size_t		data_size;	/* number of bytes of data */
+	compat_size_t		offsets_size;	/* number of bytes of offsets */
+
+	/* If this transaction is inline, the data immediately
+	 * follows here; otherwise, it ends with a pointer to
+	 * the data buffer.
+	 */
+	union {
+		struct {
+			/* transaction data */
+			unsigned int	buffer;
+			/* offsets from buffer to flat_binder_object structs */
+			unsigned int	offsets;
+		} ptr;
+		uint8_t	buf[8];
+	} data;
+};
+
+struct compat_binder_ptr_cookie {
+	unsigned int ptr;
+	unsigned int cookie;
+};
+
+enum CompatBinderDriverReturnProtocol {
+	COMPAT_BR_TRANSACTION = _IOR('r', 2, struct compat_binder_transaction_data),
+	COMPAT_BR_REPLY = _IOR('r', 3, struct compat_binder_transaction_data),
+
+	COMPAT_BR_INCREFS = _IOR('r', 7, struct compat_binder_ptr_cookie),
+	COMPAT_BR_ACQUIRE = _IOR('r', 8, struct compat_binder_ptr_cookie),
+	COMPAT_BR_RELEASE = _IOR('r', 9, struct compat_binder_ptr_cookie),
+	COMPAT_BR_DECREFS = _IOR('r', 10, struct compat_binder_ptr_cookie),
+
+	COMPAT_BR_DEAD_BINDER = _IOR('r', 15, unsigned int),
+	COMPAT_BR_CLEAR_DEATH_NOTIFICATION_DONE = _IOR('r', 16, unsigned int),
+};
+
+enum CompatBinderDriverCommandProtocol {
+	COMPAT_BC_TRANSACTION = _IOW('c', 0, struct compat_binder_transaction_data),
+	COMPAT_BC_REPLY = _IOW('c', 1, struct compat_binder_transaction_data),
+
+	COMPAT_BC_FREE_BUFFER = _IOW('c', 3, unsigned int),
+
+	COMPAT_BC_INCREFS_DONE = _IOW('c', 8, struct compat_binder_ptr_cookie),
+	COMPAT_BC_ACQUIRE_DONE = _IOW('c', 9, struct compat_binder_ptr_cookie),
+
+	COMPAT_BC_REQUEST_DEATH_NOTIFICATION = _IOW('c', 14, struct compat_binder_ptr_cookie),
+	COMPAT_BC_CLEAR_DEATH_NOTIFICATION = _IOW('c', 15, struct compat_binder_ptr_cookie),
+
+	COMPAT_BC_DEAD_BINDER_DONE = _IOW('c', 16, unsigned int),
+};
+#endif /* CONFIG_COMPAT */
+
 #endif /* _LINUX_BINDER_H */
 
