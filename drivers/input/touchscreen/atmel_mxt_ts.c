@@ -1473,11 +1473,20 @@ static int mxt_load_fw(struct device *dev, const char *fn)
 	INIT_COMPLETION(data->bl_completion);
 
 	ret = mxt_check_bootloader(data, MXT_WAITING_BOOTLOAD_CMD);
-	if (ret)
-		goto disable_irq;
+	if (ret) {
+		/* Bootloader may still be unlocked from previous update
+		 * attempt */
+		ret = mxt_check_bootloader(data, MXT_WAITING_FRAME_DATA);
+		if (ret)
+			goto disable_irq;
+	} else {
+		dev_info(dev, "Unlocking bootloader\n");
 
-	/* Unlock bootloader */
-	mxt_unlock_bootloader(data);
+		/* Unlock bootloader */
+		ret = mxt_unlock_bootloader(data);
+		if (ret)
+			goto disable_irq;
+	}
 
 	while (pos < fw->size) {
 		ret = mxt_check_bootloader(data, MXT_WAITING_FRAME_DATA);
