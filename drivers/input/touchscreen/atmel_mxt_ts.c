@@ -28,7 +28,6 @@
 #include <linux/gpio.h>
 
 /* Configuration file */
-#define MXT_CFG_NAME		"maxtouch.cfg"
 #define MXT_CFG_MAGIC		"OBP_RAW V1"
 
 /* Registers */
@@ -249,6 +248,7 @@ struct mxt_data {
 	struct regulator *reg_vdd;
 	struct regulator *reg_avdd;
 	char *fw_name;
+	char *cfg_name;
 
 	/* Cached parameters from object table */
 	u16 T5_address;
@@ -1349,10 +1349,15 @@ static int mxt_check_reg_init(struct mxt_data *data)
 	u8 val;
 	u16 reg;
 
-	ret = request_firmware(&cfg, MXT_CFG_NAME, dev);
+	if (!data->cfg_name) {
+		dev_dbg(dev, "Skipping cfg download\n");
+		return 0;
+	}
+
+	ret = request_firmware(&cfg, data->cfg_name, dev);
 	if (ret < 0) {
 		dev_err(dev, "Failure to request config file %s\n",
-			MXT_CFG_NAME);
+			data->cfg_name);
 		return 0;
 	}
 
@@ -1635,6 +1640,14 @@ static int mxt_acquire_irq(struct mxt_data *data)
 	return 0;
 }
 
+static void mxt_free_input_device(struct mxt_data *data)
+{
+	if (data->input_dev) {
+		input_unregister_device(data->input_dev);
+		data->input_dev = NULL;
+	}
+}
+
 static void mxt_free_object_table(struct mxt_data *data)
 {
 	kfree(data->raw_info_block);
@@ -1644,10 +1657,7 @@ static void mxt_free_object_table(struct mxt_data *data)
 	kfree(data->msg_buf);
 	data->msg_buf = NULL;
 
-	if (data->input_dev) {
-		input_unregister_device(data->input_dev);
-		data->input_dev = NULL;
-	}
+	mxt_free_input_device(data);
 
 	data->enable_reporting = false;
 	data->T5_address = 0;
@@ -2166,6 +2176,7 @@ err_free_mem:
 }
 
 static int mxt_initialize_t9_input_device(struct mxt_data *data);
+static int mxt_configure_objects(struct mxt_data *data);
 
 static int mxt_initialize(struct mxt_data *data)
 {
@@ -2203,12 +2214,24 @@ retry_probe:
 
 	error = mxt_acquire_irq(data);
 	if (error)
-		goto err_free_object_table;
+		return error;
+
+	error = mxt_configure_objects(data);
+	if (error)
+		return error;
+
+	return 0;
+}
+
+static int mxt_configure_objects(struct mxt_data *data)
+{
+	struct i2c_client *client = data->client;
+	int error;
 
 	error = mxt_init_t7_power_cfg(data);
 	if (error) {
 		dev_err(&client->dev, "Failed to initialize power cfg\n");
-		goto err_free_object_table;
+		return error;
 	}
 
 	/* Check register init values */
@@ -2216,32 +2239,27 @@ retry_probe:
 	if (error) {
 		dev_err(&client->dev, "Error %d initialising configuration\n",
 			error);
-		goto err_free_object_table;
+		return error;
 	}
 
 	error = mxt_check_retrigen(data);
 	if (error)
-		goto err_free_object_table;
+		return error;
 
 	if (data->T9_reportid_min) {
 		error = mxt_initialize_t9_input_device(data);
 		if (error)
-			goto err_free_object_table;
+			return error;
 	} else if (data->T100_reportid_min) {
 		error = mxt_initialize_t100_input_device(data);
 		if (error)
-			goto err_free_object_table;
+			return error;
 	} else {
 		dev_warn(&client->dev, "No touch object detected\n");
 	}
 
 	data->enable_reporting = true;
-
 	return 0;
-
-err_free_object_table:
-	mxt_free_object_table(data);
-	return error;
 }
 
 /* Firmware Version is returned as Major.Minor.Build */
@@ -2528,6 +2546,45 @@ static ssize_t mxt_update_fw_store(struct device *dev,
 	return count;
 }
 
+static ssize_t mxt_update_cfg_store(struct device *dev,
+		struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	struct mxt_data *data = dev_get_drvdata(dev);
+	int ret;
+
+	if (data->in_bootloader) {
+		dev_err(dev, "Not in appmode\n");
+		return -EINVAL;
+	}
+
+	ret = mxt_update_file_name(dev, &data->cfg_name, buf, count);
+	if (ret)
+		return ret;
+
+	data->enable_reporting = false;
+	mxt_free_input_device(data);
+
+	if (data->suspended) {
+		if (data->use_regulator)
+			mxt_regulator_enable(data);
+		else
+			mxt_set_t7_power_cfg(data, MXT_POWER_CFG_RUN);
+
+		mxt_acquire_irq(data);
+
+		data->suspended = false;
+	}
+
+	ret = mxt_configure_objects(data);
+	if (ret)
+		goto out;
+
+	ret = count;
+out:
+	return ret;
+}
+
 static ssize_t mxt_debug_enable_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -2612,6 +2669,7 @@ static DEVICE_ATTR(fw_version, S_IRUGO, mxt_fw_version_show, NULL);
 static DEVICE_ATTR(hw_version, S_IRUGO, mxt_hw_version_show, NULL);
 static DEVICE_ATTR(object, S_IRUGO, mxt_object_show, NULL);
 static DEVICE_ATTR(update_fw, S_IWUSR, NULL, mxt_update_fw_store);
+static DEVICE_ATTR(update_cfg, S_IWUSR, NULL, mxt_update_cfg_store);
 static DEVICE_ATTR(debug_enable, S_IWUSR | S_IRUSR, mxt_debug_enable_show,
 		   mxt_debug_enable_store);
 
@@ -2620,6 +2678,7 @@ static struct attribute *mxt_attrs[] = {
 	&dev_attr_hw_version.attr,
 	&dev_attr_object.attr,
 	&dev_attr_update_fw.attr,
+	&dev_attr_update_cfg.attr,
 	&dev_attr_debug_enable.attr,
 	NULL
 };
@@ -2705,8 +2764,15 @@ static int mxt_handle_pdata(struct mxt_data *data)
 	data->pdata = dev_get_platdata(&data->client->dev);
 
 	/* Use provided platform data if present */
-	if (data->pdata)
+	if (data->pdata) {
+		if (data->pdata->cfg_name)
+			mxt_update_file_name(&data->client->dev,
+					     &data->cfg_name,
+					     data->pdata->cfg_name,
+					     strlen(data->pdata->cfg_name));
+
 		return 0;
+	}
 
 	data->pdata = kzalloc(sizeof(*data->pdata), GFP_KERNEL);
 	if (!data->pdata) {
