@@ -19,6 +19,7 @@
 
 #define pr_fmt(fmt)	"%s(): " fmt, __func__
 
+#include <linux/err.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/spinlock.h>
@@ -967,7 +968,6 @@ static ssize_t smmu_debugfs_stats_write(struct file *file,
 {
 	struct smmu_debugfs_info *info;
 	struct smmu_device *smmu;
-	struct dentry *dent;
 	int i;
 	enum {
 		_OFF = 0,
@@ -995,8 +995,7 @@ static ssize_t smmu_debugfs_stats_write(struct file *file,
 	if (i == ARRAY_SIZE(command))
 		return -EINVAL;
 
-	dent = file->f_dentry;
-	info = dent->d_inode->i_private;
+	info = file_inode(file)->i_private;
 	smmu = info->smmu;
 
 	offs = SMMU_CACHE_CONFIG(info->cache);
@@ -1031,15 +1030,11 @@ static ssize_t smmu_debugfs_stats_write(struct file *file,
 
 static int smmu_debugfs_stats_show(struct seq_file *s, void *v)
 {
-	struct smmu_debugfs_info *info;
-	struct smmu_device *smmu;
-	struct dentry *dent;
+	struct smmu_debugfs_info *info = s->private;
+	struct smmu_device *smmu = info->smmu;
 	int i;
 	const char * const stats[] = { "hit", "miss", };
 
-	dent = d_find_alias(s->private);
-	info = dent->d_inode->i_private;
-	smmu = info->smmu;
 
 	for (i = 0; i < ARRAY_SIZE(stats); i++) {
 		u32 val;
@@ -1053,14 +1048,12 @@ static int smmu_debugfs_stats_show(struct seq_file *s, void *v)
 			stats[i], val, offs);
 	}
 	seq_printf(s, "\n");
-	dput(dent);
-
 	return 0;
 }
 
 static int smmu_debugfs_stats_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, smmu_debugfs_stats_show, inode);
+	return single_open(file, smmu_debugfs_stats_show, inode->i_private);
 }
 
 static const struct file_operations smmu_debugfs_stats_fops = {
@@ -1185,13 +1178,13 @@ static int tegra_smmu_probe(struct platform_device *pdev)
 		res = platform_get_resource(pdev, IORESOURCE_MEM, i);
 		if (!res)
 			return -ENODEV;
-		smmu->regs[i] = devm_request_and_ioremap(&pdev->dev, res);
-		if (!smmu->regs[i])
-			return -EBUSY;
+		smmu->regs[i] = devm_ioremap_resource(&pdev->dev, res);
+		if (IS_ERR(smmu->regs[i]))
+			return PTR_ERR(smmu->regs[i]);
 		smmu->rege[i] = smmu->regs[i] + resource_size(res) - 1;
 	}
 	/* Same as "mc" 1st regiter block start address */
-	smmu->regbase = (void __iomem *)((u32)smmu->regs[0] & ~PAGE_MASK);
+	smmu->regbase = (void __iomem *)((u32)smmu->regs[0] & PAGE_MASK);
 
 	err = of_get_dma_window(dev->of_node, NULL, 0, NULL, &base, &size);
 	if (err)
@@ -1267,13 +1260,11 @@ const struct dev_pm_ops tegra_smmu_pm_ops = {
 	.resume		= tegra_smmu_resume,
 };
 
-#ifdef CONFIG_OF
 static struct of_device_id tegra_smmu_of_match[] = {
 	{ .compatible = "nvidia,tegra30-smmu", },
 	{ },
 };
 MODULE_DEVICE_TABLE(of, tegra_smmu_of_match);
-#endif
 
 static struct platform_driver tegra_smmu_driver = {
 	.probe		= tegra_smmu_probe,
@@ -1282,7 +1273,7 @@ static struct platform_driver tegra_smmu_driver = {
 		.owner	= THIS_MODULE,
 		.name	= "tegra-smmu",
 		.pm	= &tegra_smmu_pm_ops,
-		.of_match_table = of_match_ptr(tegra_smmu_of_match),
+		.of_match_table = tegra_smmu_of_match,
 	},
 };
 
