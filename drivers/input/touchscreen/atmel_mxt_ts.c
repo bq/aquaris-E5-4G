@@ -1402,6 +1402,18 @@ static int mxt_check_reg_init(struct mxt_data *data)
 	}
 	data_pos += offset;
 
+	if (cfg_info.family_id != data->info->family_id) {
+		dev_err(dev, "Family ID mismatch!\n");
+		ret = -EINVAL;
+		goto release;
+	}
+
+	if (cfg_info.variant_id != data->info->variant_id) {
+		dev_err(dev, "Variant ID mismatch!\n");
+		ret = -EINVAL;
+		goto release;
+	}
+
 	/* The Info Block CRC is calculated over mxt_info and the object table
 	 * If it does not match then we are trying to load the configuration
 	 * from a different chip or firmware version, so the configuration CRC
