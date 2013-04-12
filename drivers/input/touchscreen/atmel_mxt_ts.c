@@ -1618,10 +1618,7 @@ recheck:
 	if (data->t7_cfg.active == 0 || data->t7_cfg.idle == 0) {
 		if (!retry) {
 			dev_info(dev, "T7 cfg zero, resetting\n");
-			error = mxt_soft_reset(data);
-			if (error)
-				return error;
-
+			mxt_soft_reset(data);
 			retry = true;
 			goto recheck;
 		} else {
