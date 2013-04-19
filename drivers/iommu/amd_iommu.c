@@ -700,10 +700,22 @@ retry:
 
 static void iommu_poll_events(struct amd_iommu *iommu)
 {
-	u32 head, tail;
+	u32 head, tail, status;
 	unsigned long flags;
 
 	spin_lock_irqsave(&iommu->lock, flags);
+
+	/* enable event interrupts again */
+	do {
+		/*
+		 * Workaround for Erratum ERBT1312
+		 * Clearing the EVT_INT bit may race in the hardware, so read
+		 * it again and make sure it was really cleared
+		 */
+		status = readl(iommu->mmio_base + MMIO_STATUS_OFFSET);
+		writel(MMIO_STATUS_EVT_INT_MASK,
+		       iommu->mmio_base + MMIO_STATUS_OFFSET);
+	} while (status & MMIO_STATUS_EVT_INT_MASK);
 
 	head = readl(iommu->mmio_base + MMIO_EVT_HEAD_OFFSET);
 	tail = readl(iommu->mmio_base + MMIO_EVT_TAIL_OFFSET);
@@ -741,15 +753,24 @@ static void iommu_handle_ppr_entry(struct amd_iommu *iommu, u64 *raw)
 static void iommu_poll_ppr_log(struct amd_iommu *iommu)
 {
 	unsigned long flags;
-	u32 head, tail;
+	u32 head, tail, status;
 
 	if (iommu->ppr_log == NULL)
 		return;
 
-	/* enable ppr interrupts again */
-	writel(MMIO_STATUS_PPR_INT_MASK, iommu->mmio_base + MMIO_STATUS_OFFSET);
-
 	spin_lock_irqsave(&iommu->lock, flags);
+
+	/* enable ppr interrupts again */
+	do {
+		/*
+		 * Workaround for Erratum ERBT1312
+		 * Clearing the PPR_INT bit may race in the hardware, so read
+		 * it again and make sure it was really cleared
+		 */
+		status = readl(iommu->mmio_base + MMIO_STATUS_OFFSET);
+		writel(MMIO_STATUS_PPR_INT_MASK,
+		       iommu->mmio_base + MMIO_STATUS_OFFSET);
+	} while (status & MMIO_STATUS_PPR_INT_MASK);
 
 	head = readl(iommu->mmio_base + MMIO_PPR_HEAD_OFFSET);
 	tail = readl(iommu->mmio_base + MMIO_PPR_TAIL_OFFSET);
@@ -2466,18 +2487,16 @@ static int device_change_notifier(struct notifier_block *nb,
 
 		/* allocate a protection domain if a device is added */
 		dma_domain = find_protection_domain(devid);
-		if (dma_domain)
-			goto out;
-		dma_domain = dma_ops_domain_alloc();
-		if (!dma_domain)
-			goto out;
-		dma_domain->target_dev = devid;
+		if (!dma_domain) {
+			dma_domain = dma_ops_domain_alloc();
+			if (!dma_domain)
+				goto out;
+			dma_domain->target_dev = devid;
 
-		spin_lock_irqsave(&iommu_pd_list_lock, flags);
-		list_add_tail(&dma_domain->list, &iommu_pd_list);
-		spin_unlock_irqrestore(&iommu_pd_list_lock, flags);
-
-		dev_data = get_dev_data(dev);
+			spin_lock_irqsave(&iommu_pd_list_lock, flags);
+			list_add_tail(&dma_domain->list, &iommu_pd_list);
+			spin_unlock_irqrestore(&iommu_pd_list_lock, flags);
+		}
 
 		dev->archdata.dma_ops = &amd_iommu_dma_ops;
 
@@ -2841,24 +2860,6 @@ static void unmap_page(struct device *dev, dma_addr_t dma_addr, size_t size,
 }
 
 /*
- * This is a special map_sg function which is used if we should map a
- * device which is not handled by an AMD IOMMU in the system.
- */
-static int map_sg_no_iommu(struct device *dev, struct scatterlist *sglist,
-			   int nelems, int dir)
-{
-	struct scatterlist *s;
-	int i;
-
-	for_each_sg(sglist, s, nelems, i) {
-		s->dma_address = (dma_addr_t)sg_phys(s);
-		s->dma_length  = s->length;
-	}
-
-	return nelems;
-}
-
-/*
  * The exported map_sg function for dma_ops (handles scatter-gather
  * lists).
  */
@@ -2877,9 +2878,7 @@ static int map_sg(struct device *dev, struct scatterlist *sglist,
 	INC_STATS_COUNTER(cnt_map_sg);
 
 	domain = get_domain(dev);
-	if (PTR_ERR(domain) == -EINVAL)
-		return map_sg_no_iommu(dev, sglist, nelems, dir);
-	else if (IS_ERR(domain))
+	if (IS_ERR(domain))
 		return 0;
 
 	dma_mask = *dev->dma_mask;
@@ -3412,7 +3411,7 @@ static size_t amd_iommu_unmap(struct iommu_domain *dom, unsigned long iova,
 }
 
 static phys_addr_t amd_iommu_iova_to_phys(struct iommu_domain *dom,
-					  unsigned long iova)
+					  dma_addr_t iova)
 {
 	struct protection_domain *domain = dom->priv;
 	unsigned long offset_mask;
@@ -3949,6 +3948,9 @@ static struct irq_remap_table *get_irq_table(u16 devid, bool ioapic)
 	if (!table)
 		goto out;
 
+	/* Initialize table spin-lock */
+	spin_lock_init(&table->lock);
+
 	if (ioapic)
 		/* Keep the first 32 indexes free for IOAPIC interrupts */
 		table->min_index = 32;
@@ -4009,7 +4011,7 @@ static int alloc_irq_index(struct irq_cfg *cfg, u16 devid, int count)
 			c = 0;
 
 		if (c == count)	{
-			struct irq_2_iommu *irte_info;
+			struct irq_2_irte *irte_info;
 
 			for (; c != 0; --c)
 				table->table[index - c + 1] = IRTE_ALLOCATED;
@@ -4017,9 +4019,9 @@ static int alloc_irq_index(struct irq_cfg *cfg, u16 devid, int count)
 			index -= count - 1;
 
 			cfg->remapped	      = 1;
-			irte_info             = &cfg->irq_2_iommu;
-			irte_info->sub_handle = devid;
-			irte_info->irte_index = index;
+			irte_info             = &cfg->irq_2_irte;
+			irte_info->devid      = devid;
+			irte_info->index      = index;
 
 			goto out;
 		}
@@ -4100,7 +4102,7 @@ static int setup_ioapic_entry(int irq, struct IO_APIC_route_entry *entry,
 			      struct io_apic_irq_attr *attr)
 {
 	struct irq_remap_table *table;
-	struct irq_2_iommu *irte_info;
+	struct irq_2_irte *irte_info;
 	struct irq_cfg *cfg;
 	union irte irte;
 	int ioapic_id;
@@ -4112,7 +4114,7 @@ static int setup_ioapic_entry(int irq, struct IO_APIC_route_entry *entry,
 	if (!cfg)
 		return -EINVAL;
 
-	irte_info = &cfg->irq_2_iommu;
+	irte_info = &cfg->irq_2_irte;
 	ioapic_id = mpc_ioapic_id(attr->ioapic);
 	devid     = get_ioapic_devid(ioapic_id);
 
@@ -4127,8 +4129,8 @@ static int setup_ioapic_entry(int irq, struct IO_APIC_route_entry *entry,
 
 	/* Setup IRQ remapping info */
 	cfg->remapped	      = 1;
-	irte_info->sub_handle = devid;
-	irte_info->irte_index = index;
+	irte_info->devid      = devid;
+	irte_info->index      = index;
 
 	/* Setup IRTE for IOMMU */
 	irte.val		= 0;
@@ -4162,7 +4164,7 @@ static int setup_ioapic_entry(int irq, struct IO_APIC_route_entry *entry,
 static int set_affinity(struct irq_data *data, const struct cpumask *mask,
 			bool force)
 {
-	struct irq_2_iommu *irte_info;
+	struct irq_2_irte *irte_info;
 	unsigned int dest, irq;
 	struct irq_cfg *cfg;
 	union irte irte;
@@ -4173,12 +4175,12 @@ static int set_affinity(struct irq_data *data, const struct cpumask *mask,
 
 	cfg       = data->chip_data;
 	irq       = data->irq;
-	irte_info = &cfg->irq_2_iommu;
+	irte_info = &cfg->irq_2_irte;
 
 	if (!cpumask_intersects(mask, cpu_online_mask))
 		return -EINVAL;
 
-	if (get_irte(irte_info->sub_handle, irte_info->irte_index, &irte))
+	if (get_irte(irte_info->devid, irte_info->index, &irte))
 		return -EBUSY;
 
 	if (assign_irq_vector(irq, cfg, mask))
@@ -4194,7 +4196,7 @@ static int set_affinity(struct irq_data *data, const struct cpumask *mask,
 	irte.fields.vector      = cfg->vector;
 	irte.fields.destination = dest;
 
-	modify_irte(irte_info->sub_handle, irte_info->irte_index, irte);
+	modify_irte(irte_info->devid, irte_info->index, irte);
 
 	if (cfg->move_in_progress)
 		send_cleanup_vector(cfg);
@@ -4206,16 +4208,16 @@ static int set_affinity(struct irq_data *data, const struct cpumask *mask,
 
 static int free_irq(int irq)
 {
-	struct irq_2_iommu *irte_info;
+	struct irq_2_irte *irte_info;
 	struct irq_cfg *cfg;
 
 	cfg = irq_get_chip_data(irq);
 	if (!cfg)
 		return -EINVAL;
 
-	irte_info = &cfg->irq_2_iommu;
+	irte_info = &cfg->irq_2_irte;
 
-	free_irte(irte_info->sub_handle, irte_info->irte_index);
+	free_irte(irte_info->devid, irte_info->index);
 
 	return 0;
 }
@@ -4224,7 +4226,7 @@ static void compose_msi_msg(struct pci_dev *pdev,
 			    unsigned int irq, unsigned int dest,
 			    struct msi_msg *msg, u8 hpet_id)
 {
-	struct irq_2_iommu *irte_info;
+	struct irq_2_irte *irte_info;
 	struct irq_cfg *cfg;
 	union irte irte;
 
@@ -4232,7 +4234,7 @@ static void compose_msi_msg(struct pci_dev *pdev,
 	if (!cfg)
 		return;
 
-	irte_info = &cfg->irq_2_iommu;
+	irte_info = &cfg->irq_2_irte;
 
 	irte.val		= 0;
 	irte.fields.vector	= cfg->vector;
@@ -4241,11 +4243,11 @@ static void compose_msi_msg(struct pci_dev *pdev,
 	irte.fields.dm		= apic->irq_dest_mode;
 	irte.fields.valid	= 1;
 
-	modify_irte(irte_info->sub_handle, irte_info->irte_index, irte);
+	modify_irte(irte_info->devid, irte_info->index, irte);
 
 	msg->address_hi = MSI_ADDR_BASE_HI;
 	msg->address_lo = MSI_ADDR_BASE_LO;
-	msg->data       = irte_info->irte_index;
+	msg->data       = irte_info->index;
 }
 
 static int msi_alloc_irq(struct pci_dev *pdev, int irq, int nvec)
@@ -4270,7 +4272,7 @@ static int msi_alloc_irq(struct pci_dev *pdev, int irq, int nvec)
 static int msi_setup_irq(struct pci_dev *pdev, unsigned int irq,
 			 int index, int offset)
 {
-	struct irq_2_iommu *irte_info;
+	struct irq_2_irte *irte_info;
 	struct irq_cfg *cfg;
 	u16 devid;
 
@@ -4285,18 +4287,18 @@ static int msi_setup_irq(struct pci_dev *pdev, unsigned int irq,
 		return 0;
 
 	devid		= get_device_id(&pdev->dev);
-	irte_info	= &cfg->irq_2_iommu;
+	irte_info	= &cfg->irq_2_irte;
 
 	cfg->remapped	      = 1;
-	irte_info->sub_handle = devid;
-	irte_info->irte_index = index + offset;
+	irte_info->devid      = devid;
+	irte_info->index      = index + offset;
 
 	return 0;
 }
 
 static int setup_hpet_msi(unsigned int irq, unsigned int id)
 {
-	struct irq_2_iommu *irte_info;
+	struct irq_2_irte *irte_info;
 	struct irq_cfg *cfg;
 	int index, devid;
 
@@ -4304,7 +4306,7 @@ static int setup_hpet_msi(unsigned int irq, unsigned int id)
 	if (!cfg)
 		return -EINVAL;
 
-	irte_info = &cfg->irq_2_iommu;
+	irte_info = &cfg->irq_2_irte;
 	devid     = get_hpet_devid(id);
 	if (devid < 0)
 		return devid;
@@ -4314,8 +4316,8 @@ static int setup_hpet_msi(unsigned int irq, unsigned int id)
 		return index;
 
 	cfg->remapped	      = 1;
-	irte_info->sub_handle = devid;
-	irte_info->irte_index = index;
+	irte_info->devid      = devid;
+	irte_info->index      = index;
 
 	return 0;
 }
