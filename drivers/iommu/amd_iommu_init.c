@@ -1324,7 +1324,7 @@ static int iommu_setup_msi(struct amd_iommu *iommu)
 				 amd_iommu_int_handler,
 				 amd_iommu_int_thread,
 				 0, "AMD-Vi",
-				 iommu->dev);
+				 iommu);
 
 	if (r) {
 		pci_disable_msi(iommu->dev);
@@ -1860,6 +1860,7 @@ static int __init early_amd_iommu_init(void)
 		 * Interrupt remapping enabled, create kmem_cache for the
 		 * remapping tables.
 		 */
+		ret = -ENOMEM;
 		amd_iommu_irq_cache = kmem_cache_create("irq_remap_cache",
 				MAX_IRQS_PER_TABLE * sizeof(u32),
 				IRQ_TABLE_ALIGNMENT,
