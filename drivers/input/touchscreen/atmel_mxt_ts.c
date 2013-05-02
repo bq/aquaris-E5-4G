@@ -412,8 +412,8 @@ static int mxt_lookup_bootloader_address(struct mxt_data *data, u8 retry)
 	switch (appmode) {
 	case 0x4a:
 	case 0x4b:
-		/* 1188S/1664S use different scheme */
-		if ((retry % 2) || family_id == 0xa2) {
+		/* Chips after 1664S use different scheme */
+		if ((retry % 2) || family_id >= 0xa2) {
 			bootloader = appmode - 0x24;
 			break;
 		}
