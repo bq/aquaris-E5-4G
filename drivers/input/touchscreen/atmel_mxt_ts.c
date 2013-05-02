@@ -658,7 +658,7 @@ mxt_get_object(struct mxt_data *data, u8 type)
 			return object;
 	}
 
-	dev_err(&data->client->dev, "Invalid object type T%u\n", type);
+	dev_warn(&data->client->dev, "Invalid object type T%u\n", type);
 	return NULL;
 }
 
@@ -1464,8 +1464,12 @@ static int mxt_check_reg_init(struct mxt_data *data)
 
 		object = mxt_get_object(data, type);
 		if (!object) {
-			ret = -EINVAL;
-			goto release_mem;
+			/* Skip object */
+			for (i = 0; i < size; i++) {
+				ret = sscanf(cfg->data + data_pos, "%hhx%n",
+					     &val,
+					     &offset);
+			}
 		}
 
 		if (instance >= mxt_obj_instances(object)) {
