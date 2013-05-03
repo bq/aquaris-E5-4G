@@ -2490,10 +2490,7 @@ static int mxt_load_fw(struct device *dev)
 	dev_info(dev, "Sent %d frames, %zd bytes\n", frame, pos);
 
 	/* Wait for device to reset */
-	ret = mxt_wait_for_completion(data, &data->bl_completion,
-				      MXT_FW_RESET_TIME);
-	if (ret)
-		dev_err(dev, "Device didn't reset\n");
+	mxt_wait_for_completion(data, &data->bl_completion, MXT_RESET_TIMEOUT);
 
 	data->in_bootloader = false;
 
