@@ -1311,6 +1311,31 @@ static u32 mxt_calculate_crc(u8 *base, off_t start_off, off_t end_off)
 
 static int mxt_init_t7_power_cfg(struct mxt_data *data);
 
+static int mxt_check_retrigen(struct mxt_data *data)
+{
+	struct i2c_client *client = data->client;
+	int error;
+	int val;
+
+	if (data->pdata->irqflags & IRQF_TRIGGER_LOW)
+		return 0;
+
+	if (data->T18_address) {
+		error = __mxt_read_reg(client,
+				       data->T18_address + MXT_COMMS_CTRL,
+				       1, &val);
+		if (error)
+			return error;
+
+		if (val & MXT_COMMS_RETRIGEN)
+			return 0;
+	}
+
+	dev_warn(&client->dev, "Enabling RETRIGEN workaround\n");
+	data->use_retrigen_workaround = true;
+	return 0;
+}
+
 /*
  * mxt_check_reg_init - download configuration to chip
  *
@@ -1566,6 +1591,10 @@ static int mxt_check_reg_init(struct mxt_data *data)
 	}
 
 	mxt_update_crc(data, MXT_COMMAND_BACKUPNV, MXT_BACKUP_VALUE);
+
+	ret = mxt_check_retrigen(data);
+	if (ret)
+		goto release_mem;
 
 	ret = mxt_soft_reset(data);
 	if (ret)
@@ -1945,31 +1974,6 @@ static int mxt_read_t9_resolution(struct mxt_data *data)
 	return 0;
 }
 
-static int mxt_check_retrigen(struct mxt_data *data)
-{
-	struct i2c_client *client = data->client;
-	int error;
-	int val;
-
-	if (data->pdata->irqflags & IRQF_TRIGGER_LOW)
-		return 0;
-
-	if (data->T18_address) {
-		error = __mxt_read_reg(client,
-				       data->T18_address + MXT_COMMS_CTRL,
-				       1, &val);
-		if (error)
-			return error;
-
-		if (val & MXT_COMMS_RETRIGEN)
-			return 0;
-	}
-
-	dev_warn(&client->dev, "Enabling RETRIGEN workaround\n");
-	data->use_retrigen_workaround = true;
-	return 0;
-}
-
 static void mxt_regulator_enable(struct mxt_data *data)
 {
 	gpio_set_value(data->pdata->gpio_reset, 0);
@@ -2227,6 +2231,10 @@ retry_probe:
 		}
 	}
 
+	error = mxt_check_retrigen(data);
+	if (error)
+		return error;
+
 	error = mxt_acquire_irq(data);
 	if (error)
 		return error;
@@ -2256,10 +2264,6 @@ static int mxt_configure_objects(struct mxt_data *data)
 			error);
 		return error;
 	}
-
-	error = mxt_check_retrigen(data);
-	if (error)
-		return error;
 
 	if (data->T9_reportid_min) {
 		error = mxt_initialize_t9_input_device(data);
