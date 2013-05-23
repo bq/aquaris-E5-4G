@@ -1566,13 +1566,10 @@ static int mxt_check_reg_init(struct mxt_data *data)
 					   data->T7_address - cfg_start_ofs,
 					   config_mem_size);
 
-	/* check the crc, calculated should same as what's in file */
-	if (config_crc > 0 && (config_crc != calculated_crc)) {
-		dev_err(dev, "CRC mismatch in config file, calculated=%06X, file=%06X\n",
+	/* Check the crc, calculated should match what is in file */
+	if (config_crc > 0 && (config_crc != calculated_crc))
+		dev_warn(dev, "CRC mismatch in config file, calculated=%06X, file=%06X\n",
 				calculated_crc, config_crc);
-		ret = 0;
-		goto release_mem;
-	}
 
 	/* Write configuration as blocks */
 	byte_offset = 0;
