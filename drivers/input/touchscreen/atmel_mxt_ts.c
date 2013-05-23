@@ -1494,7 +1494,9 @@ static int mxt_check_reg_init(struct mxt_data *data)
 				ret = sscanf(cfg->data + data_pos, "%hhx%n",
 					     &val,
 					     &offset);
+				data_pos += offset;
 			}
+			continue;
 		}
 
 		if (instance >= mxt_obj_instances(object)) {
@@ -1509,10 +1511,8 @@ static int mxt_check_reg_init(struct mxt_data *data)
 			/* Either we are in fallback mode due to wrong
 			 * config or config from a later fw version,
 			 * or the file is corrupt or hand-edited */
-			dev_warn(dev, "Discarding %u bytes in T%u!\n",
+			dev_warn(dev, "Discarding %u byte(s) in T%u\n",
 				 size - mxt_obj_size(object), type);
-
-			size = mxt_obj_size(object);
 		} else if (mxt_obj_size(object) > size) {
 			/* If firmware is upgraded, new bytes may be added to
 			 * end of objects. It is generally forward compatible
@@ -1521,7 +1521,7 @@ static int mxt_check_reg_init(struct mxt_data *data)
 			 * will force fallback mode until the configuration is
 			 * updated. We warn here but do nothing else - the
 			 * malloc has zeroed the entire configuration. */
-			dev_warn(dev, "Zeroing %d byte(s) in T%d\n",
+			dev_warn(dev, "Zeroing %u byte(s) in T%d\n",
 				 mxt_obj_size(object) - size, type);
 		}
 
@@ -1534,6 +1534,9 @@ static int mxt_check_reg_init(struct mxt_data *data)
 				ret = -EINVAL;
 				goto release_mem;
 			}
+
+			if (i > mxt_obj_size(object))
+				continue;
 
 			byte_offset = reg + i - cfg_start_ofs;
 
