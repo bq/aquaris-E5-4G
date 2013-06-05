@@ -402,7 +402,7 @@ static int mxt_bootloader_write(struct mxt_data *data,
 	return ret;
 }
 
-static int mxt_lookup_bootloader_address(struct mxt_data *data, u8 retry)
+static int mxt_lookup_bootloader_address(struct mxt_data *data, bool retry)
 {
 	u8 appmode = data->client->addr;
 	u8 bootloader;
@@ -415,7 +415,7 @@ static int mxt_lookup_bootloader_address(struct mxt_data *data, u8 retry)
 	case 0x4a:
 	case 0x4b:
 		/* Chips after 1664S use different scheme */
-		if ((retry % 2) || family_id >= 0xa2) {
+		if (retry || family_id >= 0xa2) {
 			bootloader = appmode - 0x24;
 			break;
 		}
@@ -437,7 +437,7 @@ static int mxt_lookup_bootloader_address(struct mxt_data *data, u8 retry)
 	return 0;
 }
 
-static int mxt_probe_bootloader(struct mxt_data *data, u8 retry)
+static int mxt_probe_bootloader(struct mxt_data *data, bool retry)
 {
 	struct device *dev = &data->client->dev;
 	int ret;
@@ -2204,20 +2204,25 @@ static int mxt_initialize(struct mxt_data *data)
 {
 	struct i2c_client *client = data->client;
 	int error;
-	u8 retry_count = 0;
+	bool alt_bootloader_addr = false;
+	bool retry = false;
 
-retry_probe:
+retry_info:
 	error = mxt_read_info_block(data);
 	if (error) {
-		error = mxt_probe_bootloader(data, retry_count);
+retry_bootloader:
+		error = mxt_probe_bootloader(data, alt_bootloader_addr);
 		if (error) {
-			if (++retry_count > 11)
+			if (alt_bootloader_addr) {
 				/* Chip is not in appmode or bootloader mode */
 				return error;
+			}
 
-			goto retry_probe;
+			dev_info(&client->dev, "Trying alternate bootloader address\n");
+			alt_bootloader_addr = true;
+			goto retry_bootloader;
 		} else {
-			if (++retry_count > 10) {
+			if (retry) {
 				dev_err(&client->dev,
 						"Could not recover device from "
 						"bootloader mode\n");
@@ -2230,7 +2235,8 @@ retry_probe:
 			/* Attempt to exit bootloader into app mode */
 			mxt_send_bootloader_cmd(data, false);
 			msleep(MXT_FW_RESET_TIME);
-			goto retry_probe;
+			retry = true;
+			goto retry_info;
 		}
 	}
 
