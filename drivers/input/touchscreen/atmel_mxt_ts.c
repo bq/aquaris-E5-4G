@@ -2437,6 +2437,8 @@ static int mxt_load_fw(struct device *dev)
 		ret = mxt_lookup_bootloader_address(data, 0);
 		if (ret)
 			goto release_firmware;
+	} else {
+		enable_irq(data->irq);
 	}
 
 	mxt_free_object_table(data);
