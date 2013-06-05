@@ -372,7 +372,8 @@ static int mxt_bootloader_read(struct mxt_data *data,
 		ret = 0;
 	} else {
 		ret = (ret < 0) ? ret : -EIO;
-		dev_err(&data->client->dev, "i2c recv failed (%d)\n", ret);
+		dev_err(&data->client->dev, "%s: i2c recv failed (%d)\n",
+			__func__, ret);
 	}
 
 	return ret;
@@ -394,7 +395,8 @@ static int mxt_bootloader_write(struct mxt_data *data,
 		ret = 0;
 	} else {
 		ret = (ret < 0) ? ret : -EIO;
-		dev_err(&data->client->dev, "i2c send failed (%d)\n", ret);
+		dev_err(&data->client->dev, "%s: i2c send failed (%d)\n",
+			__func__, ret);
 	}
 
 	return ret;
