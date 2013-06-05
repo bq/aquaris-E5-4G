@@ -482,14 +482,15 @@ static u8 mxt_get_bootloader_version(struct mxt_data *data, u8 val)
 	}
 }
 
-static int mxt_check_bootloader(struct mxt_data *data, unsigned int state)
+static int mxt_check_bootloader(struct mxt_data *data, unsigned int state,
+				bool wait)
 {
 	struct device *dev = &data->client->dev;
 	u8 val;
 	int ret;
 
 recheck:
-	if (state != MXT_WAITING_BOOTLOAD_CMD) {
+	if (wait) {
 		/*
 		 * In application update mode, the interrupt
 		 * line signals state transitions. We must wait for the
@@ -2441,11 +2442,11 @@ static int mxt_load_fw(struct device *dev)
 	mxt_free_object_table(data);
 	INIT_COMPLETION(data->bl_completion);
 
-	ret = mxt_check_bootloader(data, MXT_WAITING_BOOTLOAD_CMD);
+	ret = mxt_check_bootloader(data, MXT_WAITING_BOOTLOAD_CMD, false);
 	if (ret) {
 		/* Bootloader may still be unlocked from previous update
 		 * attempt */
-		ret = mxt_check_bootloader(data, MXT_WAITING_FRAME_DATA);
+		ret = mxt_check_bootloader(data, MXT_WAITING_FRAME_DATA, false);
 		if (ret)
 			goto disable_irq;
 	} else {
@@ -2458,7 +2459,7 @@ static int mxt_load_fw(struct device *dev)
 	}
 
 	while (pos < fw->size) {
-		ret = mxt_check_bootloader(data, MXT_WAITING_FRAME_DATA);
+		ret = mxt_check_bootloader(data, MXT_WAITING_FRAME_DATA, true);
 		if (ret)
 			goto disable_irq;
 
@@ -2472,7 +2473,7 @@ static int mxt_load_fw(struct device *dev)
 		if (ret)
 			goto disable_irq;
 
-		ret = mxt_check_bootloader(data, MXT_FRAME_CRC_PASS);
+		ret = mxt_check_bootloader(data, MXT_FRAME_CRC_PASS, true);
 		if (ret) {
 			retry++;
 
