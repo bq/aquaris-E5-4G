@@ -337,6 +337,12 @@ asmlinkage ssize_t compat_sys_preadv(unsigned long fd,
 asmlinkage ssize_t compat_sys_pwritev(unsigned long fd,
 		const struct compat_iovec __user *vec,
 		unsigned long vlen, u32 pos_low, u32 pos_high);
+asmlinkage long compat_sys_preadv64(unsigned long fd,
+				    const struct compat_iovec __user *vec,
+				    unsigned long vlen, loff_t pos);
+asmlinkage long compat_sys_pwritev64(unsigned long fd,
+				     const struct compat_iovec __user *vec,
+				     unsigned long vlen, loff_t pos);
 asmlinkage long comat_sys_lseek(unsigned int, compat_off_t, unsigned int);
 
 asmlinkage long compat_sys_execve(const char __user *filename, const compat_uptr_t __user *argv,

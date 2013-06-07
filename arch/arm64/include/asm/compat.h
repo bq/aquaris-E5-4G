@@ -66,6 +66,8 @@ typedef u32		compat_ulong_t;
 typedef u64		compat_u64;
 typedef u32		compat_uptr_t;
 
+typedef s64		ilp32_clock_t __attribute__((aligned(4)));
+
 struct compat_timespec {
 	compat_time_t	tv_sec;
 	s32		tv_nsec;
@@ -193,6 +195,15 @@ typedef struct compat_siginfo {
 			compat_clock_t _utime;
 			compat_clock_t _stime;
 		} _sigchld;
+
+		/* SIGCHLD (ILP32 version) */
+		struct {
+			unsigned int _pid;	/* which child */
+			unsigned int _uid;	/* sender's uid */
+			int _status;		/* exit code */
+			ilp32_clock_t _utime;
+			ilp32_clock_t _stime;
+		} _sigchld_ilp32;
 
 		/* SIGILL, SIGFPE, SIGSEGV, SIGBUS */
 		struct {
