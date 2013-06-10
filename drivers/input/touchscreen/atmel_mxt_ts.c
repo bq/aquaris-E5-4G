@@ -1846,7 +1846,7 @@ static int mxt_read_info_block(struct mxt_data *data)
 	int error;
 	size_t size;
 	void *buf;
-	struct mxt_info *info;
+	uint8_t num_objects;
 	u32 calculated_crc;
 	u8 *crc_ptr;
 
@@ -1867,8 +1867,8 @@ static int mxt_read_info_block(struct mxt_data *data)
 		goto err_free_mem;
 
 	/* Resize buffer to give space for rest of info block */
-	info = (struct mxt_info *)buf;
-	size += (info->object_num * sizeof(struct mxt_object))
+	num_objects = ((struct mxt_info *)buf)->object_num;
+	size += (num_objects * sizeof(struct mxt_object))
 		+ MXT_INFO_CHECKSUM_SIZE;
 
 	buf = krealloc(buf, size, GFP_KERNEL);
@@ -1908,8 +1908,9 @@ static int mxt_read_info_block(struct mxt_data *data)
 
 	dev_info(&client->dev,
 		 "Family: %u Variant: %u Firmware V%u.%u.%02X Objects: %u\n",
-		 info->family_id, info->variant_id, info->version >> 4,
-		 info->version & 0xf, info->build, info->object_num);
+		 data->info->family_id, data->info->variant_id,
+		 data->info->version >> 4, data->info->version & 0xf,
+		 data->info->build, data->info->object_num);
 
 	/* Parse object table information */
 	error = mxt_parse_object_table(data);
