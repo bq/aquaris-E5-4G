@@ -1536,6 +1536,7 @@ static int mxt_check_reg_init(struct mxt_data *data)
 				ret = -EINVAL;
 				goto release_mem;
 			}
+			data_pos += offset;
 
 			if (i > mxt_obj_size(object))
 				continue;
@@ -1551,8 +1552,6 @@ static int mxt_check_reg_init(struct mxt_data *data)
 				ret = -EINVAL;
 				goto release_mem;
 			}
-
-			data_pos += offset;
 		}
 	}
 
