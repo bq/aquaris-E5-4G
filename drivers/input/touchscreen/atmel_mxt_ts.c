@@ -2616,13 +2616,10 @@ static ssize_t mxt_debug_enable_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	struct mxt_data *data = dev_get_drvdata(dev);
-	int count;
 	char c;
 
 	c = data->debug_enabled ? '1' : '0';
-	count = sprintf(buf, "%c\n", c);
-
-	return count;
+	return scnprintf(buf, PAGE_SIZE, "%c\n", c);
 }
 
 static ssize_t mxt_debug_enable_store(struct device *dev,
