@@ -1311,8 +1311,6 @@ static u32 mxt_calculate_crc(u8 *base, off_t start_off, off_t end_off)
 	return crc;
 }
 
-static int mxt_init_t7_power_cfg(struct mxt_data *data);
-
 static int mxt_check_retrigen(struct mxt_data *data)
 {
 	struct i2c_client *client = data->client;
@@ -1337,6 +1335,8 @@ static int mxt_check_retrigen(struct mxt_data *data)
 	data->use_retrigen_workaround = true;
 	return 0;
 }
+
+static int mxt_init_t7_power_cfg(struct mxt_data *data);
 
 /*
  * mxt_check_reg_init - download configuration to chip
