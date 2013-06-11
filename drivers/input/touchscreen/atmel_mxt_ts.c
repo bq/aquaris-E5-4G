@@ -64,7 +64,6 @@
 #define MXT_SPT_DIGITIZER_T43		43
 #define MXT_SPT_MESSAGECOUNT_T44	44
 #define MXT_SPT_CTECONFIG_T46		46
-#define MXT_SPT_NOISESUPPRESSION_T48	48
 #define MXT_PROCI_ACTIVE_STYLUS_T63	63
 #define MXT_TOUCH_MULTITOUCHSCREEN_T100 100
 
@@ -1800,7 +1799,7 @@ static int mxt_parse_object_table(struct mxt_data *data)
 		case MXT_SPT_GPIOPWM_T19:
 			data->T19_reportid = min_id;
 			break;
-		case MXT_SPT_NOISESUPPRESSION_T48:
+		case MXT_PROCG_NOISESUPPRESSION_T48:
 			data->T48_reportid = min_id;
 			break;
 		case MXT_PROCI_ACTIVE_STYLUS_T63:
