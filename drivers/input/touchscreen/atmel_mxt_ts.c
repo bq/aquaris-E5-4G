@@ -1894,7 +1894,7 @@ static int mxt_read_info_block(struct mxt_data *data)
 
 	/* CRC mismatch can be caused by data corruption due to I2C comms
 	 * issue or else device is not using Object Based Protocol */
-	if (data->info_crc != calculated_crc) {
+	if ((data->info_crc == 0) || (data->info_crc != calculated_crc)) {
 		dev_err(&client->dev,
 			"Info Block CRC error calculated=0x%06X read=0x%06X\n",
 			data->info_crc, calculated_crc);
