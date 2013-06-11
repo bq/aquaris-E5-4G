@@ -1501,14 +1501,6 @@ static int mxt_check_reg_init(struct mxt_data *data)
 			continue;
 		}
 
-		if (instance >= mxt_obj_instances(object)) {
-			dev_err(dev, "Object instances exceeded!\n");
-			ret = -EINVAL;
-			goto release_mem;
-		}
-
-		reg = object->start_address + mxt_obj_size(object) * instance;
-
 		if (size > mxt_obj_size(object)) {
 			/* Either we are in fallback mode due to wrong
 			 * config or config from a later fw version,
@@ -1526,6 +1518,14 @@ static int mxt_check_reg_init(struct mxt_data *data)
 			dev_warn(dev, "Zeroing %u byte(s) in T%d\n",
 				 mxt_obj_size(object) - size, type);
 		}
+
+		if (instance >= mxt_obj_instances(object)) {
+			dev_err(dev, "Object instances exceeded!\n");
+			ret = -EINVAL;
+			goto release_mem;
+		}
+
+		reg = object->start_address + mxt_obj_size(object) * instance;
 
 		for (i = 0; i < size; i++) {
 			ret = sscanf(cfg->data + data_pos, "%hhx%n",
