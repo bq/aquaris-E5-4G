@@ -624,9 +624,7 @@ static int __mxt_write_reg(struct i2c_client *client, u16 reg, u16 len,
 
 retry_write:
 	ret = i2c_master_send(client, buf, count);
-	if (ret == count) {
-		ret = 0;
-	} else {
+	if (ret != count) {
 		if (!retry) {
 			dev_dbg(&client->dev, "%s: i2c retry\n", __func__);
 			msleep(MXT_WAKEUP_TIME);
@@ -637,6 +635,8 @@ retry_write:
 				__func__, ret);
 			ret = -EIO;
 		}
+	} else {
+		ret = 0;
 	}
 
 	kfree(buf);
