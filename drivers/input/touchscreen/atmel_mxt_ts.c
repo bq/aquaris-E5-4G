@@ -167,7 +167,7 @@ struct t9_range {
 #define MXT_RESET_TIME		200	/* msec */
 #define MXT_RESET_TIMEOUT	3000	/* msec */
 #define MXT_CRC_TIMEOUT		1000	/* msec */
-#define MXT_FW_RESET_TIME	1000	/* msec */
+#define MXT_FW_RESET_TIME	3000	/* msec */
 #define MXT_FW_CHG_TIMEOUT	300	/* msec */
 #define MXT_WAKEUP_TIME		25	/* msec */
 #define MXT_REGULATOR_DELAY	150	/* msec */
@@ -2496,16 +2496,18 @@ static int mxt_load_fw(struct device *dev)
 				 frame, pos, fw->size);
 	}
 
-	/* Wait for flash */
+	/* Wait for flash. */
 	ret = mxt_wait_for_completion(data, &data->bl_completion,
-				      MXT_FW_RESET_TIME);
+				MXT_FW_RESET_TIME);
 	if (ret)
 		goto disable_irq;
 
 	dev_info(dev, "Sent %d frames, %zd bytes\n", frame, pos);
 
-	/* Wait for device to reset */
-	mxt_wait_for_completion(data, &data->bl_completion, MXT_RESET_TIMEOUT);
+	/* Wait for device to reset. Some bootloader versions do not assert
+	 * the CHG line after bootloading has finished, so ignore error */
+	mxt_wait_for_completion(data, &data->bl_completion,
+				MXT_FW_RESET_TIME);
 
 	data->in_bootloader = false;
 
