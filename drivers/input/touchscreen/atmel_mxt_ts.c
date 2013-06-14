@@ -66,6 +66,7 @@
 #define MXT_SPT_CTECONFIG_T46		46
 #define MXT_PROCI_ACTIVE_STYLUS_T63	63
 #define MXT_TOUCH_MULTITOUCHSCREEN_T100 100
+#define MXT_GEN2_ACTIVE_STYLUS		35
 
 /* MXT_GEN_MESSAGE_T5 object */
 #define MXT_RPTID_NOMSG		0xff
@@ -129,8 +130,8 @@ struct t9_range {
 /* Define for MXT_PROCI_TOUCHSUPPRESSION_T42 */
 #define MXT_T42_MSG_TCHSUP	(1 << 0)
 
-/* T47 Stylus */
-#define MXT_TOUCH_MAJOR_T47_STYLUS	1
+/* Hardcoded touch major for stylus */
+#define MXT_TOUCH_MAJOR_STYLUS	1
 
 /* T63 Stylus */
 #define MXT_T63_STYLUS_PRESS	(1 << 0)
@@ -160,7 +161,23 @@ struct t9_range {
 
 #define MXT_T100_DETECT		(1 << 7)
 #define MXT_T100_TYPE_MASK	0x70
-#define MXT_T100_TYPE_STYLUS	0x20
+
+enum t100_type {
+	MXT_T100_TYPE_FINGER		= 1,
+	MXT_T100_TYPE_PASSIVE_STYLUS	= 2,
+	MXT_T100_TYPE_ACTIVE_STYLUS	= 3,
+};
+
+/* Gen2 Active Stylus */
+#define MXT_GEN2_STYLUS_STYAUX		42
+#define MXT_GEN2_STYLUS_STYAUX_PRESSURE	(1 << 0)
+#define MXT_GEN2_STYLUS_STYAUX_PEAK	(1 << 4)
+
+#define MXT_GEN2_STYLUS_HOVER		(1 << 0)
+#define MXT_GEN2_STYLUS_TIPSWITCH	(1 << 1)
+#define MXT_GEN2_STYLUS_BUTTON0		(1 << 2)
+#define MXT_GEN2_STYLUS_BUTTON1		(1 << 3)
+#define MXT_GEN2_STYLUS_PRESSURE	1
 
 /* Delay times */
 #define MXT_BACKUP_TIME		50	/* msec */
@@ -255,6 +272,8 @@ struct mxt_data {
 	struct regulator *reg_avdd;
 	char *fw_name;
 	char *cfg_name;
+	u8 stylus_aux_pressure;
+	u8 stylus_aux_peak;
 
 	/* Cached parameters from object table */
 	u16 T5_address;
@@ -276,6 +295,7 @@ struct mxt_data {
 	u8 T63_reportid_max;
 	u8 T100_reportid_min;
 	u8 T100_reportid_max;
+	u16 gen2_stylus_address;
 
 	/* for fw update in bootloader */
 	struct completion bl_completion;
@@ -923,7 +943,7 @@ static void mxt_proc_t9_message(struct mxt_data *data, u8 *message)
 		/* A reported size of zero indicates that the reported touch
 		 * is a stylus from a linked Stylus T47 object. */
 		if (area == 0) {
-			area = MXT_TOUCH_MAJOR_T47_STYLUS;
+			area = MXT_TOUCH_MAJOR_STYLUS;
 			tool = MT_TOOL_PEN;
 		} else {
 			tool = MT_TOOL_FINGER;
@@ -950,9 +970,15 @@ static void mxt_proc_t100_message(struct mxt_data *data, u8 *message)
 	struct input_dev *input_dev = data->input_dev;
 	int id;
 	u8 status;
+	u8 type;
 	int x;
 	int y;
 	int tool;
+	u8 major = 0;
+	u8 pressure = 0;
+	u8 orientation = 0;
+	bool touch_active = false;
+	bool eraser, barrel;
 
 	/* do not report events if input device not yet registered */
 	if (!data->enable_reporting)
@@ -968,49 +994,88 @@ static void mxt_proc_t100_message(struct mxt_data *data, u8 *message)
 	x = (message[3] << 8) | message[2];
 	y = (message[5] << 8) | message[4];
 
-	dev_dbg(dev,
-		"[%u] status:%02X x:%u y:%u area:%02X amp:%02X vec:%02X\n",
-		id,
-		status,
-		x, y,
-		(data->t100_aux_area) ? message[data->t100_aux_area] : 0,
-		(data->t100_aux_ampl) ? message[data->t100_aux_ampl] : 0,
-		(data->t100_aux_vect) ? message[data->t100_aux_vect] : 0);
+	if (status & MXT_T100_DETECT) {
+		touch_active = true;
+		type = (status & MXT_T100_TYPE_MASK) >> 4;
+
+		switch (type)
+		{
+		case MXT_T100_TYPE_FINGER:
+			tool = MT_TOOL_FINGER;
+
+			if (data->t100_aux_area)
+				major = message[data->t100_aux_area];
+			if (data->t100_aux_ampl)
+				pressure = message[data->t100_aux_ampl];
+			if (data->t100_aux_vect)
+				orientation = message[data->t100_aux_vect];
+
+			break;
+
+		case MXT_T100_TYPE_PASSIVE_STYLUS:
+			tool = MT_TOOL_PEN;
+
+			/* Passive stylus is reported with size zero so
+			 * hardcode */
+			major = MXT_TOUCH_MAJOR_STYLUS;
+
+			if (data->t100_aux_ampl)
+				pressure = message[data->t100_aux_ampl];
+
+			break;
+
+		case MXT_T100_TYPE_ACTIVE_STYLUS:
+			tool = MT_TOOL_PEN;
+			major = MXT_TOUCH_MAJOR_STYLUS;
+
+			if (message[6] & MXT_GEN2_STYLUS_HOVER) {
+				/* hover */
+				eraser = message[6] & MXT_GEN2_STYLUS_BUTTON0;
+				barrel = message[6] & MXT_GEN2_STYLUS_BUTTON1;
+
+				if (message[6] & MXT_GEN2_STYLUS_TIPSWITCH) {
+					if (data->stylus_aux_pressure)
+						pressure = message[data->stylus_aux_pressure];
+					else
+						pressure = MXT_GEN2_STYLUS_PRESSURE;
+				} else {
+					/* hover */
+					pressure = 0;
+				}
+			} else {
+				/* Stylus detected but no position information */
+				touch_active = false;
+			}
+
+			break;
+		default:
+			dev_dbg(dev, "Unexpected T100 type\n");
+			return;
+		}
+	}
 
 	input_mt_slot(input_dev, id);
 
-	if (status & MXT_T100_DETECT) {
-		/* A reported size of zero indicates that the reported touch
-		 * is a stylus from a linked Stylus T47 object. */
-		if ((status & MXT_T100_TYPE_MASK) == MXT_T100_TYPE_STYLUS)
-			tool = MT_TOOL_PEN;
-		else
-			tool = MT_TOOL_FINGER;
+	if (touch_active) {
+		dev_dbg(dev,
+			"[%u] status:%02X x:%u y:%u a:%02X p:%02X v:%02X\n",
+			id, status, x, y, major, pressure, orientation);
 
-		/* Touch active */
 		input_mt_report_slot_state(input_dev, tool, 1);
 		input_report_abs(input_dev, ABS_MT_POSITION_X, x);
 		input_report_abs(input_dev, ABS_MT_POSITION_Y, y);
+		input_report_abs(input_dev, ABS_MT_TOUCH_MAJOR, major);
+		input_report_abs(input_dev, ABS_MT_PRESSURE, pressure);
+		input_report_abs(input_dev, ABS_MT_ORIENTATION, orientation);
 
-		if (data->t100_aux_ampl)
-			input_report_abs(input_dev, ABS_MT_PRESSURE,
-					 message[data->t100_aux_ampl]);
-
-		if (data->t100_aux_area) {
-			if (tool == MT_TOOL_PEN)
-				input_report_abs(input_dev, ABS_MT_TOUCH_MAJOR,
-						 MXT_TOUCH_MAJOR_T47_STYLUS);
-			else
-				input_report_abs(input_dev, ABS_MT_TOUCH_MAJOR,
-						 message[data->t100_aux_area]);
-		}
-
-		if (data->t100_aux_vect)
-			input_report_abs(input_dev, ABS_MT_ORIENTATION,
-					 message[data->t100_aux_vect]);
+		input_report_key(input_dev, BTN_STYLUS, (message[6] & 0x4));
+		input_report_key(input_dev, BTN_STYLUS2, (message[6] & 0x8));
 	} else {
-		/* Touch no longer active, close out slot */
-		input_mt_report_slot_state(input_dev, MT_TOOL_FINGER, 0);
+		dev_dbg(dev,
+			"[%u] status:%02X\n", id, status);
+
+		/* close out slot */
+		input_mt_report_slot_state(input_dev, 0, 0);
 	}
 
 	data->update_input = true;
@@ -1958,6 +2023,9 @@ static int mxt_parse_object_table(struct mxt_data *data)
 			/* first two report IDs reserved */
 			data->num_touchids = object->num_report_ids - 2;
 			break;
+		case MXT_GEN2_ACTIVE_STYLUS:
+			data->gen2_stylus_address = object->start_address;
+			break;
 		}
 
 		end_address = object->start_address
@@ -2181,6 +2249,40 @@ fail:
 	data->use_regulator = false;
 }
 
+static int mxt_read_gen2_stylus_config(struct mxt_data *data)
+{
+	struct i2c_client *client = data->client;
+	int error;
+	struct mxt_object *object;
+	u8 styaux;
+	int aux;
+
+	object = mxt_get_object(data, MXT_GEN2_ACTIVE_STYLUS);
+	if (!object)
+		return 0;
+
+	error = __mxt_read_reg(client,
+			       object->start_address + MXT_GEN2_STYLUS_STYAUX,
+			       1, &styaux);
+	if (error)
+		return error;
+
+	/* map aux bits */
+	aux = 7;
+
+	if (styaux & MXT_GEN2_STYLUS_STYAUX_PRESSURE)
+		data->stylus_aux_pressure = aux++;
+
+	if (styaux & MXT_GEN2_STYLUS_STYAUX_PEAK)
+		data->stylus_aux_peak = aux++;
+
+	dev_dbg(&client->dev,
+		"Enabling gen2 stylus, aux mappings pressure:%u peak:%u\n",
+		data->stylus_aux_pressure, data->stylus_aux_peak);
+
+	return 0;
+}
+
 static int mxt_read_t100_config(struct mxt_data *data)
 {
 	struct i2c_client *client = data->client;
@@ -2253,6 +2355,11 @@ static int mxt_read_t100_config(struct mxt_data *data)
 	if (tchaux & MXT_T100_TCHAUX_AREA)
 		data->t100_aux_area = aux++;
 
+	dev_dbg(&client->dev,
+		"T100 aux mappings vect:%u ampl:%u area:%u\n",
+		data->t100_aux_vect, data->t100_aux_ampl, data->t100_aux_area);
+
+
 	dev_info(&client->dev,
 		 "T100 Touchscreen size X%uY%u\n", data->max_x, data->max_y);
 
@@ -2271,6 +2378,8 @@ static int mxt_initialize_t100_input_device(struct mxt_data *data)
 	error = mxt_read_t100_config(data);
 	if (error)
 		dev_warn(dev, "Failed to initialize T9 resolution\n");
+
+	mxt_read_gen2_stylus_config(data);
 
 	input_dev = input_allocate_device();
 	if (!data || !input_dev) {
@@ -2312,11 +2421,16 @@ static int mxt_initialize_t100_input_device(struct mxt_data *data)
 	input_set_abs_params(input_dev, ABS_MT_POSITION_Y,
 			     0, data->max_y, 0, 0);
 
+	if (data->gen2_stylus_address) {
+		input_set_capability(input_dev, EV_KEY, BTN_STYLUS);
+		input_set_capability(input_dev, EV_KEY, BTN_STYLUS2);
+	}
+
 	if (data->t100_aux_area)
 		input_set_abs_params(input_dev, ABS_MT_TOUCH_MAJOR,
 				     0, MXT_MAX_AREA, 0, 0);
 
-	if (data->t100_aux_ampl)
+	if (data->t100_aux_ampl | data->stylus_aux_pressure)
 		input_set_abs_params(input_dev, ABS_MT_PRESSURE,
 				     0, 255, 0, 0);
 
