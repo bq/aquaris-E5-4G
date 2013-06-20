@@ -283,8 +283,4 @@ static inline void arch_write_unlock(arch_rwlock_t *rw)
 #undef WRITE_LOCK_SUB
 #undef WRITE_LOCK_CMP
 
-#define arch_spin_relax(lock)	cpu_relax()
-#define arch_read_relax(lock)	cpu_relax()
-#define arch_write_relax(lock)	cpu_relax()
-
 #endif /* _ASM_X86_SPINLOCK_H */
