@@ -42,6 +42,8 @@ int arch_spin_trylock_retry(arch_spinlock_t *);
 void arch_spin_relax(arch_spinlock_t *);
 void arch_spin_lock_wait_flags(arch_spinlock_t *, unsigned long flags);
 
+#define arch_spin_relax arch_spin_relax
+
 static inline u32 arch_spin_lockval(int cpu)
 {
 	return ~cpu;
@@ -195,8 +197,5 @@ static inline int arch_write_trylock(arch_rwlock_t *rw)
 		return _raw_write_trylock_retry(rw);
 	return 1;
 }
-
-#define arch_read_relax(lock)	cpu_relax()
-#define arch_write_relax(lock)	cpu_relax()
 
 #endif /* __ASM_SPINLOCK_H */
