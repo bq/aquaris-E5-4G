@@ -2,6 +2,7 @@
  * This is a module which is used for setting the MSS option in TCP packets.
  *
  * Copyright (C) 2000 Marc Boucher <marc@mbsi.ca>
+ * Copyright (C) 2007 Patrick McHardy <kaber@trash.net>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -123,6 +124,12 @@ tcpmss_mangle_packet(struct sk_buff *skb,
 	}
 
 	skb_put(skb, TCPOLEN_MSS);
+
+	/* RFC 879 states that the default MSS is 536 without specific
+	 * knowledge that the destination host is prepared to accept larger.
+	 * Since no MSS was provided, we MUST NOT set a value > 536.
+	 */
+	newmss = min(newmss, (u16)536);
 
 	opt = (u_int8_t *)tcph + sizeof(struct tcphdr);
 	memmove(opt + TCPOLEN_MSS, opt, tcplen - sizeof(struct tcphdr));
