@@ -133,17 +133,17 @@ struct t9_range {
 #define MXT_TOUCH_MAJOR_T47_STYLUS	1
 
 /* T63 Stylus */
-#define MXT_STYLUS_PRESS	(1 << 0)
-#define MXT_STYLUS_RELEASE	(1 << 1)
-#define MXT_STYLUS_MOVE		(1 << 2)
-#define MXT_STYLUS_SUPPRESS	(1 << 3)
+#define MXT_T63_STYLUS_PRESS	(1 << 0)
+#define MXT_T63_STYLUS_RELEASE	(1 << 1)
+#define MXT_T63_STYLUS_MOVE		(1 << 2)
+#define MXT_T63_STYLUS_SUPPRESS	(1 << 3)
 
-#define MXT_STYLUS_DETECT	(1 << 4)
-#define MXT_STYLUS_TIP		(1 << 5)
-#define MXT_STYLUS_ERASER	(1 << 6)
-#define MXT_STYLUS_BARREL	(1 << 7)
+#define MXT_T63_STYLUS_DETECT	(1 << 4)
+#define MXT_T63_STYLUS_TIP		(1 << 5)
+#define MXT_T63_STYLUS_ERASER	(1 << 6)
+#define MXT_T63_STYLUS_BARREL	(1 << 7)
 
-#define MXT_STYLUS_PRESSURE_MASK	0x3F
+#define MXT_T63_STYLUS_PRESSURE_MASK	0x3F
 
 /* T100 Multiple Touch Touchscreen */
 #define MXT_T100_CTRL		0
@@ -968,24 +968,24 @@ static void mxt_proc_t63_messages(struct mxt_data *data, u8 *msg)
 
 	x = msg[3] | (msg[4] << 8);
 	y = msg[5] | (msg[6] << 8);
-	pressure = msg[7] & MXT_STYLUS_PRESSURE_MASK;
+	pressure = msg[7] & MXT_T63_STYLUS_PRESSURE_MASK;
 
 	dev_dbg(dev,
 		"[%d] %c%c%c%c x: %d y: %d pressure: %d stylus:%c%c%c%c\n",
 		id,
-		(msg[1] & MXT_STYLUS_SUPPRESS) ? 'S' : '.',
-		(msg[1] & MXT_STYLUS_MOVE)     ? 'M' : '.',
-		(msg[1] & MXT_STYLUS_RELEASE)  ? 'R' : '.',
-		(msg[1] & MXT_STYLUS_PRESS)    ? 'P' : '.',
+		(msg[1] & MXT_T63_STYLUS_SUPPRESS) ? 'S' : '.',
+		(msg[1] & MXT_T63_STYLUS_MOVE)     ? 'M' : '.',
+		(msg[1] & MXT_T63_STYLUS_RELEASE)  ? 'R' : '.',
+		(msg[1] & MXT_T63_STYLUS_PRESS)    ? 'P' : '.',
 		x, y, pressure,
-		(msg[2] & MXT_STYLUS_BARREL) ? 'B' : '.',
-		(msg[2] & MXT_STYLUS_ERASER) ? 'E' : '.',
-		(msg[2] & MXT_STYLUS_TIP)    ? 'T' : '.',
-		(msg[2] & MXT_STYLUS_DETECT) ? 'D' : '.');
+		(msg[2] & MXT_T63_STYLUS_BARREL) ? 'B' : '.',
+		(msg[2] & MXT_T63_STYLUS_ERASER) ? 'E' : '.',
+		(msg[2] & MXT_T63_STYLUS_TIP)    ? 'T' : '.',
+		(msg[2] & MXT_T63_STYLUS_DETECT) ? 'D' : '.');
 
 	input_mt_slot(input_dev, id);
 
-	if (msg[2] & MXT_STYLUS_DETECT) {
+	if (msg[2] & MXT_T63_STYLUS_DETECT) {
 		input_mt_report_slot_state(input_dev, MT_TOOL_PEN, 1);
 		input_report_abs(input_dev, ABS_MT_POSITION_X, x);
 		input_report_abs(input_dev, ABS_MT_POSITION_Y, y);
@@ -994,8 +994,10 @@ static void mxt_proc_t63_messages(struct mxt_data *data, u8 *msg)
 		input_mt_report_slot_state(input_dev, MT_TOOL_PEN, 0);
 	}
 
-	input_report_key(input_dev, BTN_STYLUS, (msg[2] & MXT_STYLUS_ERASER));
-	input_report_key(input_dev, BTN_STYLUS2, (msg[2] & MXT_STYLUS_BARREL));
+	input_report_key(input_dev, BTN_STYLUS,
+			 (msg[2] & MXT_T63_STYLUS_ERASER));
+	input_report_key(input_dev, BTN_STYLUS2,
+			 (msg[2] & MXT_T63_STYLUS_BARREL));
 
 	mxt_input_sync(input_dev);
 }
