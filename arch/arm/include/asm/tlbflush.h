@@ -202,6 +202,7 @@
 #ifndef __ASSEMBLY__
 
 #include <linux/sched.h>
+#include <asm/smp_plat.h>
 
 struct cpu_tlb_fns {
 	void (*flush_user_range)(unsigned long, unsigned long, struct vm_area_struct *);
@@ -401,6 +402,17 @@ static inline void __flush_tlb_mm(struct mm_struct *mm)
 {
 	const unsigned int __tlb_flag = __cpu_tlb_flags;
 
+	if (!cache_ops_need_broadcast()) {
+		int cpu = get_cpu();
+		if (cpumask_equal(mm_cpumask(mm), cpumask_of(cpu))) {
+			cpumask_clear_cpu(cpu, mm_cpumask(mm));
+			local_flush_tlb_mm(mm);
+			put_cpu();
+			return;
+		}
+		put_cpu();
+	}
+
 	if (tlb_flag(TLB_WB))
 		dsb(ishst);
 
@@ -458,6 +470,17 @@ static inline void
 __flush_tlb_page(struct vm_area_struct *vma, unsigned long uaddr)
 {
 	const unsigned int __tlb_flag = __cpu_tlb_flags;
+
+	if (!cache_ops_need_broadcast()) {
+		int cpu = get_cpu();
+		if (cpumask_equal(mm_cpumask(vma->vm_mm), cpumask_of(cpu))) {
+			cpumask_clear_cpu(cpu, mm_cpumask(vma->vm_mm));
+			local_flush_tlb_page(vma, uaddr);
+			put_cpu();
+			return;
+		}
+		put_cpu();
+	}
 
 	uaddr = (uaddr & PAGE_MASK) | ASID(vma->vm_mm);
 
