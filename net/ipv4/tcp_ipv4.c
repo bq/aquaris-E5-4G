@@ -434,7 +434,7 @@ void tcp_v4_err(struct sk_buff *icmp_skb, u32 info)
 
 		icsk->icsk_backoff--;
 		inet_csk(sk)->icsk_rto = (tp->srtt ? __tcp_set_rto(tp) :
-			TCP_TIMEOUT_INIT) << icsk->icsk_backoff;
+			sysctl_tcp_timeout_init) << icsk->icsk_backoff;
 		tcp_bound_rto(sk);
 
 		skb = tcp_write_queue_head(sk);
@@ -445,7 +445,7 @@ void tcp_v4_err(struct sk_buff *icmp_skb, u32 info)
 
 		if (remaining) {
 			inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
-						  remaining, TCP_RTO_MAX);
+				remaining, sysctl_tcp_rto_max);
 		} else {
 			/* RTO revert clocked out retransmission.
 			 * Will retransmit now */
@@ -1423,7 +1423,7 @@ static int tcp_v4_conn_req_fastopen(struct sock *sk,
 	 * because it's been added to the accept queue directly.
 	 */
 	inet_csk_reset_xmit_timer(child, ICSK_TIME_RETRANS,
-	    TCP_TIMEOUT_INIT, TCP_RTO_MAX);
+	    sysctl_tcp_timeout_init, sysctl_tcp_rto_max);
 
 	/* Add the child socket directly into the accept queue */
 	inet_csk_reqsk_queue_add(sk, req, child);
@@ -1615,7 +1615,7 @@ int tcp_v4_conn_request(struct sock *sk, struct sk_buff *skb)
 		tcp_rsk(req)->snt_synack = tcp_time_stamp;
 		tcp_rsk(req)->listener = NULL;
 		/* Add the request_sock to the SYN table */
-		inet_csk_reqsk_queue_hash_add(sk, req, TCP_TIMEOUT_INIT);
+		inet_csk_reqsk_queue_hash_add(sk, req, sysctl_tcp_timeout_init);
 		if (fastopen_cookie_present(&foc) && foc.len != 0)
 			NET_INC_STATS_BH(sock_net(sk),
 			    LINUX_MIB_TCPFASTOPENPASSIVEFAIL);
@@ -1948,7 +1948,7 @@ bool tcp_prequeue(struct sock *sk, struct sk_buff *skb)
 		if (!inet_csk_ack_scheduled(sk))
 			inet_csk_reset_xmit_timer(sk, ICSK_TIME_DACK,
 						  (3 * tcp_rto_min(sk)) / 4,
-						  TCP_RTO_MAX);
+						  sysctl_tcp_rto_max);
 	}
 	return true;
 }
@@ -2161,7 +2161,6 @@ static int tcp_v4_init_sock(struct sock *sk)
 	struct inet_connection_sock *icsk = inet_csk(sk);
 
 	tcp_init_sock(sk);
-
 	icsk->icsk_af_ops = &ipv4_specific;
 
 #ifdef CONFIG_TCP_MD5SIG

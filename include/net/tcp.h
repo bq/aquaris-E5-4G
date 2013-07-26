@@ -141,6 +141,9 @@ extern void tcp_time_wait(struct sock *sk, int state, int timeo);
 						 * most likely due to retrans in 3WHS.
 						 */
 
+/* Number of full MSS to receive before Acking RFC2581 */
+#define TCP_DELACK_SEG          1
+
 #define TCP_RESOURCE_PROBE_INTERVAL ((unsigned)(HZ/2U)) /* Maximal interval between probes
 					                 * for local resources.
 					                 */
@@ -288,6 +291,17 @@ extern int sysctl_tcp_early_retrans;
 extern int sysctl_tcp_limit_output_bytes;
 extern int sysctl_tcp_challenge_ack_limit;
 
+/* sysctl variables for controlling various tcp parameters */
+extern unsigned sysctl_tcp_delack_min;
+extern unsigned sysctl_tcp_delack_max;
+extern int sysctl_tcp_delack_seg;
+extern unsigned sysctl_tcp_ato_min;
+extern unsigned sysctl_tcp_rto_min;
+extern unsigned sysctl_tcp_rto_max;
+extern unsigned sysctl_tcp_timeout_init;
+extern unsigned sysctl_tcp_synq_interval;
+extern int sysctl_tcp_use_userconfig;
+
 extern atomic_long_t tcp_memory_allocated;
 extern struct percpu_counter tcp_sockets_allocated;
 extern int tcp_memory_pressure;
@@ -386,6 +400,10 @@ extern ssize_t tcp_splice_read(struct socket *sk, loff_t *ppos,
 			       struct pipe_inode_info *pipe, size_t len,
 			       unsigned int flags);
 
+/* sysctl master controller */
+extern int tcp_use_userconfig_sysctl_handler(struct ctl_table *, int,
+				void __user *, size_t *, loff_t *);
+
 static inline void tcp_dec_quickack_mode(struct sock *sk,
 					 const unsigned int pkts)
 {
@@ -395,7 +413,7 @@ static inline void tcp_dec_quickack_mode(struct sock *sk,
 		if (pkts >= icsk->icsk_ack.quick) {
 			icsk->icsk_ack.quick = 0;
 			/* Leaving quickack mode we deflate ATO. */
-			icsk->icsk_ack.ato   = TCP_ATO_MIN;
+			icsk->icsk_ack.ato   = sysctl_tcp_ato_min;
 		} else
 			icsk->icsk_ack.quick -= pkts;
 	}
@@ -599,8 +617,8 @@ extern void tcp_init_buffer_space(struct sock *sk);
 
 static inline void tcp_bound_rto(const struct sock *sk)
 {
-	if (inet_csk(sk)->icsk_rto > TCP_RTO_MAX)
-		inet_csk(sk)->icsk_rto = TCP_RTO_MAX;
+	if (inet_csk(sk)->icsk_rto > sysctl_tcp_rto_max)
+		inet_csk(sk)->icsk_rto = sysctl_tcp_rto_max;
 }
 
 static inline u32 __tcp_set_rto(const struct tcp_sock *tp)
@@ -637,7 +655,7 @@ static inline void tcp_fast_path_check(struct sock *sk)
 static inline u32 tcp_rto_min(struct sock *sk)
 {
 	const struct dst_entry *dst = __sk_dst_get(sk);
-	u32 rto_min = TCP_RTO_MIN;
+	u32 rto_min = sysctl_tcp_rto_min;
 
 	if (dst && dst_metric_locked(dst, RTAX_RTO_MIN))
 		rto_min = dst_metric_rtt(dst, RTAX_RTO_MIN);
@@ -977,7 +995,7 @@ static inline void tcp_check_probe_timer(struct sock *sk)
 
 	if (!tp->packets_out && !icsk->icsk_pending)
 		inet_csk_reset_xmit_timer(sk, ICSK_TIME_PROBE0,
-					  icsk->icsk_rto, TCP_RTO_MAX);
+					  icsk->icsk_rto, sysctl_tcp_rto_max);
 }
 
 static inline void tcp_init_wl(struct tcp_sock *tp, u32 seq)
@@ -1184,8 +1202,8 @@ static inline void tcp_mib_init(struct net *net)
 {
 	/* See RFC 2012 */
 	TCP_ADD_STATS_USER(net, TCP_MIB_RTOALGORITHM, 1);
-	TCP_ADD_STATS_USER(net, TCP_MIB_RTOMIN, TCP_RTO_MIN*1000/HZ);
-	TCP_ADD_STATS_USER(net, TCP_MIB_RTOMAX, TCP_RTO_MAX*1000/HZ);
+	TCP_ADD_STATS_USER(net, TCP_MIB_RTOMIN, sysctl_tcp_rto_min*1000/HZ);
+	TCP_ADD_STATS_USER(net, TCP_MIB_RTOMAX, sysctl_tcp_rto_max*1000/HZ);
 	TCP_ADD_STATS_USER(net, TCP_MIB_MAXCONN, -1);
 }
 

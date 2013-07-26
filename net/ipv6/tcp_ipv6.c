@@ -1068,7 +1068,7 @@ have_isn:
 
 	tcp_rsk(req)->snt_synack = tcp_time_stamp;
 	tcp_rsk(req)->listener = NULL;
-	inet6_csk_reqsk_queue_hash_add(sk, req, TCP_TIMEOUT_INIT);
+	inet6_csk_reqsk_queue_hash_add(sk, req, sysctl_tcp_timeout_init);
 	return 0;
 
 drop_and_release:
@@ -1698,7 +1698,6 @@ static const struct tcp_sock_af_ops tcp_sock_ipv6_mapped_specific = {
 static int tcp_v6_init_sock(struct sock *sk)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
-
 	tcp_init_sock(sk);
 
 	icsk->icsk_af_ops = &ipv6_specific;

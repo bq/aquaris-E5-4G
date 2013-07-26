@@ -166,8 +166,9 @@ out:
  */
 static void dccp_response_timer(struct sock *sk)
 {
-	inet_csk_reqsk_queue_prune(sk, TCP_SYNQ_INTERVAL, DCCP_TIMEOUT_INIT,
-				   DCCP_RTO_MAX);
+	inet_csk_reqsk_queue_prune(sk, sysctl_tcp_synq_interval,
+						DCCP_TIMEOUT_INIT,
+						DCCP_RTO_MAX);
 }
 
 static void dccp_keepalive_timer(unsigned long data)
@@ -178,7 +179,7 @@ static void dccp_keepalive_timer(unsigned long data)
 	bh_lock_sock(sk);
 	if (sock_owned_by_user(sk)) {
 		/* Try again later. */
-		inet_csk_reset_keepalive_timer(sk, HZ / 20);
+		inet_csk_reset_keepalive_timer(sk, sysctl_tcp_delack_min);
 		goto out;
 	}
 
@@ -203,7 +204,7 @@ static void dccp_delack_timer(unsigned long data)
 		icsk->icsk_ack.blocked = 1;
 		NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_DELAYEDACKLOCKED);
 		sk_reset_timer(sk, &icsk->icsk_delack_timer,
-			       jiffies + TCP_DELACK_MIN);
+			       jiffies + sysctl_tcp_delack_min);
 		goto out;
 	}
 
@@ -228,7 +229,7 @@ static void dccp_delack_timer(unsigned long data)
 			 * deflate ATO.
 			 */
 			icsk->icsk_ack.pingpong = 0;
-			icsk->icsk_ack.ato = TCP_ATO_MIN;
+			icsk->icsk_ack.ato = sysctl_tcp_ato_min;
 		}
 		dccp_send_ack(sk);
 		NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_DELAYEDACKS);

@@ -771,6 +771,71 @@ static struct ctl_table ipv4_table[] = {
 		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= &one
 	},
+
+	{
+		.procname	= "tcp_ato_min",
+		.data		= &sysctl_tcp_ato_min,
+		.maxlen		= sizeof(sysctl_tcp_ato_min),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "tcp_rto_min",
+		.data		= &sysctl_tcp_rto_min,
+		.maxlen		= sizeof(sysctl_tcp_rto_min),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "tcp_rto_max",
+		.data		= &sysctl_tcp_rto_max,
+		.maxlen		= sizeof(sysctl_tcp_rto_max),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "tcp_delack_min",
+		.data		= &sysctl_tcp_delack_min,
+		.maxlen		= sizeof(sysctl_tcp_delack_min),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "tcp_delack_max",
+		.data		= &sysctl_tcp_delack_max,
+		.maxlen		= sizeof(sysctl_tcp_delack_min),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "tcp_delack_seg",
+		.data		= &sysctl_tcp_delack_seg,
+		.maxlen		= sizeof(sysctl_tcp_delack_seg),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "tcp_timeout_init",
+		.data		= &sysctl_tcp_timeout_init,
+		.maxlen		= sizeof(sysctl_tcp_timeout_init),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "tcp_synq_interval",
+		.data		= &sysctl_tcp_synq_interval,
+		.maxlen		= sizeof(sysctl_tcp_synq_interval),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname       = "tcp_use_userconfig",
+		.data           = &sysctl_tcp_use_userconfig,
+		.maxlen         = sizeof(sysctl_tcp_use_userconfig),
+		.mode           = 0644,
+		.proc_handler   = tcp_use_userconfig_sysctl_handler,
+	},
+
 	{ }
 };
 
