@@ -548,8 +548,7 @@ static void fuse_aio_complete(struct fuse_io_priv *io, int err, ssize_t pos)
 			res = io->bytes < 0 ? io->size : io->bytes;
 
 			if (!is_sync_kiocb(io->iocb)) {
-				struct path *path = &io->iocb->ki_filp->f_path;
-				struct inode *inode = path->dentry->d_inode;
+				struct inode *inode = file_inode(io->iocb->ki_filp);
 				struct fuse_conn *fc = get_fuse_conn(inode);
 				struct fuse_inode *fi = get_fuse_inode(inode);
 
@@ -630,7 +629,8 @@ static void fuse_read_update_size(struct inode *inode, loff_t size,
 	struct fuse_inode *fi = get_fuse_inode(inode);
 
 	spin_lock(&fc->lock);
-	if (attr_ver == fi->attr_version && size < inode->i_size) {
+	if (attr_ver == fi->attr_version && size < inode->i_size &&
+	    !test_bit(FUSE_I_SIZE_UNSTABLE, &fi->state)) {
 		fi->attr_version = ++fc->attr_version;
 		i_size_write(inode, size);
 	}
@@ -1033,11 +1033,15 @@ static ssize_t fuse_perform_write(struct file *file,
 {
 	struct inode *inode = mapping->host;
 	struct fuse_conn *fc = get_fuse_conn(inode);
+	struct fuse_inode *fi = get_fuse_inode(inode);
 	int err = 0;
 	ssize_t res = 0;
 
 	if (is_bad_inode(inode))
 		return -EIO;
+
+	if (inode->i_size < pos + iov_iter_count(ii))
+		set_bit(FUSE_I_SIZE_UNSTABLE, &fi->state);
 
 	do {
 		struct fuse_req *req;
@@ -1074,6 +1078,7 @@ static ssize_t fuse_perform_write(struct file *file,
 	if (res > 0)
 		fuse_write_update_size(inode, pos);
 
+	clear_bit(FUSE_I_SIZE_UNSTABLE, &fi->state);
 	fuse_invalidate_attr(inode);
 
 	return res > 0 ? res : err;
@@ -1530,13 +1535,14 @@ static int fuse_writepage_locked(struct page *page)
 
 	inc_bdi_stat(mapping->backing_dev_info, BDI_WRITEBACK);
 	inc_zone_page_state(tmp_page, NR_WRITEBACK_TEMP);
-	end_page_writeback(page);
 
 	spin_lock(&fc->lock);
 	list_add(&req->writepages_entry, &fi->writepages);
 	list_add_tail(&req->list, &fi->queued_writes);
 	fuse_flush_writepages(inode);
 	spin_unlock(&fc->lock);
+
+	end_page_writeback(page);
 
 	return 0;
 
@@ -2470,13 +2476,16 @@ static long fuse_file_fallocate(struct file *file, int mode, loff_t offset,
 		.mode = mode
 	};
 	int err;
+	bool lock_inode = !(mode & FALLOC_FL_KEEP_SIZE) ||
+			   (mode & FALLOC_FL_PUNCH_HOLE);
 
 	if (fc->no_fallocate)
 		return -EOPNOTSUPP;
 
-	if (mode & FALLOC_FL_PUNCH_HOLE) {
+	if (lock_inode) {
 		mutex_lock(&inode->i_mutex);
-		fuse_set_nowrite(inode);
+		if (mode & FALLOC_FL_PUNCH_HOLE)
+			fuse_set_nowrite(inode);
 	}
 
 	req = fuse_get_req_nopages(fc);
@@ -2511,8 +2520,9 @@ static long fuse_file_fallocate(struct file *file, int mode, loff_t offset,
 	fuse_invalidate_attr(inode);
 
 out:
-	if (mode & FALLOC_FL_PUNCH_HOLE) {
-		fuse_release_nowrite(inode);
+	if (lock_inode) {
+		if (mode & FALLOC_FL_PUNCH_HOLE)
+			fuse_release_nowrite(inode);
 		mutex_unlock(&inode->i_mutex);
 	}
 
