@@ -3902,7 +3902,7 @@ PCI_signature(char *name, struct de4x5_private *lp)
     int i, status = 0, siglen = ARRAY_SIZE(de4x5_signatures);
 
     if (lp->chipset == DC21040) {
-	strcpy(name, "DE434/5");
+	strcpy(name, "DE434_5");
 	return status;
     } else {                           /* Search for a DEC name in the SROM */
 	int tmp = *((char *)&lp->srom + 19) * 3;
