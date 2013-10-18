@@ -1,0 +1,20 @@
+Firmware Update Function
+========================
+
+The driver uses the kernel's request_firmware() feature to obtain the firmware
+image for the touch sensor.  The firmware image is expected to live in
+the file firmware/synaptics/<firmware_name>.img.ihex.
+
+Use the command below to convert the .img firmware image provided by Synaptics
+to the .ihex format.
+
+   objcopy -I binary -O ihex <firmware_name>.img firmware/<firmware_name>.img.ihex
+
+To inlcude the firmware image in the kernel build so that it can be used for
+doing firmware update during device initialization, make sure the line below is
+included in the file firmware/Makefile.
+
+   fw-shipped-$(CONFIG_TOUCHSCREEN_SYNAPTICS_DSX_FW_UPDATE) += synaptics/<firmware_name>.img
+
+The function synaptics_fw_updater() defined in synaptics_dsx_fw_update.c is
+called to initiate the firmware update process.

@@ -1,0 +1,10 @@
+//
+//  Synaptics DSX I2C Driver
+///////////////////////////////////////////////////////////
+
+v2.1 Oct 08, 2013 scott.lin@tw.synaptics.com
+   - Added bus abstraction layer
+   - Added support for SPI
+   - Updated the registration interface for expansion modules
+   - Updated proximity module to utilize generic F$12 registers
+   - Various other fixes and updates
