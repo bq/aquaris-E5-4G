@@ -199,6 +199,14 @@ struct mxt_object {
 	u8 num_report_ids;
 } __packed;
 
+struct mxt_finger {
+	int status;
+	int x;
+	int y;
+	int area;
+	int pressure;
+};
+
 /* Each client has this additional data */
 struct mxt_data {
 	struct i2c_client *client;
@@ -207,6 +215,7 @@ struct mxt_data {
 	struct mxt_platform_data *pdata;
 	struct mxt_object *object_table;
 	struct mxt_info *info;
+	struct mxt_finger *finger;
 	void *raw_info_block;
 	unsigned int irq;
 	unsigned int max_x;
@@ -845,18 +854,57 @@ static void mxt_input_sync(struct input_dev *input_dev)
 	input_sync(input_dev);
 }
 
+static void mxt_input_report(struct mxt_data *data, int single_id)
+{
+	struct mxt_finger *finger = data->finger;
+	struct input_dev *input_dev = data->input_dev;
+	int status = finger[single_id].status;
+	int finger_num = 0;
+	int id;
+
+	for (id = 0; id < data->num_touchids; id++) {
+		if (!finger[id].status)
+			continue;
+
+		input_report_abs(input_dev, ABS_MT_TOUCH_MAJOR,
+				finger[id].status != MXT_T9_RELEASE ?
+				finger[id].area : 0);
+		input_report_abs(input_dev, ABS_MT_POSITION_X,
+				finger[id].x);
+		input_report_abs(input_dev, ABS_MT_POSITION_Y,
+				finger[id].y);
+		input_report_abs(input_dev, ABS_MT_PRESSURE,
+				finger[id].pressure);
+		input_mt_sync(input_dev);
+
+		if (finger[id].status == MXT_T9_RELEASE)
+			finger[id].status = 0;
+		else
+			finger_num++;
+	}
+
+	input_report_key(input_dev, BTN_TOUCH, finger_num > 0);
+
+	if (status != MXT_T9_RELEASE) {
+		input_report_abs(input_dev, ABS_X, finger[single_id].x);
+		input_report_abs(input_dev, ABS_Y, finger[single_id].y);
+		input_report_abs(input_dev,
+				 ABS_PRESSURE, finger[single_id].pressure);
+	}
+
+	input_sync(input_dev);
+}
+
 static void mxt_proc_t9_message(struct mxt_data *data, u8 *message)
 {
 	struct device *dev = &data->client->dev;
-	struct input_dev *input_dev = data->input_dev;
+	struct mxt_finger *finger = data->finger;
 	int id;
 	u8 status;
 	int x;
 	int y;
 	int area;
 	int amplitude;
-	u8 vector;
-	int tool;
 
 	/* do not report events if input device not yet registered */
 	if (!data->enable_reporting)
@@ -864,6 +912,23 @@ static void mxt_proc_t9_message(struct mxt_data *data, u8 *message)
 
 	id = message[0] - data->T9_reportid_min;
 	status = message[1];
+
+	/* Handle releases */
+	if (!(status & MXT_T9_DETECT)) {
+		if (status & (MXT_T9_SUPPRESS | MXT_T9_RELEASE)) {
+			dev_dbg(dev, "[%u] %s\n", id,
+				status & MXT_T9_SUPPRESS ? "suppressed" : "released");
+
+			finger[id].status = MXT_T9_RELEASE;
+			mxt_input_report(data,id);
+		}
+		return;
+	}
+
+	/* Check only AMP detection */
+	if (!(status & (MXT_T9_PRESS | MXT_T9_MOVE)))
+		return;
+
 	x = (message[2] << 4) | ((message[4] >> 4) & 0xf);
 	y = (message[3] << 4) | ((message[4] & 0xf));
 
@@ -876,53 +941,21 @@ static void mxt_proc_t9_message(struct mxt_data *data, u8 *message)
 	area = message[5];
 
 	amplitude = message[6];
-	vector = message[7];
 
 	dev_dbg(dev,
-		"[%u] %c%c%c%c%c%c%c%c x: %5u y: %5u area: %3u amp: %3u vector: %02X\n",
+		"[%u] %c x: %5u y: %5u area: %3u amp: %3u\n",
 		id,
-		(status & MXT_T9_DETECT) ? 'D' : '.',
-		(status & MXT_T9_PRESS) ? 'P' : '.',
-		(status & MXT_T9_RELEASE) ? 'R' : '.',
-		(status & MXT_T9_MOVE) ? 'M' : '.',
-		(status & MXT_T9_VECTOR) ? 'V' : '.',
-		(status & MXT_T9_AMP) ? 'A' : '.',
-		(status & MXT_T9_SUPPRESS) ? 'S' : '.',
-		(status & MXT_T9_UNGRIP) ? 'U' : '.',
-		x, y, area, amplitude, vector);
+		(status & MXT_T9_MOVE) ? 'move' : 'press',
+		x, y, area, amplitude);
 
-	input_mt_slot(input_dev, id);
+	finger[id].status = (status & MXT_T9_MOVE) ?
+				MXT_T9_MOVE : MXT_T9_PRESS;
+	finger[id].x = x;
+	finger[id].y = y;
+	finger[id].area = area;
+	finger[id].pressure = amplitude;
 
-	if (status & MXT_T9_DETECT) {
-		/* Multiple bits may be set if the host is slow to read the
-		 * status messages, indicating all the events that have
-		 * happened */
-		if (status & MXT_T9_RELEASE) {
-			input_mt_report_slot_state(input_dev,
-						   MT_TOOL_FINGER, 0);
-			mxt_input_sync(input_dev);
-		}
-
-		/* A reported size of zero indicates that the reported touch
-		 * is a stylus from a linked Stylus T47 object. */
-		if (area == 0) {
-			area = MXT_TOUCH_MAJOR_T47_STYLUS;
-			tool = MT_TOOL_PEN;
-		} else {
-			tool = MT_TOOL_FINGER;
-		}
-
-		/* Touch active */
-		input_mt_report_slot_state(input_dev, tool, 1);
-		input_report_abs(input_dev, ABS_MT_POSITION_X, x);
-		input_report_abs(input_dev, ABS_MT_POSITION_Y, y);
-		input_report_abs(input_dev, ABS_MT_PRESSURE, amplitude);
-		input_report_abs(input_dev, ABS_MT_TOUCH_MAJOR, area);
-		input_report_abs(input_dev, ABS_MT_ORIENTATION, vector);
-	} else {
-		/* Touch no longer active, close out slot */
-		input_mt_report_slot_state(input_dev, MT_TOOL_FINGER, 0);
-	}
+	mxt_input_report(data, id);
 
 	data->update_input = true;
 }
@@ -1767,6 +1800,8 @@ static void mxt_free_object_table(struct mxt_data *data)
 	data->raw_info_block = NULL;
 	kfree(data->msg_buf);
 	data->msg_buf = NULL;
+	kfree(data->finger);
+	data->finger = NULL;
 
 	mxt_free_input_device(data);
 
@@ -1846,6 +1881,13 @@ static int mxt_parse_object_table(struct mxt_data *data)
 			data->T9_reportid_max = min_id +
 						object->num_report_ids - 1;
 			data->num_touchids = object->num_report_ids;
+			data->finger = kcalloc(data->num_touchids,
+					sizeof(struct mxt_finger), GFP_KERNEL);
+			if (!data->finger) {
+				dev_err(&data->client->dev,
+					"Failed to allocate finger array\n");
+				return -ENOMEM;
+			}
 			break;
 		case MXT_TOUCH_KEYARRAY_T15:
 			data->T15_reportid_min = min_id;
@@ -2805,19 +2847,6 @@ static const struct attribute_group mxt_attr_group = {
 	.attrs = mxt_attrs,
 };
 
-static void mxt_reset_slots(struct mxt_data *data)
-{
-	struct input_dev *input_dev = data->input_dev;
-	int id;
-
-	for (id = 0; id < data->num_touchids; id++) {
-		input_mt_slot(input_dev, id);
-		input_mt_report_slot_state(input_dev, MT_TOOL_FINGER, 0);
-	}
-
-	mxt_input_sync(input_dev);
-}
-
 static void mxt_start(struct mxt_data *data)
 {
 	if (!data->suspended || data->in_bootloader)
@@ -2854,7 +2883,6 @@ static void mxt_stop(struct mxt_data *data)
 	else
 		mxt_set_t7_power_cfg(data, MXT_POWER_CFG_DEEPSLEEP);
 
-	mxt_reset_slots(data);
 	data->suspended = true;
 }
 
