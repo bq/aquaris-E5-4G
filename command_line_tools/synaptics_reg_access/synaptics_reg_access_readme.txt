@@ -1,20 +1,27 @@
-synaptics_reg_access - read/write RMI registers
+Use ADB (Android Debug Bridge) to do register access
+- Power on device.
+- Connect device to host via USB.
+- Open command prompt on host and go to directory where adb and synaptics_reg_access
+  reside.
+- Run "adb devices" to ensure connection with device.
+- Run "adb root" to have root privileges.
+- Run "adb push synaptics_reg_access /data" to copy synaptics_reg_access to /data directory on
+  device.
+- Run "adb shell chmod 777 /data/synaptics_reg_access" to make synaptics_reg_access executable.
+- Follow instructions below to run synaptics_reg_access.
 
-usage: ./synaptics_reg_access -a {address in hex} -l {length to read} -d 
-				{data to write} [-r] [-w] [-p {sysfs_entry}]
+Parameters
+[-a {address in hex}] - Start address (16-bit) for reading/writing
+[-l {length to read}] - Length in bytes to read from start address
+[-d {data to write}] - Data (MSB = first byte to write) to write to start address
+[-r] - Read from start address for number of bytes set with -l parameter
+[-w] - Write data set with -d parameter to start address
 
 Usage examples
-- Read 6 bytes from RMI address 0xe9
-	./synaptics_reg_access -a 0xe9 -l 6 -r
-	
-- Write 1 bytes to RMI address 0xff
-	./synaptics_reg_access -a 0xff -d 0x01 -w
-	
-- Change sysfs entry to /sys/class/input/input5
-  (default path is /sys/class/input/input0)
-	./synaptics_reg_access -a 0xe9 -l 6 -r -p /sys/class/input/input5
-
-Pleae make sure rmi dev is built in in kernel.
+- Read five bytes of data starting from address 0x048a
+   adb shell /data/synaptics_reg_access -a 0x048a -l 5 -r
+- Write 0x11 0x22 0x33 to address 0x048a starting with 0x11
+   adb shell /data/synaptics_reg_access -a 0x048a -d 0x112233 -w
 
 /* ----------------------------------------------------------------------------
  * Copyright (C) 2012 Synaptics Incorporated
@@ -32,4 +39,3 @@ Pleae make sure rmi dev is built in in kernel.
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
-
