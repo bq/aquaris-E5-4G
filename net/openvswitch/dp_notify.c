@@ -40,7 +40,8 @@ static void dp_detach_port_notify(struct vport *vport)
 		return;
 	}
 
-	genlmsg_multicast_netns(ovs_dp_get_net(dp), notify, 0,
+	genlmsg_multicast_netns(&dp_vport_genl_family,
+				ovs_dp_get_net(dp), notify, 0,
 				ovs_dp_vport_multicast_group.id,
 				GFP_KERNEL);
 }
