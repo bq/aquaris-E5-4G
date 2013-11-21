@@ -1797,6 +1797,7 @@ static void ieee80211_set_disassoc(struct ieee80211_sub_if_data *sdata,
 	mutex_unlock(&local->mtx);
 
 	sdata->encrypt_headroom = IEEE80211_ENCRYPT_HEADROOM;
+	sdata->drop_gratuitous_arp_unsolicited_na = false;
 }
 
 void ieee80211_sta_rx_notify(struct ieee80211_sub_if_data *sdata,
@@ -2608,6 +2609,11 @@ static bool ieee80211_assoc_success(struct ieee80211_sub_if_data *sdata,
 		sta->sta.rx_nss = nss;
 	}
 
+	if (ifmgd->flags & IEEE80211_STA_DROP_PROXY_SERVICE_ARP_NA &&
+	    elems.ext_capa && elems.ext_capa_len >= 2)
+		sdata->drop_gratuitous_arp_unsolicited_na =
+			elems.ext_capa[1] & WLAN_EXT_CAPA1_PROXY_ARP;
+
 	rate_control_rate_init(sta);
 
 	if (ifmgd->flags & IEEE80211_STA_MFP_ENABLED)
@@ -3141,6 +3147,11 @@ static void ieee80211_rx_mgmt_beacon(struct ieee80211_sub_if_data *sdata,
 						       elems.country_elem,
 						       elems.country_elem_len,
 						       elems.pwr_constr_elem);
+
+	if (ifmgd->flags & IEEE80211_STA_DROP_PROXY_SERVICE_ARP_NA &&
+	    elems.ext_capa && elems.ext_capa_len >= 2)
+		sdata->drop_gratuitous_arp_unsolicited_na =
+			elems.ext_capa[1] & WLAN_EXT_CAPA1_PROXY_ARP;
 
 	ieee80211_bss_info_change_notify(sdata, changed);
 }
@@ -4310,6 +4321,11 @@ int ieee80211_mgd_assoc(struct ieee80211_sub_if_data *sdata,
 							sdata->vif.type);
 	sdata->drop_group_protected_unicast =
 		req->flags & ASSOC_REQ_DROP_GROUP_PROTECTED_UNICAST;
+	sdata->drop_gratuitous_arp_unsolicited_na = false;
+	if (req->flags & ASSOC_REQ_DROP_PROXY_SERVICE_ARP_NA)
+		ifmgd->flags |= IEEE80211_STA_DROP_PROXY_SERVICE_ARP_NA;
+	else
+		ifmgd->flags &= ~IEEE80211_STA_DROP_PROXY_SERVICE_ARP_NA;
 
 	/* kick off associate process */
 

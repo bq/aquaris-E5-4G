@@ -1930,6 +1930,12 @@ ieee80211_deliver_skb(struct ieee80211_rx_data *rx)
 	skb = rx->skb;
 	xmit_skb = NULL;
 
+	if (sdata->drop_gratuitous_arp_unsolicited_na &&
+	    cfg80211_is_gratuitous_arp_unsolicited_na(skb)) {
+		dev_kfree_skb(skb);
+		return;
+	}
+
 	if ((sdata->vif.type == NL80211_IFTYPE_AP ||
 	     sdata->vif.type == NL80211_IFTYPE_AP_VLAN) &&
 	    !(sdata->flags & IEEE80211_SDATA_DONT_BRIDGE_PACKETS) &&

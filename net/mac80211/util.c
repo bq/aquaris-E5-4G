@@ -756,6 +756,7 @@ u32 ieee802_11_parse_elems_crc(const u8 *start, size_t len, bool action,
 		 * not listing WLAN_EID_CHANNEL_SWITCH_WRAPPER -- it seems possible
 		 * that if the content gets bigger it might be needed more than once
 		 */
+		case WLAN_EID_EXT_CAPABILITY:
 			if (test_bit(id, seen_elems)) {
 				elems->parse_error = true;
 				left -= elen;
@@ -970,6 +971,9 @@ u32 ieee802_11_parse_elems_crc(const u8 *start, size_t len, bool action,
 			else
 				elem_parse_failed = true;
 			break;
+		case WLAN_EID_EXT_CAPABILITY:
+			elems->ext_capa = pos;
+			elems->ext_capa_len = elen;
 		default:
 			break;
 		}

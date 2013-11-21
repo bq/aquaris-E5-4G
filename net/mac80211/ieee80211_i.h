@@ -344,6 +344,7 @@ enum ieee80211_sta_flags {
 	IEEE80211_STA_DISABLE_80P80MHZ	= BIT(12),
 	IEEE80211_STA_DISABLE_160MHZ	= BIT(13),
 	IEEE80211_STA_DISABLE_WMM	= BIT(14),
+	IEEE80211_STA_DROP_PROXY_SERVICE_ARP_NA = BIT(15),
 };
 
 struct ieee80211_mgd_auth_data {
@@ -728,6 +729,7 @@ struct ieee80211_sub_if_data {
 
 	bool drop_unencrypted;
 	bool drop_group_protected_unicast;
+	bool drop_gratuitous_arp_unsolicited_na;
 
 	char name[IFNAMSIZ];
 
@@ -1317,6 +1319,7 @@ struct ieee802_11_elems {
 	const u8 *opmode_notif;
 	const struct ieee80211_sec_chan_offs_ie *sec_chan_offs;
 	const struct ieee80211_mesh_chansw_params_ie *mesh_chansw_params_ie;
+	const u8 *ext_capa;
 
 	/* length of them, respectively */
 	u8 ssid_len;
@@ -1333,6 +1336,7 @@ struct ieee802_11_elems {
 	u8 prep_len;
 	u8 perr_len;
 	u8 country_elem_len;
+	u8 ext_capa_len;
 
 	/* whether a parse error occurred while retrieving these elements */
 	bool parse_error;

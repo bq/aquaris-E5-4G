@@ -1571,11 +1571,14 @@ struct cfg80211_auth_request {
  * @ASSOC_REQ_DISABLE_VHT:  Disable VHT
  * @ASSOC_REQ_DROP_GROUP_PROTECTED_UNICAST: Drop protocol unicast packets
  *	that were group-protected at the link layer.
+ * @ASSOC_REQ_DROP_PROXY_SERVICE_ARP_NA: While proxy ARP/NA service is enabled,
+ *	drop gratuitous ARP/unsolicited NA frames.
  */
 enum cfg80211_assoc_req_flags {
 	ASSOC_REQ_DISABLE_HT			= BIT(0),
 	ASSOC_REQ_DISABLE_VHT			= BIT(1),
 	ASSOC_REQ_DROP_GROUP_PROTECTED_UNICAST	= BIT(2),
+	ASSOC_REQ_DROP_PROXY_SERVICE_ARP_NA	= BIT(3),
 };
 
 /**
@@ -4684,6 +4687,16 @@ void cfg80211_crit_proto_stopped(struct wireless_dev *wdev, gfp_t gfp);
  * Return: the number of channels supported by the device.
  */
 unsigned int ieee80211_get_num_supported_channels(struct wiphy *wiphy);
+
+/**
+ * cfg80211_is_gratuitous_arp_unsolicited_na - packet is grat. ARP/unsol. NA
+ * @skb: the input packet, must be an ethernet frame already
+ *
+ * Return: %true if the packet is a gratuitous ARP or unsolicited NA packet.
+ * This is used to drop packets that shouldn't occur because the AP implements
+ * a proxy service.
+ */
+bool cfg80211_is_gratuitous_arp_unsolicited_na(struct sk_buff *skb);
 
 /* Logging, debugging and troubleshooting/diagnostic helpers. */
 

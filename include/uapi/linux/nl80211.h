@@ -1582,6 +1582,10 @@ enum nl80211_commands {
  * @NL80211_ATTR_DROP_GROUP_PROTECTED_UNICAST: Drop protocol unicast packets
  *	that were group protected at the wireless level. This flag attribute
  *	is valid in the association command.
+ * @NL80211_ATTR_DROP_PROXY_SERVICE_ARP_NA: If the AP supports proxy ARP/NA
+ *	service, then drop gratuitous ARP/unsolicted NA packets while that
+ *	service is enabled. This flag attribute is valid in the association
+ *	command.
  *
  * @NL80211_ATTR_MAX: highest attribute number currently defined
  * @__NL80211_ATTR_AFTER_LAST: internal use
@@ -1919,6 +1923,7 @@ enum nl80211_attrs {
 	NL80211_ATTR_TDLS_PEER_CAPABILITY,
 
 	NL80211_ATTR_DROP_GROUP_PROTECTED_UNICAST,
+	NL80211_ATTR_DROP_PROXY_SERVICE_ARP_NA,
 
 	/* add attributes here, update the policy in nl80211.c */
 

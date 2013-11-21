@@ -386,6 +386,7 @@ static const struct nla_policy nl80211_policy[NL80211_ATTR_MAX+1] = {
 	[NL80211_ATTR_WIPHY_FREQ_HINT] = { .type = NLA_U32 },
 	[NL80211_ATTR_TDLS_PEER_CAPABILITY] = { .type = NLA_U32 },
 	[NL80211_ATTR_DROP_GROUP_PROTECTED_UNICAST] = { .type = NLA_FLAG },
+	[NL80211_ATTR_DROP_PROXY_SERVICE_ARP_NA] = { .type = NLA_FLAG },
 };
 
 /* policy for the key attributes */
@@ -6521,6 +6522,8 @@ static int nl80211_associate(struct sk_buff *skb, struct genl_info *info)
 
 	if (info->attrs[NL80211_ATTR_DROP_GROUP_PROTECTED_UNICAST])
 		req.flags |= ASSOC_REQ_DROP_GROUP_PROTECTED_UNICAST;
+	if (info->attrs[NL80211_ATTR_DROP_PROXY_SERVICE_ARP_NA])
+		req.flags |= ASSOC_REQ_DROP_PROXY_SERVICE_ARP_NA;
 
 	err = nl80211_crypto_settings(rdev, info, &req.crypto, 1);
 	if (!err) {
