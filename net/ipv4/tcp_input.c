@@ -186,7 +186,7 @@ static void tcp_enter_quickack_mode(struct sock *sk)
 	struct inet_connection_sock *icsk = inet_csk(sk);
 	tcp_incr_quickack(sk);
 	icsk->icsk_ack.pingpong = 0;
-	icsk->icsk_ack.ato = sysctl_tcp_ato_min;
+	icsk->icsk_ack.ato = TCP_ATO_MIN;
 }
 
 /* Send ACKs quickly, if "quick" count is not exhausted
@@ -600,14 +600,13 @@ static void tcp_event_data_recv(struct sock *sk, struct sk_buff *skb)
 		 * delayed ACK engine.
 		 */
 		tcp_incr_quickack(sk);
-		icsk->icsk_ack.ato = sysctl_tcp_ato_min;
+		icsk->icsk_ack.ato = TCP_ATO_MIN;
 	} else {
 		int m = now - icsk->icsk_ack.lrcvtime;
 
-		if (m <= sysctl_tcp_ato_min / 2) {
+		if (m <= TCP_ATO_MIN / 2) {
 			/* The fastest case is the first. */
-			icsk->icsk_ack.ato = (icsk->icsk_ack.ato >> 1) +
-				sysctl_tcp_ato_min / 2;
+			icsk->icsk_ack.ato = (icsk->icsk_ack.ato >> 1) + TCP_ATO_MIN / 2;
 		} else if (m < icsk->icsk_ack.ato) {
 			icsk->icsk_ack.ato = (icsk->icsk_ack.ato >> 1) + m;
 			if (icsk->icsk_ack.ato > icsk->icsk_rto)
@@ -1914,7 +1913,7 @@ static bool tcp_check_sack_reneging(struct sock *sk, int flag)
 		icsk->icsk_retransmits++;
 		tcp_retransmit_skb(sk, tcp_write_queue_head(sk));
 		inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
-					  icsk->icsk_rto, sysctl_tcp_rto_max);
+					  icsk->icsk_rto, TCP_RTO_MAX);
 		return true;
 	}
 	return false;
@@ -1963,7 +1962,7 @@ static bool tcp_pause_early_retransmit(struct sock *sk, int flag)
 		return false;
 
 	inet_csk_reset_xmit_timer(sk, ICSK_TIME_EARLY_RETRANS, delay,
-				  sysctl_tcp_rto_max);
+				  TCP_RTO_MAX);
 	return true;
 }
 
@@ -2951,9 +2950,8 @@ void tcp_rearm_rto(struct sock *sk)
 			if (delta > 0)
 				rto = delta;
 		}
-		inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
-		  inet_csk(sk)->icsk_rto,
-		  sysctl_tcp_rto_max);
+		inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS, rto,
+					  TCP_RTO_MAX);
 	}
 }
 
@@ -3182,9 +3180,8 @@ static void tcp_ack_probe(struct sock *sk)
 		 */
 	} else {
 		inet_csk_reset_xmit_timer(sk, ICSK_TIME_PROBE0,
-			min(icsk->icsk_rto << icsk->icsk_backoff,
-			sysctl_tcp_rto_max),
-			sysctl_tcp_rto_max);
+					  min(icsk->icsk_rto << icsk->icsk_backoff, TCP_RTO_MAX),
+					  TCP_RTO_MAX);
 	}
 }
 
@@ -4760,9 +4757,8 @@ static void __tcp_ack_snd_check(struct sock *sk, int ofo_possible)
 	struct tcp_sock *tp = tcp_sk(sk);
 
 	    /* More than one full frame received... */
-	if (((tp->rcv_nxt - tp->rcv_wup) > (inet_csk(sk)->icsk_ack.rcv_mss) *
-					sysctl_tcp_delack_seg &&
-		  /* ... and right edge of window advances far enough.
+	if (((tp->rcv_nxt - tp->rcv_wup) > inet_csk(sk)->icsk_ack.rcv_mss &&
+	     /* ... and right edge of window advances far enough.
 	      * (tcp_recvmsg() will send ACK otherwise). Or...
 	      */
 	     __tcp_select_window(sk) >= tp->rcv_wnd) ||
@@ -5496,10 +5492,9 @@ static int tcp_rcv_synsent_state_process(struct sock *sk, struct sk_buff *skb,
 			 */
 			inet_csk_schedule_ack(sk);
 			icsk->icsk_ack.lrcvtime = tcp_time_stamp;
-			icsk->icsk_ack.ato	 = sysctl_tcp_ato_min;
 			tcp_enter_quickack_mode(sk);
 			inet_csk_reset_xmit_timer(sk, ICSK_TIME_DACK,
-				sysctl_tcp_delack_max, sysctl_tcp_rto_max);
+						  TCP_DELACK_MAX, TCP_RTO_MAX);
 
 discard:
 			__kfree_skb(skb);

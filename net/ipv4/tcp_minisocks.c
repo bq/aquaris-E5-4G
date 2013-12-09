@@ -403,8 +403,8 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct request_sock *req,
 		tcp_init_wl(newtp, treq->rcv_isn);
 
 		newtp->srtt = 0;
-		newtp->mdev = sysctl_tcp_timeout_init;
-		newicsk->icsk_rto = sysctl_tcp_timeout_init;
+		newtp->mdev = TCP_TIMEOUT_INIT;
+		newicsk->icsk_rto = TCP_TIMEOUT_INIT;
 
 		newtp->packets_out = 0;
 		newtp->retrans_out = 0;
@@ -523,9 +523,7 @@ struct sock *tcp_check_req(struct sock *sk, struct sk_buff *skb,
 			 * it can be estimated (approximately)
 			 * from another data.
 			 */
-			tmp_opt.ts_recent_stamp = get_seconds() -
-				((sysctl_tcp_timeout_init/HZ) <<
-				 req->num_timeout);
+			tmp_opt.ts_recent_stamp = get_seconds() - ((TCP_TIMEOUT_INIT/HZ)<<req->num_timeout);
 			paws_reject = tcp_paws_reject(&tmp_opt, th->rst);
 		}
 	}
@@ -558,9 +556,8 @@ struct sock *tcp_check_req(struct sock *sk, struct sk_buff *skb,
 		 * the idea of fast retransmit in recovery.
 		 */
 		if (!inet_rtx_syn_ack(sk, req))
-			req->expires = min(sysctl_tcp_timeout_init <<
-					req->num_timeout,
-					sysctl_tcp_rto_max) + jiffies;
+			req->expires = min(TCP_TIMEOUT_INIT << req->num_timeout,
+					   TCP_RTO_MAX) + jiffies;
 		return NULL;
 	}
 
