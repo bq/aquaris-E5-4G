@@ -15,7 +15,6 @@
  */
 
 #include <linux/module.h>
-#include <linux/init.h>
 #include <linux/completion.h>
 #include <linux/delay.h>
 #include <linux/firmware.h>
@@ -394,7 +393,8 @@ static void mxt_debug_msg_add(struct mxt_data *data, u8 *msg)
 	}
 
 	if (data->debug_msg_count < DEBUG_MSG_MAX) {
-		memcpy(data->debug_msg_data + data->debug_msg_count * data->T5_msg_size,
+		memcpy(data->debug_msg_data +
+		       data->debug_msg_count * data->T5_msg_size,
 		       msg,
 		       data->T5_msg_size);
 		data->debug_msg_count++;
@@ -475,7 +475,8 @@ static void mxt_debug_msg_remove(struct mxt_data *data)
 }
 
 static int mxt_wait_for_completion(struct mxt_data *data,
-			struct completion *comp, unsigned int timeout_ms)
+				   struct completion *comp,
+				   unsigned int timeout_ms)
 {
 	struct device *dev = &data->client->dev;
 	unsigned long timeout = msecs_to_jiffies(timeout_ms);
@@ -1608,9 +1609,9 @@ static int mxt_check_reg_init(struct mxt_data *data)
 	}
 
 	/* Malloc memory to store configuration */
-	cfg_start_ofs = MXT_OBJECT_START
-		+ data->info->object_num * sizeof(struct mxt_object)
-		+ MXT_INFO_CHECKSUM_SIZE;
+	cfg_start_ofs = MXT_OBJECT_START +
+			data->info->object_num * sizeof(struct mxt_object) +
+			MXT_INFO_CHECKSUM_SIZE;
 	config_mem_size = data->mem_size - cfg_start_ofs;
 	config_mem = kzalloc(config_mem_size, GFP_KERNEL);
 	if (!config_mem) {
@@ -1773,8 +1774,7 @@ static int mxt_set_t7_power_cfg(struct mxt_data *data, u8 sleep)
 		new_config = &data->t7_cfg;
 
 	error = __mxt_write_reg(data->client, data->T7_address,
-			sizeof(data->t7_cfg),
-			new_config);
+				sizeof(data->t7_cfg), new_config);
 	if (error)
 		return error;
 
@@ -2883,7 +2883,8 @@ static DEVICE_ATTR(hw_version, S_IRUGO, mxt_hw_version_show, NULL);
 static DEVICE_ATTR(object, S_IRUGO, mxt_object_show, NULL);
 static DEVICE_ATTR(update_fw, S_IWUSR, NULL, mxt_update_fw_store);
 static DEVICE_ATTR(update_cfg, S_IWUSR, NULL, mxt_update_cfg_store);
-static DEVICE_ATTR(debug_v2_enable, S_IWUSR | S_IRUSR, NULL, mxt_debug_v2_enable_store);
+static DEVICE_ATTR(debug_v2_enable, S_IWUSR | S_IRUSR, NULL,
+		   mxt_debug_v2_enable_store);
 static DEVICE_ATTR(debug_notify, S_IRUGO, mxt_debug_notify_show, NULL);
 static DEVICE_ATTR(debug_enable, S_IWUSR | S_IRUSR, mxt_debug_enable_show,
 		   mxt_debug_enable_store);
