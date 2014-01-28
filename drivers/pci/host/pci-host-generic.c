@@ -330,7 +330,9 @@ static int gen_pci_probe(struct platform_device *pdev)
 		.nr_controllers	= 1,
 		.private_data	= (void **)&pci,
 		.setup		= gen_pci_setup,
+#ifdef CONFIG_ARM
 		.map_irq	= of_irq_parse_and_map_pci,
+#endif
 		.ops		= &gen_pci_ops,
 	};
 
