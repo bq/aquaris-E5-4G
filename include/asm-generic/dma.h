@@ -9,6 +9,8 @@
  */
 #define MAX_DMA_ADDRESS PAGE_OFFSET
 
+extern int isa_dma_bridge_buggy;
+
 extern int request_dma(unsigned int dmanr, const char *device_id);
 extern void free_dma(unsigned int dmanr);
 

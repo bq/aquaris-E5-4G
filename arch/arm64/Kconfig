@@ -156,6 +156,20 @@ menu "Bus support"
 config ARM_AMBA
 	bool
 
+config PCI
+	bool "PCI support"
+	help
+	  Enable PCI bus support. If unsure, say Y.
+
+config PCI_DOMAINS
+	def_bool PCI
+
+config PCI_SYSCALL
+	def_bool PCI
+
+source "drivers/pci/Kconfig"
+source "drivers/pci/pcie/Kconfig"
+
 endmenu
 
 menu "Kernel Features"

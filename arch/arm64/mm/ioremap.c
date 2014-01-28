@@ -103,6 +103,19 @@ void __iomem *ioremap_cache(phys_addr_t phys_addr, size_t size)
 }
 EXPORT_SYMBOL(ioremap_cache);
 
+#ifdef CONFIG_PCI
+int pci_ioremap_io(unsigned int offset, phys_addr_t phys_addr)
+{
+	BUG_ON(offset + SZ_64K - 1 > IO_SPACE_LIMIT);
+
+	return ioremap_page_range((unsigned long)PCI_IOBASE + offset,
+				  (unsigned long)PCI_IOBASE + offset + SZ_64K,
+				  phys_addr,
+				  __pgprot(PROT_DEVICE_nGnRE));
+}
+EXPORT_SYMBOL_GPL(pci_ioremap_io);
+#endif
+
 static pte_t bm_pte[PTRS_PER_PTE] __page_aligned_bss;
 #if CONFIG_ARM64_PGTABLE_LEVELS > 2
 static pte_t bm_pmd[PTRS_PER_PMD] __page_aligned_bss;
