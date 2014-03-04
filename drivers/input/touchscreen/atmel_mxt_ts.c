@@ -2053,7 +2053,8 @@ static int mxt_read_info_block(struct mxt_data *data)
 		dev_err(&client->dev,
 			"Info Block CRC error calculated=0x%06X read=0x%06X\n",
 			data->info_crc, calculated_crc);
-		return -EIO;
+		error = -EIO;
+		goto err_free_mem;
 	}
 
 	/* Save pointers in device data structure */
