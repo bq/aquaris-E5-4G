@@ -1334,7 +1334,7 @@ static irqreturn_t mxt_interrupt(int irq, void *dev_id)
 	}
 
 	if (!data->object_table)
-		return IRQ_NONE;
+		return IRQ_HANDLED;
 
 	if (data->T44_address) {
 		return mxt_process_messages_t44(data);
