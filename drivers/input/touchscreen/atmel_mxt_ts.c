@@ -285,9 +285,6 @@ struct mxt_data {
 	/* for config update handling */
 	struct completion crc_completion;
 
-	/* Enable reporting of input events */
-	bool enable_reporting;
-
 	/* Indicates whether device is in suspend */
 	bool suspended;
 };
@@ -840,10 +837,6 @@ static void mxt_input_button(struct mxt_data *data, u8 *message)
 	bool button;
 	int i;
 
-	/* do not report events if input device not yet registered */
-	if (!data->enable_reporting)
-		return;
-
 	/* Active-low switch */
 	for (i = 0; i < pdata->t19_num_keys; i++) {
 		if (pdata->t19_keymap[i] == KEY_RESERVED)
@@ -871,10 +864,6 @@ static void mxt_proc_t9_message(struct mxt_data *data, u8 *message)
 	int amplitude;
 	u8 vector;
 	int tool;
-
-	/* do not report events if input device not yet registered */
-	if (!data->enable_reporting)
-		return;
 
 	id = message[0] - data->T9_reportid_min;
 	status = message[1];
@@ -952,10 +941,6 @@ static void mxt_proc_t100_message(struct mxt_data *data, u8 *message)
 	int y;
 	int tool;
 
-	/* do not report events if input device not yet registered */
-	if (!data->enable_reporting)
-		return;
-
 	id = message[0] - data->T100_reportid_min - 2;
 
 	/* ignore SCRSTATUS events */
@@ -1022,10 +1007,6 @@ static void mxt_proc_t15_messages(struct mxt_data *data, u8 *msg)
 	bool sync = false;
 	unsigned long keystates = le32_to_cpu(msg[2]);
 
-	/* do not report events if input device not yet registered */
-	if (!data->enable_reporting)
-		return;
-
 	for (key = 0; key < data->pdata->t15_num_keys; key++) {
 		curr_state = test_bit(key, &data->t15_keystatus);
 		new_state = test_bit(key, &keystates);
@@ -1086,10 +1067,6 @@ static void mxt_proc_t63_messages(struct mxt_data *data, u8 *msg)
 	u16 x, y;
 	u8 pressure;
 
-	/* do not report events if input device not yet registered */
-	if (!data->enable_reporting)
-		return;
-
 	/* stylus slots come after touch slots */
 	id = data->num_touchids + (msg[0] - data->T63_reportid_min);
 
@@ -1145,6 +1122,17 @@ static int mxt_proc_message(struct mxt_data *data, u8 *message)
 
 	if (report_id == data->T6_reportid) {
 		mxt_proc_t6_messages(data, message);
+	} else if (report_id >= data->T42_reportid_min
+		   && report_id <= data->T42_reportid_max) {
+		mxt_proc_t42_messages(data, message);
+	} else if (report_id == data->T48_reportid) {
+		mxt_proc_t48_messages(data, message);
+	} else if (!data->input_dev || data->suspended) {
+		/*
+		 * do not report events if input device is not
+		 * yet registered or returning from suspend
+		 */
+		mxt_dump_message(data, message);
 	} else if (report_id >= data->T9_reportid_min
 	    && report_id <= data->T9_reportid_max) {
 		mxt_proc_t9_message(data, message);
@@ -1157,11 +1145,6 @@ static int mxt_proc_message(struct mxt_data *data, u8 *message)
 	} else if (report_id >= data->T63_reportid_min
 		   && report_id <= data->T63_reportid_max) {
 		mxt_proc_t63_messages(data, message);
-	} else if (report_id >= data->T42_reportid_min
-		   && report_id <= data->T42_reportid_max) {
-		mxt_proc_t42_messages(data, message);
-	} else if (report_id == data->T48_reportid) {
-		mxt_proc_t48_messages(data, message);
 	} else if (report_id >= data->T15_reportid_min
 		   && report_id <= data->T15_reportid_max) {
 		mxt_proc_t15_messages(data, message);
@@ -1315,7 +1298,7 @@ static irqreturn_t mxt_process_messages(struct mxt_data *data)
 update_count:
 	data->last_message_count = total_handled;
 
-	if (data->enable_reporting && data->update_input) {
+	if (data->update_input) {
 		mxt_input_sync(data->input_dev);
 		data->update_input = false;
 	}
@@ -1850,7 +1833,6 @@ static void mxt_free_object_table(struct mxt_data *data)
 
 	mxt_free_input_device(data);
 
-	data->enable_reporting = false;
 	data->T5_address = 0;
 	data->T5_msg_size = 0;
 	data->T6_reportid = 0;
@@ -1872,7 +1854,8 @@ static void mxt_free_object_table(struct mxt_data *data)
 	data->max_reportid = 0;
 }
 
-static int mxt_parse_object_table(struct mxt_data *data)
+static int mxt_parse_object_table(struct mxt_data *data,
+				  struct mxt_object *object_table)
 {
 	struct i2c_client *client = data->client;
 	int i;
@@ -1883,7 +1866,7 @@ static int mxt_parse_object_table(struct mxt_data *data)
 	reportid = 1;
 	data->mem_size = 0;
 	for (i = 0; i < data->info->object_num; i++) {
-		struct mxt_object *object = data->object_table + i;
+		struct mxt_object *object = object_table + i;
 		u8 min_id, max_id;
 
 		le16_to_cpus(&object->start_address);
@@ -2057,10 +2040,8 @@ static int mxt_read_info_block(struct mxt_data *data)
 		goto err_free_mem;
 	}
 
-	/* Save pointers in device data structure */
 	data->raw_info_block = buf;
 	data->info = (struct mxt_info *)buf;
-	data->object_table = (struct mxt_object *)(buf + MXT_OBJECT_START);
 
 	dev_info(&client->dev,
 		 "Family: %u Variant: %u Firmware V%u.%u.%02X Objects: %u\n",
@@ -2069,12 +2050,14 @@ static int mxt_read_info_block(struct mxt_data *data)
 		 data->info->build, data->info->object_num);
 
 	/* Parse object table information */
-	error = mxt_parse_object_table(data);
+	error = mxt_parse_object_table(data, buf + MXT_OBJECT_START);
 	if (error) {
-		dev_err(&client->dev, "Error %d reading object table\n", error);
+		dev_err(&client->dev, "Error %d parsing object table\n", error);
 		mxt_free_object_table(data);
 		return error;
 	}
+
+	data->object_table = (struct mxt_object *)(buf + MXT_OBJECT_START);
 
 	return 0;
 
@@ -2455,7 +2438,6 @@ static int mxt_configure_objects(struct mxt_data *data)
 		dev_warn(&client->dev, "No touch object detected\n");
 	}
 
-	data->enable_reporting = true;
 	return 0;
 }
 
@@ -2762,7 +2744,6 @@ static ssize_t mxt_update_cfg_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	data->enable_reporting = false;
 	mxt_free_input_device(data);
 
 	if (data->suspended) {
@@ -2951,7 +2932,6 @@ static void mxt_start(struct mxt_data *data)
 	}
 
 	mxt_acquire_irq(data);
-	data->enable_reporting = true;
 	data->suspended = false;
 }
 
@@ -2960,7 +2940,6 @@ static void mxt_stop(struct mxt_data *data)
 	if (data->suspended || data->in_bootloader)
 		return;
 
-	data->enable_reporting = false;
 	disable_irq(data->irq);
 
 	if (data->use_regulator)
