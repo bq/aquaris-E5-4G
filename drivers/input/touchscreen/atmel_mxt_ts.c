@@ -509,7 +509,7 @@ static int mxt_bootloader_read(struct mxt_data *data,
 	if (ret == 1) {
 		ret = 0;
 	} else {
-		ret = (ret < 0) ? ret : -EIO;
+		ret = ret < 0 ? ret : -EIO;
 		dev_err(&data->client->dev, "%s: i2c recv failed (%d)\n",
 			__func__, ret);
 	}
@@ -532,7 +532,7 @@ static int mxt_bootloader_write(struct mxt_data *data,
 	if (ret == 1) {
 		ret = 0;
 	} else {
-		ret = (ret < 0) ? ret : -EIO;
+		ret = ret < 0 ? ret : -EIO;
 		dev_err(&data->client->dev, "%s: i2c send failed (%d)\n",
 			__func__, ret);
 	}
@@ -544,10 +544,7 @@ static int mxt_lookup_bootloader_address(struct mxt_data *data, bool retry)
 {
 	u8 appmode = data->client->addr;
 	u8 bootloader;
-	u8 family_id = 0;
-
-	if (data->info)
-		family_id = data->info->family_id;
+	u8 family_id = data->info ? data->info->family_id : 0;
 
 	switch (appmode) {
 	case 0x4a:
@@ -824,13 +821,13 @@ static void mxt_proc_t6_messages(struct mxt_data *data, u8 *msg)
 	if (status != data->t6_status)
 		dev_dbg(dev, "T6 Status 0x%02X%s%s%s%s%s%s%s\n",
 			status,
-			(status == 0) ? " OK" : "",
-			(status & MXT_T6_STATUS_RESET) ? " RESET" : "",
-			(status & MXT_T6_STATUS_OFL) ? " OFL" : "",
-			(status & MXT_T6_STATUS_SIGERR) ? " SIGERR" : "",
-			(status & MXT_T6_STATUS_CAL) ? " CAL" : "",
-			(status & MXT_T6_STATUS_CFGERR) ? " CFGERR" : "",
-			(status & MXT_T6_STATUS_COMSERR) ? " COMSERR" : "");
+			status == 0 ? " OK" : "",
+			status & MXT_T6_STATUS_RESET ? " RESET" : "",
+			status & MXT_T6_STATUS_OFL ? " OFL" : "",
+			status & MXT_T6_STATUS_SIGERR ? " SIGERR" : "",
+			status & MXT_T6_STATUS_CAL ? " CAL" : "",
+			status & MXT_T6_STATUS_CFGERR ? " CFGERR" : "",
+			status & MXT_T6_STATUS_COMSERR ? " COMSERR" : "");
 
 	/* Save current status */
 	data->t6_status = status;
@@ -973,9 +970,9 @@ static void mxt_proc_t100_message(struct mxt_data *data, u8 *message)
 		id,
 		status,
 		x, y,
-		(data->t100_aux_area) ? message[data->t100_aux_area] : 0,
-		(data->t100_aux_ampl) ? message[data->t100_aux_ampl] : 0,
-		(data->t100_aux_vect) ? message[data->t100_aux_vect] : 0);
+		data->t100_aux_area ? message[data->t100_aux_area] : 0,
+		data->t100_aux_ampl ? message[data->t100_aux_ampl] : 0,
+		data->t100_aux_vect ? message[data->t100_aux_vect] : 0);
 
 	input_mt_slot(input_dev, id);
 
@@ -1072,14 +1069,12 @@ static int mxt_proc_t48_messages(struct mxt_data *data, u8 *msg)
 	status = msg[1];
 	state  = msg[4];
 
-	dev_dbg(dev, "T48 state %d status %02X %s%s%s%s%s\n",
-			state,
-			status,
-			(status & 0x01) ? "FREQCHG " : "",
-			(status & 0x02) ? "APXCHG " : "",
-			(status & 0x04) ? "ALGOERR " : "",
-			(status & 0x10) ? "STATCHG " : "",
-			(status & 0x20) ? "NLVLCHG " : "");
+	dev_dbg(dev, "T48 state %d status %02X %s%s%s%s%s\n", state, status,
+		status & 0x01 ? "FREQCHG " : "",
+		status & 0x02 ? "APXCHG " : "",
+		status & 0x04 ? "ALGOERR " : "",
+		status & 0x10 ? "STATCHG " : "",
+		status & 0x20 ? "NLVLCHG " : "");
 
 	return 0;
 }
@@ -1112,15 +1107,15 @@ static void mxt_proc_t63_messages(struct mxt_data *data, u8 *msg)
 	dev_dbg(dev,
 		"[%d] %c%c%c%c x: %d y: %d pressure: %d stylus:%c%c%c%c\n",
 		id,
-		(msg[1] & MXT_T63_STYLUS_SUPPRESS) ? 'S' : '.',
-		(msg[1] & MXT_T63_STYLUS_MOVE)     ? 'M' : '.',
-		(msg[1] & MXT_T63_STYLUS_RELEASE)  ? 'R' : '.',
-		(msg[1] & MXT_T63_STYLUS_PRESS)    ? 'P' : '.',
+		msg[1] & MXT_T63_STYLUS_SUPPRESS ? 'S' : '.',
+		msg[1] & MXT_T63_STYLUS_MOVE     ? 'M' : '.',
+		msg[1] & MXT_T63_STYLUS_RELEASE  ? 'R' : '.',
+		msg[1] & MXT_T63_STYLUS_PRESS    ? 'P' : '.',
 		x, y, pressure,
-		(msg[2] & MXT_T63_STYLUS_BARREL) ? 'B' : '.',
-		(msg[2] & MXT_T63_STYLUS_ERASER) ? 'E' : '.',
-		(msg[2] & MXT_T63_STYLUS_TIP)    ? 'T' : '.',
-		(msg[2] & MXT_T63_STYLUS_DETECT) ? 'D' : '.');
+		msg[2] & MXT_T63_STYLUS_BARREL   ? 'B' : '.',
+		msg[2] & MXT_T63_STYLUS_ERASER   ? 'E' : '.',
+		msg[2] & MXT_T63_STYLUS_TIP      ? 'T' : '.',
+		msg[2] & MXT_T63_STYLUS_DETECT   ? 'D' : '.');
 
 	input_mt_slot(input_dev, id);
 
@@ -1372,7 +1367,7 @@ static int mxt_t6_command(struct mxt_data *data, u16 cmd_offset,
 		ret = __mxt_read_reg(data->client, reg, 1, &command_register);
 		if (ret)
 			return ret;
-	} while ((command_register != 0) && (timeout_counter++ <= 100));
+	} while (command_register != 0 && timeout_counter++ <= 100);
 
 	if (timeout_counter > 100) {
 		dev_err(&data->client->dev, "Command failed!\n");
