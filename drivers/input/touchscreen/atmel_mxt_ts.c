@@ -607,11 +607,11 @@ static u8 mxt_get_bootloader_version(struct mxt_data *data, u8 val)
 			return -EIO;
 		}
 
-		dev_info(dev, "Bootloader ID:%d Version:%d\n", buf[1], buf[2]);
+		dev_dbg(dev, "Bootloader ID:%d Version:%d\n", buf[1], buf[2]);
 
 		return buf[0];
 	} else {
-		dev_info(dev, "Bootloader ID:%d\n", val & MXT_BOOT_ID_MASK);
+		dev_dbg(dev, "Bootloader ID:%d\n", val & MXT_BOOT_ID_MASK);
 
 		return val;
 	}
@@ -1593,7 +1593,7 @@ static int mxt_check_reg_init(struct mxt_data *data)
 		if (config_crc == 0 || data->config_crc == 0) {
 			dev_info(dev, "CRC zero, attempting to apply config\n");
 		} else if (config_crc == data->config_crc) {
-			dev_info(dev, "Config CRC 0x%06X: OK\n",
+			dev_dbg(dev, "Config CRC 0x%06X: OK\n",
 				 data->config_crc);
 			ret = 0;
 			goto release;
@@ -1748,7 +1748,7 @@ static int mxt_check_reg_init(struct mxt_data *data)
 	if (ret)
 		goto release_mem;
 
-	dev_info(dev, "Config written\n");
+	dev_info(dev, "Config successfully updated\n");
 
 	/* T7 config may have changed */
 	mxt_init_t7_power_cfg(data);
@@ -1798,7 +1798,7 @@ recheck:
 
 	if (data->t7_cfg.active == 0 || data->t7_cfg.idle == 0) {
 		if (!retry) {
-			dev_info(dev, "T7 cfg zero, resetting\n");
+			dev_dbg(dev, "T7 cfg zero, resetting\n");
 			mxt_soft_reset(data);
 			retry = true;
 			goto recheck;
@@ -1808,11 +1808,11 @@ recheck:
 		    data->t7_cfg.idle = 100;
 		    return mxt_set_t7_power_cfg(data, MXT_POWER_CFG_RUN);
 		}
-	} else {
-		dev_info(dev, "Initialised power cfg: ACTV %d, IDLE %d\n",
+	}
+
+	dev_dbg(dev, "Initialized power cfg: ACTV %d, IDLE %d\n",
 				data->t7_cfg.active, data->t7_cfg.idle);
 		return 0;
-	}
 }
 
 static int mxt_acquire_irq(struct mxt_data *data)
@@ -2123,7 +2123,7 @@ static int mxt_read_t9_resolution(struct mxt_data *data)
 		data->max_y = range.y;
 	}
 
-	dev_info(&client->dev,
+	dev_dbg(&client->dev,
 		 "Touchscreen size X%uY%u\n", data->max_x, data->max_y);
 
 	return 0;
@@ -2652,7 +2652,7 @@ static int mxt_load_fw(struct device *dev)
 		}
 
 		if (frame % 50 == 0)
-			dev_info(dev, "Sent %d frames, %d/%zd bytes\n",
+			dev_dbg(dev, "Sent %d frames, %d/%zd bytes\n",
 				 frame, pos, fw->size);
 	}
 
@@ -2662,7 +2662,7 @@ static int mxt_load_fw(struct device *dev)
 	if (ret)
 		goto disable_irq;
 
-	dev_info(dev, "Sent %d frames, %zd bytes\n", frame, pos);
+	dev_dbg(dev, "Sent %d frames, %d bytes\n", frame, pos);
 
 	/*
 	 * Wait for device to reset. Some bootloader versions do not assert
