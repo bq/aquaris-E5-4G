@@ -813,9 +813,8 @@ static void mxt_proc_t6_messages(struct mxt_data *data, u8 *msg)
 		complete(&data->crc_completion);
 	}
 
-	/* Detect transition out of reset */
-	if ((data->t6_status & MXT_T6_STATUS_RESET) &&
-	    !(status & MXT_T6_STATUS_RESET))
+	/* Detect reset */
+	if (status & MXT_T6_STATUS_RESET)
 		complete(&data->reset_completion);
 
 	/* Output debug if status has changed */
