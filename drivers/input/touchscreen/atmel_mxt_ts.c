@@ -1651,7 +1651,7 @@ static int mxt_check_reg_init(struct mxt_data *data)
 			 * config or config from a later fw version,
 			 * or the file is corrupt or hand-edited.
 			 */
-			dev_warn(dev, "Discarding %u byte(s) in T%u\n",
+			dev_warn(dev, "Discarding %zu byte(s) in T%u\n",
 				 size - mxt_obj_size(object), type);
 		} else if (mxt_obj_size(object) > size) {
 			/*
@@ -1663,7 +1663,7 @@ static int mxt_check_reg_init(struct mxt_data *data)
 			 * updated. We warn here but do nothing else - the
 			 * malloc has zeroed the entire configuration.
 			 */
-			dev_warn(dev, "Zeroing %u byte(s) in T%d\n",
+			dev_warn(dev, "Zeroing %zu byte(s) in T%d\n",
 				 mxt_obj_size(object) - size, type);
 		}
 
@@ -1899,7 +1899,7 @@ static int mxt_parse_object_table(struct mxt_data *data)
 		}
 
 		dev_dbg(&data->client->dev,
-			"T%u Start:%u Size:%u Instances:%u Report IDs:%u-%u\n",
+			"T%u Start:%u Size:%zu Instances:%zu Report IDs:%u-%u\n",
 			object->type, object->start_address,
 			mxt_obj_size(object), mxt_obj_instances(object),
 			min_id, max_id);
