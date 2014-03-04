@@ -283,7 +283,7 @@ struct mxt_data {
 	/* for reset handling */
 	struct completion reset_completion;
 
-	/* for reset handling */
+	/* for config update handling */
 	struct completion crc_completion;
 
 	/* Enable reporting of input events */
@@ -908,17 +908,18 @@ static void mxt_proc_t9_message(struct mxt_data *data, u8 *message)
 	input_mt_slot(input_dev, id);
 
 	if (status & MXT_T9_DETECT) {
-		/* Multiple bits may be set if the host is slow to read the
-		 * status messages, indicating all the events that have
-		 * happened */
+		/*
+		 * Multiple bits may be set if the host is slow to read
+		 * the status messages, indicating all the events that
+		 * have happened.
+		 */
 		if (status & MXT_T9_RELEASE) {
 			input_mt_report_slot_state(input_dev,
 						   MT_TOOL_FINGER, 0);
 			mxt_input_sync(input_dev);
 		}
 
-		/* A reported size of zero indicates that the reported touch
-		 * is a stylus from a linked Stylus T47 object. */
+		/* A size of zero indicates touch is from a linked T47 Stylus */
 		if (area == 0) {
 			area = MXT_TOUCH_MAJOR_T47_STYLUS;
 			tool = MT_TOOL_PEN;
@@ -977,8 +978,6 @@ static void mxt_proc_t100_message(struct mxt_data *data, u8 *message)
 	input_mt_slot(input_dev, id);
 
 	if (status & MXT_T100_DETECT) {
-		/* A reported size of zero indicates that the reported touch
-		 * is a stylus from a linked Stylus T47 object. */
 		if ((status & MXT_T100_TYPE_MASK) == MXT_T100_TYPE_STYLUS)
 			tool = MT_TOOL_PEN;
 		else
@@ -1301,8 +1300,7 @@ static irqreturn_t mxt_process_messages(struct mxt_data *data)
 	else if (total_handled <= count)
 		goto update_count;
 
-	/* read two at a time until an invalid message or else we reach
-	 * reportid limit */
+	/* keep reading two msgs until one is invalid or reportid limit */
 	do {
 		num_handled = mxt_read_and_process_messages(data, 2);
 		if (num_handled < 0)
@@ -1400,14 +1398,19 @@ static int mxt_soft_reset(struct mxt_data *data)
 
 static void mxt_update_crc(struct mxt_data *data, u8 cmd, u8 value)
 {
-	/* on failure, CRC is set to 0 and config will always be downloaded */
+	/*
+	 * On failure, CRC is set to 0 and config will always be
+	 * downloaded.
+	 */
 	data->config_crc = 0;
 	INIT_COMPLETION(data->crc_completion);
 
 	mxt_t6_command(data, cmd, value, true);
 
-	/* Wait for crc message. On failure, CRC is set to 0 and config will
-	 * always be downloaded */
+	/*
+	 * Wait for crc message. On failure, CRC is set to 0 and config will
+	 * always be downloaded.
+	 */
 	mxt_wait_for_completion(data, &data->crc_completion, MXT_CRC_TIMEOUT);
 }
 
@@ -1580,10 +1583,12 @@ static int mxt_check_reg_init(struct mxt_data *data)
 	}
 	data_pos += offset;
 
-	/* The Info Block CRC is calculated over mxt_info and the object table
-	 * If it does not match then we are trying to load the configuration
-	 * from a different chip or firmware version, so the configuration CRC
-	 * is invalid anyway. */
+	/*
+	 * The Info Block CRC is calculated over mxt_info and the object
+	 * table. If it does not match then we are trying to load the
+	 * configuration from a different chip or firmware version, so
+	 * the configuration CRC is invalid anyway.
+	 */
 	if (info_crc == data->info_crc) {
 		if (config_crc == 0 || data->config_crc == 0) {
 			dev_info(dev, "CRC zero, attempting to apply config\n");
@@ -1641,19 +1646,23 @@ static int mxt_check_reg_init(struct mxt_data *data)
 		}
 
 		if (size > mxt_obj_size(object)) {
-			/* Either we are in fallback mode due to wrong
+			/*
+			 * Either we are in fallback mode due to wrong
 			 * config or config from a later fw version,
-			 * or the file is corrupt or hand-edited */
+			 * or the file is corrupt or hand-edited.
+			 */
 			dev_warn(dev, "Discarding %u byte(s) in T%u\n",
 				 size - mxt_obj_size(object), type);
 		} else if (mxt_obj_size(object) > size) {
-			/* If firmware is upgraded, new bytes may be added to
+			/*
+			 * If firmware is upgraded, new bytes may be added to
 			 * end of objects. It is generally forward compatible
 			 * to zero these bytes - previous behaviour will be
 			 * retained. However this does invalidate the CRC and
 			 * will force fallback mode until the configuration is
 			 * updated. We warn here but do nothing else - the
-			 * malloc has zeroed the entire configuration. */
+			 * malloc has zeroed the entire configuration.
+			 */
 			dev_warn(dev, "Zeroing %u byte(s) in T%d\n",
 				 mxt_obj_size(object) - size, type);
 		}
@@ -1694,7 +1703,7 @@ static int mxt_check_reg_init(struct mxt_data *data)
 		}
 	}
 
-	/* calculate crc of the received configs (not the raw config file) */
+	/* Calculate crc of the received configs (not the raw config file) */
 	if (data->T7_address < cfg_start_ofs) {
 		dev_err(dev, "Bad T7 address, T7addr = %x, config offset %x\n",
 			data->T7_address, cfg_start_ofs);
@@ -1899,8 +1908,10 @@ static int mxt_parse_object_table(struct mxt_data *data)
 		switch (object->type) {
 		case MXT_GEN_MESSAGE_T5:
 			if (data->info->family_id == 0x80) {
-				/* On mXT224 read and discard unused CRC byte
-				 * otherwise DMA reads are misaligned */
+				/*
+				 * On mXT224 read and discard unused CRC byte
+				 * otherwise DMA reads are misaligned
+				 */
 				data->T5_msg_size = mxt_obj_size(object);
 			} else {
 				/* CRC not enabled, so skip last byte */
@@ -2033,8 +2044,10 @@ static int mxt_read_info_block(struct mxt_data *data)
 	calculated_crc = mxt_calculate_crc(buf, 0,
 					   size - MXT_INFO_CHECKSUM_SIZE);
 
-	/* CRC mismatch can be caused by data corruption due to I2C comms
-	 * issue or else device is not using Object Based Protocol */
+	/*
+	 * CRC mismatch can be caused by data corruption due to I2C comms
+	 * issue or else device is not using Object Based Protocol (eg i2c-hid)
+	 */
 	if ((data->info_crc == 0) || (data->info_crc != calculated_crc)) {
 		dev_err(&client->dev,
 			"Info Block CRC error calculated=0x%06X read=0x%06X\n",
@@ -2140,9 +2153,11 @@ static void mxt_probe_regulators(struct mxt_data *data)
 	struct device *dev = &data->client->dev;
 	int error;
 
-	/* According to maXTouch power sequencing specification, RESET line
+	/*
+	 * According to maXTouch power sequencing specification, RESET line
 	 * must be kept low until some time after regulators come up to
-	 * voltage */
+	 * voltage
+	 */
 	if (!data->pdata->gpio_reset) {
 		dev_warn(dev, "Must have reset GPIO to use regulator support\n");
 		goto fail;
@@ -2365,8 +2380,10 @@ retry_bootloader:
 				dev_err(&client->dev,
 						"Could not recover device from "
 						"bootloader mode\n");
-				/* this is not an error state, we can reflash
-				 * from here */
+				/*
+				 * We can reflash from this state, so do not
+				 * abort init
+				 */
 				data->in_bootloader = true;
 				return 0;
 			}
@@ -2527,8 +2544,10 @@ static int mxt_check_firmware_format(struct device *dev,
 		pos++;
 	}
 
-	/* To convert file try
-	 * xxd -r -p mXTXXX__APP_VX-X-XX.enc > maxtouch.fw */
+	/*
+	 * To convert file try:
+	 * xxd -r -p mXTXXX__APP_VX-X-XX.enc > maxtouch.fw
+	 */
 	dev_err(dev, "Aborting: firmware file must be in binary format\n");
 
 	return -1;
@@ -2574,8 +2593,7 @@ static int mxt_load_fw(struct device *dev)
 
 		msleep(MXT_RESET_TIME);
 
-		/* At this stage, do not need to scan since we know
-		 * family ID */
+		/* Do not need to scan since we know family ID */
 		ret = mxt_lookup_bootloader_address(data, 0);
 		if (ret)
 			goto release_firmware;
@@ -2588,8 +2606,7 @@ static int mxt_load_fw(struct device *dev)
 
 	ret = mxt_check_bootloader(data, MXT_WAITING_BOOTLOAD_CMD, false);
 	if (ret) {
-		/* Bootloader may still be unlocked from previous update
-		 * attempt */
+		/* Bootloader may still be unlocked from previous attempt */
 		ret = mxt_check_bootloader(data, MXT_WAITING_FRAME_DATA, false);
 		if (ret)
 			goto disable_irq;
@@ -2647,10 +2664,12 @@ static int mxt_load_fw(struct device *dev)
 
 	dev_info(dev, "Sent %d frames, %zd bytes\n", frame, pos);
 
-	/* Wait for device to reset. Some bootloader versions do not assert
-	 * the CHG line after bootloading has finished, so ignore error */
-	mxt_wait_for_completion(data, &data->bl_completion,
-				MXT_FW_RESET_TIME);
+	/*
+	 * Wait for device to reset. Some bootloader versions do not assert
+	 * the CHG line after bootloading has finished, so ignore potential
+	 * errors.
+	 */
+	mxt_wait_for_completion(data, &data->bl_completion, MXT_FW_RESET_TIME);
 
 	data->in_bootloader = false;
 
@@ -2909,8 +2928,10 @@ static void mxt_start(struct mxt_data *data)
 	if (data->use_regulator) {
 		mxt_regulator_enable(data);
 	} else {
-		/* Discard any messages still in message buffer from before
-		 * chip went to sleep */
+		/*
+		 * Discard any messages still in message buffer
+		 * from before chip went to sleep
+		 */
 		mxt_process_messages_until_invalid(data);
 
 		mxt_set_t7_power_cfg(data, MXT_POWER_CFG_RUN);
