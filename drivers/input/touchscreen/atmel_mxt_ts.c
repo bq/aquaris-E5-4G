@@ -1996,7 +1996,7 @@ static int mxt_read_info_block(struct mxt_data *data)
 	struct i2c_client *client = data->client;
 	int error;
 	size_t size;
-	void *buf;
+	void *id_buf, *buf;
 	uint8_t num_objects;
 	u32 calculated_crc;
 	u8 *crc_ptr;
@@ -2007,22 +2007,24 @@ static int mxt_read_info_block(struct mxt_data *data)
 
 	/* Read 7-byte ID information block starting at address 0 */
 	size = sizeof(struct mxt_info);
-	buf = kzalloc(size, GFP_KERNEL);
-	if (!buf) {
+	id_buf = kzalloc(size, GFP_KERNEL);
+	if (!id_buf) {
 		dev_err(&client->dev, "Failed to allocate memory\n");
 		return -ENOMEM;
 	}
 
-	error = __mxt_read_reg(client, 0, size, buf);
-	if (error)
-		goto err_free_mem;
+	error = __mxt_read_reg(client, 0, size, id_buf);
+	if (error) {
+		kfree(id_buf);
+		return error;
+	}
 
 	/* Resize buffer to give space for rest of info block */
-	num_objects = ((struct mxt_info *)buf)->object_num;
+	num_objects = ((struct mxt_info *)id_buf)->object_num;
 	size += (num_objects * sizeof(struct mxt_object))
 		+ MXT_INFO_CHECKSUM_SIZE;
 
-	buf = krealloc(buf, size, GFP_KERNEL);
+	buf = krealloc(id_buf, size, GFP_KERNEL);
 	if (!buf) {
 		dev_err(&client->dev, "Failed to allocate memory\n");
 		error = -ENOMEM;
