@@ -2133,10 +2133,17 @@ static int mxt_read_t9_resolution(struct mxt_data *data)
 
 static void mxt_regulator_enable(struct mxt_data *data)
 {
+	int error;
 	gpio_set_value(data->pdata->gpio_reset, 0);
 
-	regulator_enable(data->reg_vdd);
-	regulator_enable(data->reg_avdd);
+	error = regulator_enable(data->reg_vdd);
+	if (error)
+		return;
+
+	error = regulator_enable(data->reg_avdd);
+	if (error)
+		return;
+
 	msleep(MXT_REGULATOR_DELAY);
 
 	reinit_completion(&data->bl_completion);
