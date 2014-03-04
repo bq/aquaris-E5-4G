@@ -485,7 +485,7 @@ static int mxt_wait_for_completion(struct mxt_data *data,
 	ret = wait_for_completion_interruptible_timeout(comp, timeout);
 	if (ret < 0) {
 		dev_err(dev, "Wait for completion interrupted.\n");
-		return -EINTR;
+		return ret;
 	} else if (ret == 0) {
 		dev_err(dev, "Wait for completion timed out.\n");
 		return -ETIMEDOUT;
@@ -637,9 +637,9 @@ recheck:
 					      MXT_FW_CHG_TIMEOUT);
 		if (ret) {
 			/*
-			 * TODO: handle -EINTR better by terminating fw update
-			 * process before returning to userspace by writing
-			 * length 0x000 to device (iff we are in
+			 * TODO: handle -ERESTARTSYS better by terminating
+			 * fw update process before returning to userspace
+			 * by writing length 0x000 to device (iff we are in
 			 * WAITING_FRAME_DATA state).
 			 */
 			dev_err(dev, "Update wait error %d\n", ret);
