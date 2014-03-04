@@ -3102,7 +3102,7 @@ err_free_mem:
 	return error;
 }
 
-static int __devinit mxt_probe(struct i2c_client *client,
+static int mxt_probe(struct i2c_client *client,
 			       const struct i2c_device_id *id)
 {
 	struct mxt_data *data;
@@ -3183,7 +3183,7 @@ err_free_mem:
 	return error;
 }
 
-static int __devexit mxt_remove(struct i2c_client *client)
+static int mxt_remove(struct i2c_client *client)
 {
 	struct mxt_data *data = i2c_get_clientdata(client);
 
@@ -3255,7 +3255,7 @@ static struct i2c_driver mxt_driver = {
 		.pm	= &mxt_pm_ops,
 	},
 	.probe		= mxt_probe,
-	.remove		= __devexit_p(mxt_remove),
+	.remove		= mxt_remove,
 	.id_table	= mxt_id,
 };
 
