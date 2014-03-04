@@ -2559,7 +2559,7 @@ static int mxt_check_firmware_format(struct device *dev,
 	 */
 	dev_err(dev, "Aborting: firmware file must be in binary format\n");
 
-	return -1;
+	return -EINVAL;
 }
 
 static int mxt_load_fw(struct device *dev)
