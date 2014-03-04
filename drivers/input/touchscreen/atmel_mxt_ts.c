@@ -1382,7 +1382,7 @@ static int mxt_soft_reset(struct mxt_data *data)
 
 	dev_info(dev, "Resetting chip\n");
 
-	INIT_COMPLETION(data->reset_completion);
+	reinit_completion(&data->reset_completion);
 
 	ret = mxt_t6_command(data, MXT_COMMAND_RESET, MXT_RESET_VALUE, false);
 	if (ret)
@@ -1403,7 +1403,7 @@ static void mxt_update_crc(struct mxt_data *data, u8 cmd, u8 value)
 	 * downloaded.
 	 */
 	data->config_crc = 0;
-	INIT_COMPLETION(data->crc_completion);
+	reinit_completion(&data->crc_completion);
 
 	mxt_t6_command(data, cmd, value, true);
 
@@ -2136,7 +2136,7 @@ static void mxt_regulator_enable(struct mxt_data *data)
 	regulator_enable(data->reg_avdd);
 	msleep(MXT_REGULATOR_DELAY);
 
-	INIT_COMPLETION(data->bl_completion);
+	reinit_completion(&data->bl_completion);
 	gpio_set_value(data->pdata->gpio_reset, 1);
 	mxt_wait_for_completion(data, &data->bl_completion, MXT_POWERON_DELAY);
 }
@@ -2601,7 +2601,7 @@ static int mxt_load_fw(struct device *dev)
 	}
 
 	mxt_free_object_table(data);
-	INIT_COMPLETION(data->bl_completion);
+	reinit_completion(&data->bl_completion);
 
 	ret = mxt_check_bootloader(data, MXT_WAITING_BOOTLOAD_CMD, false);
 	if (ret) {
