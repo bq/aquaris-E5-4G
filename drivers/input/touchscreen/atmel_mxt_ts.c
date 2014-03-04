@@ -481,7 +481,6 @@ static int mxt_wait_for_completion(struct mxt_data *data,
 
 	ret = wait_for_completion_interruptible_timeout(comp, timeout);
 	if (ret < 0) {
-		dev_err(dev, "Wait for completion interrupted.\n");
 		return ret;
 	} else if (ret == 0) {
 		dev_err(dev, "Wait for completion timed out.\n");
