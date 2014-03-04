@@ -293,12 +293,12 @@ struct mxt_data {
 	bool suspended;
 };
 
-static inline size_t mxt_obj_size(const struct mxt_object *obj)
+static size_t mxt_obj_size(const struct mxt_object *obj)
 {
 	return obj->size_minus_one + 1;
 }
 
-static inline size_t mxt_obj_instances(const struct mxt_object *obj)
+static size_t mxt_obj_instances(const struct mxt_object *obj)
 {
 	return obj->instances_minus_one + 1;
 }
