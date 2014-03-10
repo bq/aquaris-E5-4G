@@ -2864,7 +2864,7 @@ static ssize_t mxt_mem_access_write(struct file *filp, struct kobject *kobj,
 	if (count > 0)
 		ret = __mxt_write_reg(data->client, off, count, buf);
 
-	return ret == 0 ? count : 0;
+	return ret == 0 ? count : ret;
 }
 
 static DEVICE_ATTR(fw_version, S_IRUGO, mxt_fw_version_show, NULL);
