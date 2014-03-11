@@ -21,6 +21,7 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/msi.h>
 #include <linux/of_address.h>
 #include <linux/of_pci.h>
 #include <linux/platform_device.h>
@@ -42,6 +43,7 @@ struct gen_pci {
 	struct pci_host_bridge			host;
 	struct gen_pci_cfg_windows		cfg;
 	struct list_head			resources;
+	struct msi_chip				*msi;
 };
 
 static void __iomem *gen_pci_map_cfg_bus_cam(struct pci_bus *bus,
@@ -317,6 +319,26 @@ static int gen_pci_setup(int nr, struct pci_sys_data *sys)
 	return 1;
 }
 
+static void gen_pci_add_bus(struct pci_bus *bus)
+{
+	struct pci_sys_data *sys = bus->sysdata;
+	struct gen_pci *pci = sys->private_data;
+
+	bus->msi = pci->msi;
+}
+
+static void gen_pci_get_msi_parent(struct gen_pci *pci)
+{
+	struct device_node *msi_node;
+
+	msi_node = of_parse_phandle(pci->host.dev.parent->of_node,
+				    "msi-parent", 0);
+	if (!msi_node)
+		return;
+
+	pci->msi = of_pci_find_msi_chip_by_node(msi_node);
+}
+
 static int gen_pci_probe(struct platform_device *pdev)
 {
 	int err;
@@ -334,6 +356,7 @@ static int gen_pci_probe(struct platform_device *pdev)
 		.map_irq	= of_irq_parse_and_map_pci,
 #endif
 		.ops		= &gen_pci_ops,
+		.add_bus	= gen_pci_add_bus,
 	};
 
 	if (!pci)
@@ -371,6 +394,7 @@ static int gen_pci_probe(struct platform_device *pdev)
 		return err;
 	}
 
+	gen_pci_get_msi_parent(pci);
 	pci_common_init_dev(dev, &hw);
 	return 0;
 }

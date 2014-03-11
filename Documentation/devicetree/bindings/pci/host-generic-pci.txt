@@ -69,6 +69,9 @@ Practice: Interrupt Mapping' and requires the following properties:
 
 - interrupt-map-mask : <see aforementioned specification>
 
+MSI support is provided by a separate optional property:
+
+- msi-parent	     : phandle to the device implementing the MSI doorbell
 
 Example:
 
@@ -97,4 +100,6 @@ pci {
 
     // PCI_DEVICE(3)  INT#(1)
     interrupt-map-mask = <0xf800 0x0 0x0  0x7>;
+
+    msi-parent = <&its>
 }
