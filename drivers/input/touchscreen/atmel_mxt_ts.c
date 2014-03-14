@@ -2116,6 +2116,8 @@ static int mxt_read_t9_resolution(struct mxt_data *data)
 static void mxt_regulator_enable(struct mxt_data *data)
 {
 	int error;
+
+	data->in_bootloader = true;
 	gpio_set_value(data->pdata->gpio_reset, 0);
 
 	error = regulator_enable(data->reg_vdd);
@@ -2131,6 +2133,7 @@ static void mxt_regulator_enable(struct mxt_data *data)
 	reinit_completion(&data->bl_completion);
 	gpio_set_value(data->pdata->gpio_reset, 1);
 	mxt_wait_for_completion(data, &data->bl_completion, MXT_POWERON_DELAY);
+	data->in_bootloader = false;
 }
 
 static void mxt_regulator_disable(struct mxt_data *data)
