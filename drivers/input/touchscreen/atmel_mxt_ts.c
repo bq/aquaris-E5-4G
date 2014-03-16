@@ -2409,6 +2409,10 @@ retry_bootloader:
 	if (error)
 		return error;
 
+	error = mxt_debug_msg_init(data);
+	if (error)
+		return error;
+
 	error = mxt_configure_objects(data);
 	if (error)
 		return error;
@@ -2420,10 +2424,6 @@ static int mxt_configure_objects(struct mxt_data *data)
 {
 	struct i2c_client *client = data->client;
 	int error;
-
-	error = mxt_debug_msg_init(data);
-	if (error)
-		return error;
 
 	error = mxt_init_t7_power_cfg(data);
 	if (error) {
