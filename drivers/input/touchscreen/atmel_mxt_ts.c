@@ -170,6 +170,7 @@ struct t9_range {
 #define MXT_FW_CHG_TIMEOUT	300	/* msec */
 #define MXT_WAKEUP_TIME		25	/* msec */
 #define MXT_REGULATOR_DELAY	150	/* msec */
+#define MXT_CHG_DELAY	        100	/* msec */
 #define MXT_POWERON_DELAY	150	/* msec */
 
 /* Command to unlock bootloader */
@@ -2117,7 +2118,6 @@ static void mxt_regulator_enable(struct mxt_data *data)
 {
 	int error;
 
-	data->in_bootloader = true;
 	gpio_set_value(data->pdata->gpio_reset, 0);
 
 	error = regulator_enable(data->reg_vdd);
@@ -2129,10 +2129,17 @@ static void mxt_regulator_enable(struct mxt_data *data)
 		return;
 
 	msleep(MXT_REGULATOR_DELAY);
-
-	reinit_completion(&data->bl_completion);
 	gpio_set_value(data->pdata->gpio_reset, 1);
-	mxt_wait_for_completion(data, &data->bl_completion, MXT_POWERON_DELAY);
+	msleep(MXT_CHG_DELAY);
+
+retry_wait:
+	reinit_completion(&data->bl_completion);
+	data->in_bootloader = true;
+	error = mxt_wait_for_completion(data, &data->bl_completion,
+					MXT_POWERON_DELAY);
+	if (error == -EINTR)
+		goto retry_wait;
+
 	data->in_bootloader = false;
 }
 
@@ -2919,6 +2926,8 @@ static void mxt_start(struct mxt_data *data)
 		return;
 
 	if (data->use_regulator) {
+		enable_irq(data->irq);
+
 		mxt_regulator_enable(data);
 	} else {
 		/*
@@ -2931,9 +2940,10 @@ static void mxt_start(struct mxt_data *data)
 
 		/* Recalibrate since chip has been in deep sleep */
 		mxt_t6_command(data, MXT_COMMAND_CALIBRATE, 1, false);
+
+		mxt_acquire_irq(data);
 	}
 
-	mxt_acquire_irq(data);
 	data->suspended = false;
 }
 
