@@ -804,8 +804,9 @@ static void mxt_proc_t6_messages(struct mxt_data *data, u8 *msg)
 	if (crc != data->config_crc) {
 		data->config_crc = crc;
 		dev_dbg(dev, "T6 Config Checksum: 0x%06X\n", crc);
-		complete(&data->crc_completion);
 	}
+
+	complete(&data->crc_completion);
 
 	/* Detect transition out of reset */
 	if ((data->t6_status & MXT_T6_STATUS_RESET) &&
