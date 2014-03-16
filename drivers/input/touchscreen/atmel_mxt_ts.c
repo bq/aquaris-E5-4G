@@ -288,6 +288,9 @@ struct mxt_data {
 
 	/* Indicates whether device is in suspend */
 	bool suspended;
+
+	/* Indicates whether device is updating configuration */
+	bool updating_config;
 };
 
 static size_t mxt_obj_size(const struct mxt_object *obj)
@@ -2753,15 +2756,18 @@ static ssize_t mxt_update_cfg_store(struct device *dev,
 	if (ret)
 		return ret;
 
+	data->updating_config = true;
+
 	mxt_free_input_device(data);
 
 	if (data->suspended) {
-		if (data->use_regulator)
+		if (data->use_regulator) {
+			enable_irq(data->irq);
 			mxt_regulator_enable(data);
-		else
+		} else {
 			mxt_set_t7_power_cfg(data, MXT_POWER_CFG_RUN);
-
-		mxt_acquire_irq(data);
+			mxt_acquire_irq(data);
+		}
 
 		data->suspended = false;
 	}
@@ -2772,6 +2778,7 @@ static ssize_t mxt_update_cfg_store(struct device *dev,
 
 	ret = count;
 out:
+	data->updating_config = false;
 	return ret;
 }
 
@@ -2949,7 +2956,7 @@ static void mxt_start(struct mxt_data *data)
 
 static void mxt_stop(struct mxt_data *data)
 {
-	if (data->suspended || data->in_bootloader)
+	if (data->suspended || data->in_bootloader || data->updating_config)
 		return;
 
 	disable_irq(data->irq);
