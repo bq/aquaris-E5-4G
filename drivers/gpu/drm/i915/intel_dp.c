@@ -1214,22 +1214,15 @@ void intel_edp_panel_off(struct intel_dp *intel_dp)
 
 	DRM_DEBUG_KMS("Turn eDP power off\n");
 
-<<<<<<< HEAD
-=======
 	edp_wait_backlight_off(intel_dp);
 
->>>>>>> linux-next/akpm-base
 	WARN(!intel_dp->want_panel_vdd, "Need VDD to turn off panel\n");
 
 	pp = ironlake_get_pp_control(intel_dp);
 	/* We need to switch off panel power _and_ force vdd, for otherwise some
 	 * panels get very unhappy and cease to work. */
-<<<<<<< HEAD
-	pp &= ~(POWER_TARGET_ON | EDP_FORCE_VDD | PANEL_POWER_RESET | EDP_BLC_ENABLE);
-=======
 	pp &= ~(POWER_TARGET_ON | PANEL_POWER_RESET | EDP_FORCE_VDD |
 		EDP_BLC_ENABLE);
->>>>>>> linux-next/akpm-base
 
 	pp_ctrl_reg = _pp_ctrl_reg(intel_dp);
 
@@ -1238,14 +1231,8 @@ void intel_edp_panel_off(struct intel_dp *intel_dp)
 	I915_WRITE(pp_ctrl_reg, pp);
 	POSTING_READ(pp_ctrl_reg);
 
-<<<<<<< HEAD
-	intel_dp->want_panel_vdd = false;
-
-	ironlake_wait_panel_off(intel_dp);
-=======
 	intel_dp->last_power_cycle = jiffies;
 	wait_panel_off(intel_dp);
->>>>>>> linux-next/akpm-base
 
 	/* We got a reference when we enabled the VDD. */
 	intel_runtime_pm_put(dev_priv);
@@ -1779,13 +1766,8 @@ static void intel_disable_dp(struct intel_encoder *encoder)
 
 	/* Make sure the panel is off before trying to change the mode. But also
 	 * ensure that we have vdd while we switch off the panel. */
-<<<<<<< HEAD
-	ironlake_edp_panel_vdd_on(intel_dp);
-	ironlake_edp_backlight_off(intel_dp);
-=======
 	intel_edp_panel_vdd_on(intel_dp);
 	intel_edp_backlight_off(intel_dp);
->>>>>>> linux-next/akpm-base
 	intel_dp_sink_dpms(intel_dp, DRM_MODE_DPMS_OFF);
 	intel_edp_panel_off(intel_dp);
 
