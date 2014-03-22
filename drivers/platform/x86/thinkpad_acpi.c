@@ -2321,53 +2321,55 @@ static void hotkey_read_nvram(struct tp_nvram_state *n, const u32 m)
 	}
 }
 
+#define TPACPI_COMPARE_KEY(__scancode, __member) \
+do { \
+	if ((event_mask & (1 << __scancode)) && \
+	    oldn->__member != newn->__member) \
+		tpacpi_hotkey_send_key(__scancode); \
+} while (0)
+
+#define TPACPI_MAY_SEND_KEY(__scancode) \
+do { \
+	if (event_mask & (1 << __scancode)) \
+		tpacpi_hotkey_send_key(__scancode); \
+} while (0)
+
+static void issue_volchange(const unsigned int oldvol,
+			    const unsigned int newvol,
+			    const u32 event_mask)
+{
+	unsigned int i = oldvol;
+
+	while (i > newvol) {
+		TPACPI_MAY_SEND_KEY(TP_ACPI_HOTKEYSCAN_VOLUMEDOWN);
+		i--;
+	}
+	while (i < newvol) {
+		TPACPI_MAY_SEND_KEY(TP_ACPI_HOTKEYSCAN_VOLUMEUP);
+		i++;
+	}
+}
+
+static void issue_brightnesschange(const unsigned int oldbrt,
+				   const unsigned int newbrt,
+				   const u32 event_mask)
+{
+	unsigned int i = oldbrt;
+
+	while (i > newbrt) {
+		TPACPI_MAY_SEND_KEY(TP_ACPI_HOTKEYSCAN_FNEND);
+		i--;
+	}
+	while (i < newbrt) {
+		TPACPI_MAY_SEND_KEY(TP_ACPI_HOTKEYSCAN_FNHOME);
+		i++;
+	}
+}
+
 static void hotkey_compare_and_issue_event(struct tp_nvram_state *oldn,
 					   struct tp_nvram_state *newn,
 					   const u32 event_mask)
 {
-
-#define TPACPI_COMPARE_KEY(__scancode, __member) \
-	do { \
-		if ((event_mask & (1 << __scancode)) && \
-		    oldn->__member != newn->__member) \
-			tpacpi_hotkey_send_key(__scancode); \
-	} while (0)
-
-#define TPACPI_MAY_SEND_KEY(__scancode) \
-	do { \
-		if (event_mask & (1 << __scancode)) \
-			tpacpi_hotkey_send_key(__scancode); \
-	} while (0)
-
-	void issue_volchange(const unsigned int oldvol,
-			     const unsigned int newvol)
-	{
-		unsigned int i = oldvol;
-
-		while (i > newvol) {
-			TPACPI_MAY_SEND_KEY(TP_ACPI_HOTKEYSCAN_VOLUMEDOWN);
-			i--;
-		}
-		while (i < newvol) {
-			TPACPI_MAY_SEND_KEY(TP_ACPI_HOTKEYSCAN_VOLUMEUP);
-			i++;
-		}
-	}
-
-	void issue_brightnesschange(const unsigned int oldbrt,
-				    const unsigned int newbrt)
-	{
-		unsigned int i = oldbrt;
-
-		while (i > newbrt) {
-			TPACPI_MAY_SEND_KEY(TP_ACPI_HOTKEYSCAN_FNEND);
-			i--;
-		}
-		while (i < newbrt) {
-			TPACPI_MAY_SEND_KEY(TP_ACPI_HOTKEYSCAN_FNHOME);
-			i++;
-		}
-	}
 
 	TPACPI_COMPARE_KEY(TP_ACPI_HOTKEYSCAN_THINKPAD, thinkpad_toggle);
 	TPACPI_COMPARE_KEY(TP_ACPI_HOTKEYSCAN_FNSPACE, zoom_toggle);
@@ -2402,7 +2404,8 @@ static void hotkey_compare_and_issue_event(struct tp_nvram_state *oldn,
 		    oldn->volume_level != newn->volume_level) {
 			/* recently muted, or repeated mute keypress, or
 			 * multiple presses ending in mute */
-			issue_volchange(oldn->volume_level, newn->volume_level);
+			issue_volchange(oldn->volume_level, newn->volume_level,
+				event_mask);
 			TPACPI_MAY_SEND_KEY(TP_ACPI_HOTKEYSCAN_MUTE);
 		}
 	} else {
@@ -2412,7 +2415,8 @@ static void hotkey_compare_and_issue_event(struct tp_nvram_state *oldn,
 			TPACPI_MAY_SEND_KEY(TP_ACPI_HOTKEYSCAN_VOLUMEUP);
 		}
 		if (oldn->volume_level != newn->volume_level) {
-			issue_volchange(oldn->volume_level, newn->volume_level);
+			issue_volchange(oldn->volume_level, newn->volume_level,
+				event_mask);
 		} else if (oldn->volume_toggle != newn->volume_toggle) {
 			/* repeated vol up/down keypress at end of scale ? */
 			if (newn->volume_level == 0)
@@ -2425,7 +2429,7 @@ static void hotkey_compare_and_issue_event(struct tp_nvram_state *oldn,
 	/* handle brightness */
 	if (oldn->brightness_level != newn->brightness_level) {
 		issue_brightnesschange(oldn->brightness_level,
-				       newn->brightness_level);
+				       newn->brightness_level, event_mask);
 	} else if (oldn->brightness_toggle != newn->brightness_toggle) {
 		/* repeated key presses that didn't change state */
 		if (newn->brightness_level == 0)
@@ -6776,8 +6780,9 @@ static int __init volume_create_alsa_mixer(void)
 	struct snd_kcontrol *ctl_mute;
 	int rc;
 
-	rc = snd_card_create(alsa_index, alsa_id, THIS_MODULE,
-			    sizeof(struct tpacpi_alsa_data), &card);
+	rc = snd_card_new(&tpacpi_pdev->dev,
+			  alsa_index, alsa_id, THIS_MODULE,
+			  sizeof(struct tpacpi_alsa_data), &card);
 	if (rc < 0 || !card) {
 		pr_err("Failed to create ALSA card structures: %d\n", rc);
 		return 1;
@@ -6828,7 +6833,6 @@ static int __init volume_create_alsa_mixer(void)
 	}
 	data->ctl_mute_id = &ctl_mute->id;
 
-	snd_card_set_dev(card, &tpacpi_pdev->dev);
 	rc = snd_card_register(card);
 	if (rc < 0) {
 		pr_err("Failed to register ALSA card: %d\n", rc);

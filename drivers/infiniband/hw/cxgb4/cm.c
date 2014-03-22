@@ -98,9 +98,9 @@ int c4iw_debug;
 module_param(c4iw_debug, int, 0644);
 MODULE_PARM_DESC(c4iw_debug, "Enable debug logging (default=0)");
 
-static int peer2peer;
+static int peer2peer = 1;
 module_param(peer2peer, int, 0644);
-MODULE_PARM_DESC(peer2peer, "Support peer2peer ULPs (default=0)");
+MODULE_PARM_DESC(peer2peer, "Support peer2peer ULPs (default=1)");
 
 static int p2p_type = FW_RI_INIT_P2PTYPE_READ_REQ;
 module_param(p2p_type, int, 0644);
@@ -400,7 +400,8 @@ static struct dst_entry *find_route(struct c4iw_dev *dev, __be32 local_ip,
 	n = dst_neigh_lookup(&rt->dst, &peer_ip);
 	if (!n)
 		return NULL;
-	if (!our_interface(dev, n->dev)) {
+	if (!our_interface(dev, n->dev) &&
+	    !(n->dev->flags & IFF_LOOPBACK)) {
 		dst_release(&rt->dst);
 		return NULL;
 	}
@@ -1647,6 +1648,15 @@ static inline int act_open_has_tid(int status)
 	       status != CPL_ERR_ARP_MISS;
 }
 
+/* Returns whether a CPL status conveys negative advice.
+ */
+static int is_neg_adv(unsigned int status)
+{
+	return status == CPL_ERR_RTX_NEG_ADVICE ||
+	       status == CPL_ERR_PERSIST_NEG_ADVICE ||
+	       status == CPL_ERR_KEEPALV_NEG_ADVICE;
+}
+
 #define ACT_OPEN_RETRY_COUNT 2
 
 static int import_ep(struct c4iw_ep *ep, int iptype, __u8 *peer_ip,
@@ -1835,7 +1845,7 @@ static int act_open_rpl(struct c4iw_dev *dev, struct sk_buff *skb)
 	PDBG("%s ep %p atid %u status %u errno %d\n", __func__, ep, atid,
 	     status, status2errno(status));
 
-	if (status == CPL_ERR_RTX_NEG_ADVICE) {
+	if (is_neg_adv(status)) {
 		printk(KERN_WARNING MOD "Connection problems for atid %u\n",
 			atid);
 		return 0;
@@ -2265,15 +2275,6 @@ static int peer_close(struct c4iw_dev *dev, struct sk_buff *skb)
 	return 0;
 }
 
-/*
- * Returns whether an ABORT_REQ_RSS message is a negative advice.
- */
-static int is_neg_adv_abort(unsigned int status)
-{
-	return status == CPL_ERR_RTX_NEG_ADVICE ||
-	       status == CPL_ERR_PERSIST_NEG_ADVICE;
-}
-
 static int peer_abort(struct c4iw_dev *dev, struct sk_buff *skb)
 {
 	struct cpl_abort_req_rss *req = cplhdr(skb);
@@ -2287,7 +2288,7 @@ static int peer_abort(struct c4iw_dev *dev, struct sk_buff *skb)
 	unsigned int tid = GET_TID(req);
 
 	ep = lookup_tid(t, tid);
-	if (is_neg_adv_abort(req->status)) {
+	if (is_neg_adv(req->status)) {
 		PDBG("%s neg_adv_abort ep %p tid %u\n", __func__, ep,
 		     ep->hwtid);
 		return 0;
@@ -3346,13 +3347,13 @@ static int rx_pkt(struct c4iw_dev *dev, struct sk_buff *skb)
 		pi = (struct port_info *)netdev_priv(pdev);
 		tx_chan = cxgb4_port_chan(pdev);
 	}
+	neigh_release(neigh);
 	if (!e) {
 		pr_err("%s - failed to allocate l2t entry!\n",
 		       __func__);
 		goto free_dst;
 	}
 
-	neigh_release(neigh);
 	step = dev->rdev.lldi.nrxq / dev->rdev.lldi.nchan;
 	rss_qid = dev->rdev.lldi.rxq_ids[pi->port_id * step];
 	window = (__force u16) htons((__force u16)tcph->window);
@@ -3570,7 +3571,7 @@ static int peer_abort_intr(struct c4iw_dev *dev, struct sk_buff *skb)
 		kfree_skb(skb);
 		return 0;
 	}
-	if (is_neg_adv_abort(req->status)) {
+	if (is_neg_adv(req->status)) {
 		PDBG("%s neg_adv_abort ep %p tid %u\n", __func__, ep,
 		     ep->hwtid);
 		kfree_skb(skb);

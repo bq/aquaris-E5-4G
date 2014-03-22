@@ -14,7 +14,7 @@ DOCBOOKS := z8530book.xml device-drivers.xml \
 	    genericirq.xml s390-drivers.xml uio-howto.xml scsi.xml \
 	    80211.xml debugobjects.xml sh.xml regulator.xml \
 	    alsa-driver-api.xml writing-an-alsa-driver.xml \
-	    tracepoint.xml drm.xml media_api.xml
+	    tracepoint.xml drm.xml media_api.xml w1.xml
 
 include $(srctree)/Documentation/DocBook/media/Makefile
 
@@ -36,6 +36,7 @@ PS_METHOD	= $(prefer-db2x)
 # The targets that may be used.
 PHONY += xmldocs sgmldocs psdocs pdfdocs htmldocs mandocs installmandocs cleandocs
 
+targets += $(DOCBOOKS)
 BOOKS := $(addprefix $(obj)/,$(DOCBOOKS))
 xmldocs: $(BOOKS)
 sgmldocs: xmldocs
@@ -87,20 +88,8 @@ define rule_docproc
         ) > $(dir $@).$(notdir $@).cmd
 endef
 
-%.xml: %.tmpl FORCE
+%.xml: %.tmpl $(KERNELDOC) $(DOCPROC) FORCE
 	$(call if_changed_rule,docproc)
-
-###
-#Read in all saved dependency files
-cmd_files := $(wildcard $(foreach f,$(BOOKS),$(dir $(f)).$(notdir $(f)).cmd))
-
-ifneq ($(cmd_files),)
-  include $(cmd_files)
-endif
-
-###
-# Changes in kernel-doc force a rebuild of all documentation
-$(BOOKS): $(KERNELDOC)
 
 # Tell kbuild to always build the programs
 always := $(hostprogs-y)

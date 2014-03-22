@@ -848,10 +848,6 @@ static unsigned int nmk_gpio_irq_startup(struct irq_data *d)
 {
 	struct nmk_gpio_chip *nmk_chip = irq_data_get_irq_chip_data(d);
 
-	if (gpio_lock_as_irq(&nmk_chip->chip, d->hwirq))
-		dev_err(nmk_chip->chip.dev,
-			"unable to lock HW IRQ %lu for IRQ\n",
-			d->hwirq);
 	clk_enable(nmk_chip->clk);
 	nmk_gpio_irq_unmask(d);
 	return 0;
@@ -863,6 +859,25 @@ static void nmk_gpio_irq_shutdown(struct irq_data *d)
 
 	nmk_gpio_irq_mask(d);
 	clk_disable(nmk_chip->clk);
+}
+
+static int nmk_gpio_irq_reqres(struct irq_data *d)
+{
+	struct nmk_gpio_chip *nmk_chip = irq_data_get_irq_chip_data(d);
+
+	if (gpio_lock_as_irq(&nmk_chip->chip, d->hwirq)) {
+		dev_err(nmk_chip->chip.dev,
+			"unable to lock HW IRQ %lu for IRQ\n",
+			d->hwirq);
+		return -EINVAL;
+	}
+	return 0;
+}
+
+static void nmk_gpio_irq_relres(struct irq_data *d)
+{
+	struct nmk_gpio_chip *nmk_chip = irq_data_get_irq_chip_data(d);
+
 	gpio_unlock_as_irq(&nmk_chip->chip, d->hwirq);
 }
 
@@ -875,6 +890,8 @@ static struct irq_chip nmk_gpio_irq_chip = {
 	.irq_set_wake	= nmk_gpio_irq_set_wake,
 	.irq_startup	= nmk_gpio_irq_startup,
 	.irq_shutdown	= nmk_gpio_irq_shutdown,
+	.irq_request_resources = nmk_gpio_irq_reqres,
+	.irq_release_resources = nmk_gpio_irq_relres,
 	.flags		= IRQCHIP_MASK_ON_SUSPEND,
 };
 
@@ -2035,27 +2052,29 @@ static const struct of_device_id nmk_pinctrl_match[] = {
 	{},
 };
 
-static int nmk_pinctrl_suspend(struct platform_device *pdev, pm_message_t state)
+#ifdef CONFIG_PM_SLEEP
+static int nmk_pinctrl_suspend(struct device *dev)
 {
 	struct nmk_pinctrl *npct;
 
-	npct = platform_get_drvdata(pdev);
+	npct = dev_get_drvdata(dev);
 	if (!npct)
 		return -EINVAL;
 
 	return pinctrl_force_sleep(npct->pctl);
 }
 
-static int nmk_pinctrl_resume(struct platform_device *pdev)
+static int nmk_pinctrl_resume(struct device *dev)
 {
 	struct nmk_pinctrl *npct;
 
-	npct = platform_get_drvdata(pdev);
+	npct = dev_get_drvdata(dev);
 	if (!npct)
 		return -EINVAL;
 
 	return pinctrl_force_default(npct->pctl);
 }
+#endif
 
 static int nmk_pinctrl_probe(struct platform_device *pdev)
 {
@@ -2144,17 +2163,18 @@ static struct platform_driver nmk_gpio_driver = {
 	.probe = nmk_gpio_probe,
 };
 
+static SIMPLE_DEV_PM_OPS(nmk_pinctrl_pm_ops,
+			nmk_pinctrl_suspend,
+			nmk_pinctrl_resume);
+
 static struct platform_driver nmk_pinctrl_driver = {
 	.driver = {
 		.owner = THIS_MODULE,
 		.name = "pinctrl-nomadik",
 		.of_match_table = nmk_pinctrl_match,
+		.pm = &nmk_pinctrl_pm_ops,
 	},
 	.probe = nmk_pinctrl_probe,
-#ifdef CONFIG_PM
-	.suspend = nmk_pinctrl_suspend,
-	.resume = nmk_pinctrl_resume,
-#endif
 };
 
 static int __init nmk_gpio_init(void)

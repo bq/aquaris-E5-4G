@@ -97,10 +97,17 @@ static void __always_unused ____ftrace_check_##name(void)		\
 	do {								\
 		char *type_str = #type"["__stringify(len)"]";		\
 		BUILD_BUG_ON(len > MAX_FILTER_STR_VAL);			\
+<<<<<<< HEAD
 		ret = trace_define_field(event_call, type_str, #item,	\
 				 offsetof(typeof(field), item),		\
 				 sizeof(field.item),			\
 				 is_signed_type(type), filter_type);	\
+=======
+		ret = ftrace_event_define_field(event_call, #type, len,	\
+				#item, offsetof(typeof(field), item),   \
+				sizeof(field.item),			\
+			 	is_signed_type(type), filter_type);	\
+>>>>>>> linux-next/akpm-base
 		if (ret)						\
 			return ret;					\
 	} while (0);

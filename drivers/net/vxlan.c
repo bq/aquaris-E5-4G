@@ -1132,7 +1132,6 @@ static int vxlan_udp_encap_recv(struct sock *sk, struct sk_buff *skb)
 {
 	struct vxlan_sock *vs;
 	struct vxlanhdr *vxh;
-	__be16 port;
 
 	/* Need Vxlan and inner Ethernet header to be present */
 	if (!pskb_may_pull(skb, VXLAN_HLEN))
@@ -1149,8 +1148,6 @@ static int vxlan_udp_encap_recv(struct sock *sk, struct sk_buff *skb)
 
 	if (iptunnel_pull_header(skb, VXLAN_HLEN, htons(ETH_P_TEB)))
 		goto drop;
-
-	port = inet_sk(sk)->inet_sport;
 
 	vs = rcu_dereference_sk_user_data(sk);
 	if (!vs)
@@ -1317,6 +1314,9 @@ static int arp_reduce(struct net_device *dev, struct sk_buff *skb)
 				n->ha, sha);
 
 		neigh_release(n);
+
+		if (reply == NULL)
+			goto out;
 
 		skb_reset_mac_header(reply);
 		__skb_pull(reply, skb_network_offset(reply));
@@ -1978,18 +1978,10 @@ static int vxlan_init(struct net_device *dev)
 	struct vxlan_dev *vxlan = netdev_priv(dev);
 	struct vxlan_net *vn = net_generic(dev_net(dev), vxlan_net_id);
 	struct vxlan_sock *vs;
-	int i;
 
-	dev->tstats = alloc_percpu(struct pcpu_sw_netstats);
+	dev->tstats = netdev_alloc_pcpu_stats(struct pcpu_sw_netstats);
 	if (!dev->tstats)
 		return -ENOMEM;
-
-	for_each_possible_cpu(i) {
-		struct pcpu_sw_netstats *vxlan_stats;
-		vxlan_stats = per_cpu_ptr(dev->tstats, i);
-		u64_stats_init(&vxlan_stats->syncp);
-	}
-
 
 	spin_lock(&vn->sock_lock);
 	vs = vxlan_find_sock(dev_net(dev), vxlan->dst_port);

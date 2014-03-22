@@ -97,6 +97,8 @@ static void bdi_wakeup_thread(struct backing_dev_info *bdi)
 	spin_unlock_bh(&bdi->wb_lock);
 }
 
+EXPORT_TRACEPOINT_SYMBOL_GPL(wbc_writepage);
+
 static void bdi_queue_work(struct backing_dev_info *bdi,
 			   struct wb_writeback_work *work)
 {

@@ -414,8 +414,9 @@ export MODVERDIR := $(if $(KBUILD_EXTMOD),$(firstword $(KBUILD_EXTMOD))/).tmp_ve
 
 # Files to ignore in find ... statements
 
-RCS_FIND_IGNORE := \( -name SCCS -o -name BitKeeper -o -name .svn -o -name CVS \
-		   -o -name .pc -o -name .hg -o -name .git \) -prune -o
+export RCS_FIND_IGNORE := \( -name SCCS -o -name BitKeeper -o -name .svn -o    \
+			  -name CVS -o -name .pc -o -name .hg -o -name .git \) \
+			  -prune -o
 export RCS_TAR_IGNORE := --exclude SCCS --exclude BitKeeper --exclude .svn \
 			 --exclude CVS --exclude .pc --exclude .hg --exclude .git
 
@@ -727,6 +728,13 @@ export KBUILD_IMAGE ?= vmlinux
 # INSTALL_PATH specifies where to place the updated kernel and system map
 # images. Default is /boot, but you can set it to other values
 export	INSTALL_PATH ?= /boot
+
+#
+# INSTALL_DTBS_PATH specifies a prefix for relocations required by build roots.
+# Like INSTALL_MOD_PATH, it isn't defined in the Makefile, but can be passed as
+# an argument if needed. Otherwise it defaults to the kernel install path
+#
+export INSTALL_DTBS_PATH ?= $(INSTALL_PATH)/dtbs/$(KERNELRELEASE)
 
 #
 # INSTALL_MOD_PATH specifies a prefix to MODLIB for module directory
