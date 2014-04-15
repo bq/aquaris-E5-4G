@@ -2713,18 +2713,20 @@ pl330_probe(struct amba_device *adev, const struct amba_id *id)
 
 	amba_set_drvdata(adev, pl330);
 
-	for (i = 0; i < AMBA_NR_IRQS; i++) {
+	ret = 0;
+	for (i = 0; i < AMBA_NR_IRQS; ++i) {
 		irq = adev->irq[i];
 		if (irq) {
-			ret = devm_request_irq(&adev->dev, irq,
-					       pl330_irq_handler, 0,
-					       dev_name(&adev->dev), pl330);
-			if (ret)
-				return ret;
+			ret |= devm_request_irq(&adev->dev, irq,
+						pl330_irq_handler, IRQF_SHARED,
+						dev_name(&adev->dev), pl330);
 		} else {
 			break;
 		}
 	}
+
+	if (ret)
+		return ret;
 
 	pcfg = &pl330->pcfg;
 
