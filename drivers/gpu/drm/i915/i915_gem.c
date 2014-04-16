@@ -2277,8 +2277,9 @@ static bool i915_context_is_banned(struct drm_i915_private *dev_priv,
 		if (!i915_gem_context_is_default(ctx)) {
 			DRM_DEBUG("context hanging too fast, banning!\n");
 			return true;
-		} else if (dev_priv->gpu_error.stop_rings == 0) {
-			DRM_ERROR("gpu hanging too fast, banning!\n");
+		} else if (i915_stop_ring_allow_ban(dev_priv)) {
+			if (i915_stop_ring_allow_warn(dev_priv))
+				DRM_ERROR("gpu hanging too fast, banning!\n");
 			return true;
 		}
 	}
@@ -2790,7 +2791,7 @@ int i915_gpu_idle(struct drm_device *dev)
 
 	/* Flush everything onto the inactive list. */
 	for_each_ring(ring, dev_priv, i) {
-		ret = i915_switch_context(ring, NULL, ring->default_context);
+		ret = i915_switch_context(ring, ring->default_context);
 		if (ret)
 			return ret;
 

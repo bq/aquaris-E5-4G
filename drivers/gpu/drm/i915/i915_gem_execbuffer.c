@@ -1132,7 +1132,7 @@ i915_gem_do_execbuffer(struct drm_device *dev, void *data,
 		mutex_unlock(&dev->struct_mutex);
 		ret = PTR_ERR(ctx);
 		goto pre_mutex_err;
-	} 
+	}
 
 	i915_gem_context_reference(ctx);
 
@@ -1142,6 +1142,7 @@ i915_gem_do_execbuffer(struct drm_device *dev, void *data,
 
 	eb = eb_create(args);
 	if (eb == NULL) {
+		i915_gem_context_unreference(ctx);
 		mutex_unlock(&dev->struct_mutex);
 		ret = -ENOMEM;
 		goto pre_mutex_err;
@@ -1221,7 +1222,7 @@ i915_gem_do_execbuffer(struct drm_device *dev, void *data,
 	if (ret)
 		goto err;
 
-	ret = i915_switch_context(ring, file, ctx);
+	ret = i915_switch_context(ring, ctx);
 	if (ret)
 		goto err;
 
