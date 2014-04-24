@@ -1053,7 +1053,7 @@ static int __sysrq_swap_key_ops(int key, struct sysrq_key_op *insert_op_p,
 	spin_unlock(&sysrq_key_table_lock);
 
 	/*
-	 * A concurrent __handle_sysrq eitehr got the old op or the new op.
+	 * A concurrent __handle_sysrq either got the old op or the new op.
 	 * Wait for it to go away before returning, so the code for an old
 	 * op is not freed (eg. on module unload) while it is in use.
 	 */
