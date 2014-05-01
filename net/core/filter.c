@@ -122,6 +122,13 @@ noinline u64 __bpf_call_base(u64 r1, u64 r2, u64 r3, u64 r4, u64 r5)
 	return 0;
 }
 
+/* Register mappings for user programs. */
+#define A_REG		0
+#define X_REG		7
+#define TMP_REG		8
+#define ARG2_REG	2
+#define ARG3_REG	3
+
 /**
  *	__sk_run_filter - run a filter on a given context
  *	@ctx: buffer to run the filter on
@@ -242,6 +249,8 @@ unsigned int __sk_run_filter(void *ctx, const struct sock_filter_int *insn)
 
 	regs[FP_REG]  = (u64) (unsigned long) &stack[ARRAY_SIZE(stack)];
 	regs[ARG1_REG] = (u64) (unsigned long) ctx;
+	regs[A_REG] = 0;
+	regs[X_REG] = 0;
 
 select_insn:
 	goto *jumptable[insn->code];
@@ -643,12 +652,11 @@ static u64 __get_raw_cpu_id(u64 ctx, u64 A, u64 X, u64 r4, u64 r5)
 	return raw_smp_processor_id();
 }
 
-/* Register mappings for user programs. */
-#define A_REG		0
-#define X_REG		7
-#define TMP_REG		8
-#define ARG2_REG	2
-#define ARG3_REG	3
+/* note that this only generates 32-bit random numbers */
+static u64 __get_random_u32(u64 ctx, u64 A, u64 X, u64 r4, u64 r5)
+{
+	return (u64)prandom_u32();
+}
 
 static bool convert_bpf_extensions(struct sock_filter *fp,
 				   struct sock_filter_int **insnp)
@@ -779,6 +787,7 @@ static bool convert_bpf_extensions(struct sock_filter *fp,
 	case SKF_AD_OFF + SKF_AD_NLATTR:
 	case SKF_AD_OFF + SKF_AD_NLATTR_NEST:
 	case SKF_AD_OFF + SKF_AD_CPU:
+	case SKF_AD_OFF + SKF_AD_RANDOM:
 		/* arg1 = ctx */
 		insn->code = BPF_ALU64 | BPF_MOV | BPF_X;
 		insn->a_reg = ARG1_REG;
@@ -811,6 +820,9 @@ static bool convert_bpf_extensions(struct sock_filter *fp,
 			break;
 		case SKF_AD_OFF + SKF_AD_CPU:
 			insn->imm = __get_raw_cpu_id - __bpf_call_base;
+			break;
+		case SKF_AD_OFF + SKF_AD_RANDOM:
+			insn->imm = __get_random_u32 - __bpf_call_base;
 			break;
 		}
 		break;
@@ -1362,6 +1374,7 @@ int sk_chk_filter(struct sock_filter *filter, unsigned int flen)
 			ANCILLARY(VLAN_TAG);
 			ANCILLARY(VLAN_TAG_PRESENT);
 			ANCILLARY(PAY_OFFSET);
+			ANCILLARY(RANDOM);
 			}
 
 			/* ancillary operation unknown or unsupported */
@@ -1746,6 +1759,7 @@ void sk_decode_filter(struct sock_filter *filt, struct sock_filter *to)
 		[BPF_S_ANC_VLAN_TAG]	= BPF_LD|BPF_B|BPF_ABS,
 		[BPF_S_ANC_VLAN_TAG_PRESENT] = BPF_LD|BPF_B|BPF_ABS,
 		[BPF_S_ANC_PAY_OFFSET]	= BPF_LD|BPF_B|BPF_ABS,
+		[BPF_S_ANC_RANDOM]	= BPF_LD|BPF_B|BPF_ABS,
 		[BPF_S_LD_W_LEN]	= BPF_LD|BPF_W|BPF_LEN,
 		[BPF_S_LD_W_IND]	= BPF_LD|BPF_W|BPF_IND,
 		[BPF_S_LD_H_IND]	= BPF_LD|BPF_H|BPF_IND,

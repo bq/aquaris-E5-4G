@@ -13,6 +13,7 @@ allwinner	Allwinner Technology Co., Ltd.
 altr	Altera Corp.
 amcc	Applied Micro Circuits Corporation (APM, formally AMCC)
 amd	Advanced Micro Devices (AMD), Inc.
+ams	AMS AG
 amstaos	AMS-Taos Inc.
 apm	Applied Micro Circuits Corporation (APM)
 arm	ARM Ltd.
@@ -123,6 +124,7 @@ stericsson	ST-Ericsson
 synology	Synology, Inc.
 ti	Texas Instruments
 tlm	Trusted Logic Mobility
+toradex	Toradex AG
 toshiba	Toshiba Corporation
 toumaz	Toumaz
 usi	Universal Scientifc Industrial Co., Ltd.
