@@ -692,7 +692,7 @@ int __init_memblock memblock_free(phys_addr_t base, phys_addr_t size)
 		     (void *)_RET_IP_);
 
 	kmemleak_free_part(__va(base), size);
-	return __memblock_remove(&memblock.reserved, base, size);
+	return memblock_remove_range(&memblock.reserved, base, size);
 }
 
 static int __init_memblock memblock_reserve_region(phys_addr_t base,
