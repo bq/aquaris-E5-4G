@@ -221,12 +221,16 @@ void exynos_restart(enum reboot_mode mode, const char *cmd)
 }
 
 static struct platform_device exynos_cpuidle = {
-	.name		= "exynos_cpuidle",
-	.id		= -1,
+	.name              = "exynos_cpuidle",
+	.dev.platform_data = exynos_enter_aftr,
+	.id                = -1,
 };
 
 void __init exynos_cpuidle_init(void)
 {
+	if (soc_is_exynos5440())
+		return;
+
 	platform_device_register(&exynos_cpuidle);
 }
 
@@ -250,7 +254,7 @@ static int __init exynos_fdt_map_chipid(unsigned long node, const char *uname,
 {
 	struct map_desc iodesc;
 	__be32 *reg;
-	unsigned long len;
+	int len;
 
 	if (!of_flat_dt_is_compatible(node, "samsung,exynos4210-chipid") &&
 		!of_flat_dt_is_compatible(node, "samsung,exynos5440-clock"))

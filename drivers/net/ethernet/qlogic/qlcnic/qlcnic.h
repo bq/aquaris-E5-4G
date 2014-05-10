@@ -39,8 +39,8 @@
 
 #define _QLCNIC_LINUX_MAJOR 5
 #define _QLCNIC_LINUX_MINOR 3
-#define _QLCNIC_LINUX_SUBVERSION 57
-#define QLCNIC_LINUX_VERSIONID  "5.3.57"
+#define _QLCNIC_LINUX_SUBVERSION 58
+#define QLCNIC_LINUX_VERSIONID  "5.3.58"
 #define QLCNIC_DRV_IDC_VER  0x01
 #define QLCNIC_DRIVER_VERSION  ((_QLCNIC_LINUX_MAJOR << 16) |\
 		 (_QLCNIC_LINUX_MINOR << 8) | (_QLCNIC_LINUX_SUBVERSION))
@@ -537,6 +537,7 @@ struct qlcnic_hardware_context {
 	u8 phys_port_id[ETH_ALEN];
 	u8 lb_mode;
 	u16 vxlan_port;
+	struct device *hwmon_dev;
 };
 
 struct qlcnic_adapter_stats {
@@ -1719,22 +1720,6 @@ static inline u32 qlcnic_tx_avail(struct qlcnic_host_tx_ring *tx_ring)
 				tx_ring->producer;
 }
 
-static inline int qlcnic_set_real_num_queues(struct qlcnic_adapter *adapter,
-					     struct net_device *netdev)
-{
-	int err;
-
-	netdev->num_tx_queues = adapter->drv_tx_rings;
-	netdev->real_num_tx_queues = adapter->drv_tx_rings;
-
-	err = netif_set_real_num_tx_queues(netdev, adapter->drv_tx_rings);
-	if (err)
-		netdev_err(netdev, "failed to set %d Tx queues\n",
-			   adapter->drv_tx_rings);
-
-	return err;
-}
-
 struct qlcnic_nic_template {
 	int (*config_bridged_mode) (struct qlcnic_adapter *, u32);
 	int (*config_led) (struct qlcnic_adapter *, u32, u32);
@@ -2361,4 +2346,18 @@ static inline u32 qlcnic_get_vnic_func_count(struct qlcnic_adapter *adapter)
 	else
 		return QLC_DEFAULT_VNIC_COUNT;
 }
+
+#ifdef CONFIG_QLCNIC_HWMON
+void qlcnic_register_hwmon_dev(struct qlcnic_adapter *);
+void qlcnic_unregister_hwmon_dev(struct qlcnic_adapter *);
+#else
+static inline void qlcnic_register_hwmon_dev(struct qlcnic_adapter *adapter)
+{
+	return;
+}
+static inline void qlcnic_unregister_hwmon_dev(struct qlcnic_adapter *adapter)
+{
+	return;
+}
+#endif
 #endif				/* __QLCNIC_H_ */

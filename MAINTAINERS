@@ -1974,6 +1974,12 @@ S:	Maintained
 F:	drivers/bcma/
 F:	include/linux/bcma/
 
+BROADCOM SYSTEMPORT ETHERNET DRIVER
+M:	Florian Fainelli <f.fainelli@gmail.com>
+L:	netdev@vger.kernel.org
+S:	Supported
+F:	drivers/net/ethernet/broadcom/bcmsysport.*
+
 BROCADE BFA FC SCSI DRIVER
 M:	Anil Gurumurthy <anil.gurumurthy@qlogic.com>
 M:	Sudarsana Kalluru <sudarsana.kalluru@qlogic.com>
@@ -2252,12 +2258,6 @@ L:	linux-usb@vger.kernel.org
 S:	Maintained
 F:	drivers/usb/host/ohci-ep93xx.c
 
-CIRRUS LOGIC CS4270 SOUND DRIVER
-M:	Timur Tabi <timur@tabi.org>
-L:	alsa-devel@alsa-project.org (moderated for non-subscribers)
-S:	Odd Fixes
-F:	sound/soc/codecs/cs4270*
-
 CIRRUS LOGIC AUDIO CODEC DRIVERS
 M:	Brian Austin <brian.austin@cirrus.com>
 M:	Paul Handrigan <Paul.Handrigan@cirrus.com>
@@ -2422,7 +2422,6 @@ F:	drivers/net/ethernet/ti/cpmac.c
 CPU FREQUENCY DRIVERS
 M:	Rafael J. Wysocki <rjw@rjwysocki.net>
 M:	Viresh Kumar <viresh.kumar@linaro.org>
-L:	cpufreq@vger.kernel.org
 L:	linux-pm@vger.kernel.org
 S:	Maintained
 T:	git git://git.kernel.org/pub/scm/linux/kernel/git/rafael/linux-pm.git
@@ -2433,7 +2432,6 @@ F:	include/linux/cpufreq.h
 CPU FREQUENCY DRIVERS - ARM BIG LITTLE
 M:	Viresh Kumar <viresh.kumar@linaro.org>
 M:	Sudeep Holla <sudeep.holla@arm.com>
-L:	cpufreq@vger.kernel.org
 L:	linux-pm@vger.kernel.org
 W:	http://www.arm.com/products/processors/technologies/biglittleprocessing.php
 S:	Maintained
@@ -4215,9 +4213,11 @@ S:	Maintained
 F:	fs/hpfs/
 
 HSI SUBSYSTEM
-M:	Sebastian Reichel <sre@debian.org>
+M:	Sebastian Reichel <sre@kernel.org>
+T:	git git://git.kernel.org/pub/scm/linux/kernel/git/sre/linux-hsi.git
 S:	Maintained
 F:	Documentation/ABI/testing/sysfs-bus-hsi
+F:	Documentation/hsi.txt
 F:	drivers/hsi/
 F:	include/linux/hsi/
 F:	include/uapi/linux/hsi/
@@ -6418,6 +6418,7 @@ F:	drivers/usb/*/*omap*
 F:	arch/arm/*omap*/usb*
 
 OMAP GPIO DRIVER
+M:	Javier Martinez Canillas <javier@dowhile0.org>
 M:	Santosh Shilimkar <santosh.shilimkar@ti.com>
 M:	Kevin Hilman <khilman@deeprootsystems.com>
 L:	linux-omap@vger.kernel.org
@@ -6707,6 +6708,7 @@ F:	Documentation/PCI/
 F:	drivers/pci/
 F:	include/linux/pci*
 F:	arch/x86/pci/
+F:	arch/x86/kernel/quirks.c
 
 PCI DRIVER FOR IMX6
 M:	Richard Zhu <r65037@freescale.com>
@@ -8491,6 +8493,13 @@ M:	Florian Schilhabel <florian.c.schilhabel@googlemail.com>.
 S:	Odd Fixes
 F:	drivers/staging/rtl8712/
 
+STAGING - REALTEK RTL8723U WIRELESS DRIVER
+M:	Larry Finger <Larry.Finger@lwfinger.net>
+M:	Jes Sorensen <Jes.Sorensen@redhat.com>
+L:	linux-wireless@vger.kernel.org
+S:	Maintained
+F:	drivers/staging/rtl8723au/
+
 STAGING - SILICON MOTION SM7XX FRAME BUFFER DRIVER
 M:	Teddy Wang <teddy.wang@siliconmotion.com.cn>
 S:	Odd Fixes
@@ -9110,6 +9119,9 @@ F:	arch/um/os-Linux/drivers/
 
 TURBOCHANNEL SUBSYSTEM
 M:	"Maciej W. Rozycki" <macro@linux-mips.org>
+M:	Ralf Baechle <ralf@linux-mips.org>
+L:	linux-mips@linux-mips.org
+Q:	http://patchwork.linux-mips.org/project/linux-mips/list/
 S:	Maintained
 F:	drivers/tc/
 F:	include/linux/tc.h

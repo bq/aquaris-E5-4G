@@ -1326,7 +1326,7 @@ static int __dev_close_many(struct list_head *head)
 		 * dev->stop() will invoke napi_disable() on all of it's
 		 * napi_struct instances on this device.
 		 */
-		smp_mb__after_clear_bit(); /* Commit netif_running(). */
+		smp_mb__after_atomic(); /* Commit netif_running(). */
 	}
 
 	dev_deactivate_many(head);
@@ -1661,6 +1661,29 @@ bool is_skb_forwardable(struct net_device *dev, struct sk_buff *skb)
 }
 EXPORT_SYMBOL_GPL(is_skb_forwardable);
 
+int __dev_forward_skb(struct net_device *dev, struct sk_buff *skb)
+{
+	if (skb_shinfo(skb)->tx_flags & SKBTX_DEV_ZEROCOPY) {
+		if (skb_copy_ubufs(skb, GFP_ATOMIC)) {
+			atomic_long_inc(&dev->rx_dropped);
+			kfree_skb(skb);
+			return NET_RX_DROP;
+		}
+	}
+
+	if (unlikely(!is_skb_forwardable(dev, skb))) {
+		atomic_long_inc(&dev->rx_dropped);
+		kfree_skb(skb);
+		return NET_RX_DROP;
+	}
+
+	skb_scrub_packet(skb, true);
+	skb->protocol = eth_type_trans(skb, dev);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(__dev_forward_skb);
+
 /**
  * dev_forward_skb - loopback an skb to another netif
  *
@@ -1681,24 +1704,7 @@ EXPORT_SYMBOL_GPL(is_skb_forwardable);
  */
 int dev_forward_skb(struct net_device *dev, struct sk_buff *skb)
 {
-	if (skb_shinfo(skb)->tx_flags & SKBTX_DEV_ZEROCOPY) {
-		if (skb_copy_ubufs(skb, GFP_ATOMIC)) {
-			atomic_long_inc(&dev->rx_dropped);
-			kfree_skb(skb);
-			return NET_RX_DROP;
-		}
-	}
-
-	if (unlikely(!is_skb_forwardable(dev, skb))) {
-		atomic_long_inc(&dev->rx_dropped);
-		kfree_skb(skb);
-		return NET_RX_DROP;
-	}
-
-	skb_scrub_packet(skb, true);
-	skb->protocol = eth_type_trans(skb, dev);
-
-	return netif_rx_internal(skb);
+	return __dev_forward_skb(dev, skb) ?: netif_rx_internal(skb);
 }
 EXPORT_SYMBOL_GPL(dev_forward_skb);
 
@@ -2418,7 +2424,7 @@ EXPORT_SYMBOL(netdev_rx_csum_fault);
  * 2. No high memory really exists on this machine.
  */
 
-static int illegal_highdma(const struct net_device *dev, struct sk_buff *skb)
+static int illegal_highdma(struct net_device *dev, struct sk_buff *skb)
 {
 #ifdef CONFIG_HIGHMEM
 	int i;
@@ -2493,38 +2499,36 @@ static int dev_gso_segment(struct sk_buff *skb, netdev_features_t features)
 }
 
 static netdev_features_t harmonize_features(struct sk_buff *skb,
-					    const struct net_device *dev,
-					    netdev_features_t features)
+	netdev_features_t features)
 {
 	int tmp;
 
 	if (skb->ip_summed != CHECKSUM_NONE &&
 	    !can_checksum_protocol(features, skb_network_protocol(skb, &tmp))) {
 		features &= ~NETIF_F_ALL_CSUM;
-	} else if (illegal_highdma(dev, skb)) {
+	} else if (illegal_highdma(skb->dev, skb)) {
 		features &= ~NETIF_F_SG;
 	}
 
 	return features;
 }
 
-netdev_features_t netif_skb_dev_features(struct sk_buff *skb,
-					 const struct net_device *dev)
+netdev_features_t netif_skb_features(struct sk_buff *skb)
 {
 	__be16 protocol = skb->protocol;
-	netdev_features_t features = dev->features;
+	netdev_features_t features = skb->dev->features;
 
-	if (skb_shinfo(skb)->gso_segs > dev->gso_max_segs)
+	if (skb_shinfo(skb)->gso_segs > skb->dev->gso_max_segs)
 		features &= ~NETIF_F_GSO_MASK;
 
 	if (protocol == htons(ETH_P_8021Q) || protocol == htons(ETH_P_8021AD)) {
 		struct vlan_ethhdr *veh = (struct vlan_ethhdr *)skb->data;
 		protocol = veh->h_vlan_encapsulated_proto;
 	} else if (!vlan_tx_tag_present(skb)) {
-		return harmonize_features(skb, dev, features);
+		return harmonize_features(skb, features);
 	}
 
-	features &= (dev->vlan_features | NETIF_F_HW_VLAN_CTAG_TX |
+	features &= (skb->dev->vlan_features | NETIF_F_HW_VLAN_CTAG_TX |
 					       NETIF_F_HW_VLAN_STAG_TX);
 
 	if (protocol == htons(ETH_P_8021Q) || protocol == htons(ETH_P_8021AD))
@@ -2532,9 +2536,9 @@ netdev_features_t netif_skb_dev_features(struct sk_buff *skb,
 				NETIF_F_GEN_CSUM | NETIF_F_HW_VLAN_CTAG_TX |
 				NETIF_F_HW_VLAN_STAG_TX;
 
-	return harmonize_features(skb, dev, features);
+	return harmonize_features(skb, features);
 }
-EXPORT_SYMBOL(netif_skb_dev_features);
+EXPORT_SYMBOL(netif_skb_features);
 
 int dev_hard_start_xmit(struct sk_buff *skb, struct net_device *dev,
 			struct netdev_queue *txq)
@@ -3343,7 +3347,7 @@ static void net_tx_action(struct softirq_action *h)
 
 			root_lock = qdisc_lock(q);
 			if (spin_trylock(root_lock)) {
-				smp_mb__before_clear_bit();
+				smp_mb__before_atomic();
 				clear_bit(__QDISC_STATE_SCHED,
 					  &q->state);
 				qdisc_run(q);
@@ -3353,7 +3357,7 @@ static void net_tx_action(struct softirq_action *h)
 					      &q->state)) {
 					__netif_reschedule(q);
 				} else {
-					smp_mb__before_clear_bit();
+					smp_mb__before_atomic();
 					clear_bit(__QDISC_STATE_SCHED,
 						  &q->state);
 				}
@@ -4244,7 +4248,7 @@ void __napi_complete(struct napi_struct *n)
 	BUG_ON(n->gro_list);
 
 	list_del(&n->poll_list);
-	smp_mb__before_clear_bit();
+	smp_mb__before_atomic();
 	clear_bit(NAPI_STATE_SCHED, &n->state);
 }
 EXPORT_SYMBOL(__napi_complete);
@@ -5600,10 +5604,6 @@ static void rollback_registered_many(struct list_head *head)
 		*/
 		call_netdevice_notifiers(NETDEV_UNREGISTER, dev);
 
-		if (!dev->rtnl_link_ops ||
-		    dev->rtnl_link_state == RTNL_LINK_INITIALIZED)
-			rtmsg_ifinfo(RTM_DELLINK, dev, ~0U, GFP_KERNEL);
-
 		/*
 		 *	Flush the unicast and multicast chains
 		 */
@@ -5612,6 +5612,10 @@ static void rollback_registered_many(struct list_head *head)
 
 		if (dev->netdev_ops->ndo_uninit)
 			dev->netdev_ops->ndo_uninit(dev);
+
+		if (!dev->rtnl_link_ops ||
+		    dev->rtnl_link_state == RTNL_LINK_INITIALIZED)
+			rtmsg_ifinfo(RTM_DELLINK, dev, ~0U, GFP_KERNEL);
 
 		/* Notifier chain MUST detach us all upper devices. */
 		WARN_ON(netdev_has_any_upper_dev(dev));

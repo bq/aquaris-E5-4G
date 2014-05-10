@@ -89,6 +89,7 @@ arch_trigger_all_cpu_backtrace_handler(unsigned int cmd, struct pt_regs *regs)
 
 	return NMI_DONE;
 }
+NOKPROBE_SYMBOL(arch_trigger_all_cpu_backtrace_handler);
 
 static int __init register_trigger_all_cpu_backtrace(void)
 {

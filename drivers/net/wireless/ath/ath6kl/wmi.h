@@ -898,7 +898,6 @@ struct wmi_start_scan_cmd {
  *  flags here
  */
 enum wmi_scan_ctrl_flags_bits {
-
 	/* set if can scan in the connect cmd */
 	CONNECT_SCAN_CTRL_FLAGS = 0x01,
 
@@ -1068,7 +1067,7 @@ struct wmi_power_mode_cmd {
 } __packed;
 
 /*
- * Policy to determnine whether power save failure event should be sent to
+ * Policy to determine whether power save failure event should be sent to
  * host during scanning
  */
 enum power_save_fail_event_policy {

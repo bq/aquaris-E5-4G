@@ -167,31 +167,41 @@ EXPORT_SYMBOL_GPL(__wake_up_sync);	/* For internal use only */
  * stops them from bleeding out - it would still allow subsequent
  * loads to move into the critical region).
  */
-void
+bool
 prepare_to_wait(wait_queue_head_t *q, wait_queue_t *wait, int state)
 {
 	unsigned long flags;
+	bool ret = false;
 
 	wait->flags &= ~WQ_FLAG_EXCLUSIVE;
 	spin_lock_irqsave(&q->lock, flags);
-	if (list_empty(&wait->task_list))
+	if (list_empty(&wait->task_list)) {
 		__add_wait_queue(q, wait);
+		ret = true;
+	}
 	set_current_state(state);
 	spin_unlock_irqrestore(&q->lock, flags);
+
+	return ret;
 }
 EXPORT_SYMBOL(prepare_to_wait);
 
-void
+bool
 prepare_to_wait_exclusive(wait_queue_head_t *q, wait_queue_t *wait, int state)
 {
 	unsigned long flags;
+	bool ret = false;
 
 	wait->flags |= WQ_FLAG_EXCLUSIVE;
 	spin_lock_irqsave(&q->lock, flags);
-	if (list_empty(&wait->task_list))
+	if (list_empty(&wait->task_list)) {
 		__add_wait_queue_tail(q, wait);
+		ret = true;
+	}
 	set_current_state(state);
 	spin_unlock_irqrestore(&q->lock, flags);
+
+	return ret;
 }
 EXPORT_SYMBOL(prepare_to_wait_exclusive);
 
@@ -394,7 +404,7 @@ EXPORT_SYMBOL(__wake_up_bit);
  *
  * In order for this to function properly, as it uses waitqueue_active()
  * internally, some kind of memory barrier must be done prior to calling
- * this. Typically, this will be smp_mb__after_clear_bit(), but in some
+ * this. Typically, this will be smp_mb__after_atomic(), but in some
  * cases where bitflags are manipulated non-atomically under a lock, one
  * may need to use a less regular barrier, such fs/inode.c's smp_mb(),
  * because spin_unlock() does not guarantee a memory barrier.
