@@ -55,9 +55,9 @@ int crash_mem_ranges;
 int __init early_init_dt_scan_fw_dump(unsigned long node,
 			const char *uname, int depth, void *data)
 {
-	__be32 *sections;
+	const __be32 *sections;
 	int i, num_sections;
-	unsigned long size;
+	int size;
 	const int *token;
 
 	if (depth != 1 || strcmp(uname, "rtas") != 0)
@@ -69,7 +69,7 @@ int __init early_init_dt_scan_fw_dump(unsigned long node,
 	 */
 	token = of_get_flat_dt_prop(node, "ibm,configure-kernel-dump", NULL);
 	if (!token)
-		return 0;
+		return 1;
 
 	fw_dump.fadump_supported = 1;
 	fw_dump.ibm_configure_kernel_dump = *token;
@@ -92,7 +92,7 @@ int __init early_init_dt_scan_fw_dump(unsigned long node,
 					&size);
 
 	if (!sections)
-		return 0;
+		return 1;
 
 	num_sections = size / (3 * sizeof(u32));
 
@@ -110,6 +110,7 @@ int __init early_init_dt_scan_fw_dump(unsigned long node,
 			break;
 		}
 	}
+
 	return 1;
 }
 

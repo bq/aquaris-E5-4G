@@ -113,6 +113,9 @@ config IOMMU_HELPER
 config KERNEL_MODE_NEON
 	def_bool y
 
+config FIX_EARLYCON_MEM
+	def_bool y
+
 source "init/Kconfig"
 
 source "kernel/Kconfig.freezer"
@@ -241,6 +244,9 @@ config ARCH_WANT_HUGE_PMD_SHARE
 	def_bool y if !ARM64_64K_PAGES
 
 config HAVE_ARCH_TRANSPARENT_HUGEPAGE
+	def_bool y
+
+config ARCH_HAS_CACHE_LINE_SIZE
 	def_bool y
 
 source "mm/Kconfig"

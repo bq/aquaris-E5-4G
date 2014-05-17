@@ -56,9 +56,6 @@ struct device;
 struct phy_device;
 /* 802.11 specific */
 struct wireless_dev;
-					/* source back-compat hooks */
-#define SET_ETHTOOL_OPS(netdev,ops) \
-	( (netdev)->ethtool_ops = (ops) )
 
 void netdev_set_default_ethtool_ops(struct net_device *dev,
 				    const struct ethtool_ops *ops);
@@ -493,7 +490,7 @@ static inline void napi_disable(struct napi_struct *n)
 static inline void napi_enable(struct napi_struct *n)
 {
 	BUG_ON(!test_bit(NAPI_STATE_SCHED, &n->state));
-	smp_mb__before_clear_bit();
+	smp_mb__before_atomic();
 	clear_bit(NAPI_STATE_SCHED, &n->state);
 }
 
@@ -2633,6 +2630,7 @@ int dev_get_phys_port_id(struct net_device *dev,
 			 struct netdev_phys_port_id *ppid);
 int dev_hard_start_xmit(struct sk_buff *skb, struct net_device *dev,
 			struct netdev_queue *txq);
+int __dev_forward_skb(struct net_device *dev, struct sk_buff *skb);
 int dev_forward_skb(struct net_device *dev, struct sk_buff *skb);
 bool is_skb_forwardable(struct net_device *dev, struct sk_buff *skb);
 
@@ -3180,12 +3178,7 @@ void netdev_change_features(struct net_device *dev);
 void netif_stacked_transfer_operstate(const struct net_device *rootdev,
 					struct net_device *dev);
 
-netdev_features_t netif_skb_dev_features(struct sk_buff *skb,
-					 const struct net_device *dev);
-static inline netdev_features_t netif_skb_features(struct sk_buff *skb)
-{
-	return netif_skb_dev_features(skb, skb->dev);
-}
+netdev_features_t netif_skb_features(struct sk_buff *skb);
 
 static inline bool net_gso_ok(netdev_features_t features, int gso_type)
 {

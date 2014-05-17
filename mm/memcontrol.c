@@ -526,18 +526,14 @@ static inline bool mem_cgroup_is_root(struct mem_cgroup *memcg)
 
 static inline unsigned short mem_cgroup_id(struct mem_cgroup *memcg)
 {
-	/*
-	 * The ID of the root cgroup is 0, but memcg treat 0 as an
-	 * invalid ID, so we return (cgroup_id + 1).
-	 */
-	return memcg->css.cgroup->id + 1;
+	return memcg->css.id;
 }
 
 static inline struct mem_cgroup *mem_cgroup_from_id(unsigned short id)
 {
 	struct cgroup_subsys_state *css;
 
-	css = css_from_id(id - 1, &memory_cgrp_subsys);
+	css = css_from_id(id, &memory_cgrp_subsys);
 	return mem_cgroup_from_css(css);
 }
 
@@ -570,7 +566,8 @@ void sock_update_memcg(struct sock *sk)
 		memcg = mem_cgroup_from_task(current);
 		cg_proto = sk->sk_prot->proto_cgroup(memcg);
 		if (!mem_cgroup_is_root(memcg) &&
-		    memcg_proto_active(cg_proto) && css_tryget(&memcg->css)) {
+		    memcg_proto_active(cg_proto) &&
+		    css_tryget_online(&memcg->css)) {
 			sk->sk_cgrp = cg_proto;
 		}
 		rcu_read_unlock();
@@ -837,7 +834,7 @@ retry:
 	 */
 	__mem_cgroup_remove_exceeded(mz->memcg, mz, mctz);
 	if (!res_counter_soft_limit_excess(&mz->memcg->res) ||
-		!css_tryget(&mz->memcg->css))
+	    !css_tryget_online(&mz->memcg->css))
 		goto retry;
 done:
 	return mz;
@@ -1079,7 +1076,7 @@ static struct mem_cgroup *get_mem_cgroup_from_mm(struct mm_struct *mm)
 		memcg = mem_cgroup_from_task(rcu_dereference(mm->owner));
 		if (unlikely(!memcg))
 			memcg = root_mem_cgroup;
-	} while (!css_tryget(&memcg->css));
+	} while (!css_tryget_online(&memcg->css));
 	rcu_read_unlock();
 	return memcg;
 }
@@ -1116,7 +1113,8 @@ skip_node:
 	 */
 	if (next_css) {
 		if ((next_css == &root->css) ||
-		    ((next_css->flags & CSS_ONLINE) && css_tryget(next_css)))
+		    ((next_css->flags & CSS_ONLINE) &&
+		     css_tryget_online(next_css)))
 			return mem_cgroup_from_css(next_css);
 
 		prev_css = next_css;
@@ -1162,7 +1160,7 @@ mem_cgroup_iter_load(struct mem_cgroup_reclaim_iter *iter,
 		 * would be returned all the time.
 		 */
 		if (position && position != root &&
-				!css_tryget(&position->css))
+		    !css_tryget_online(&position->css))
 			position = NULL;
 	}
 	return position;
@@ -2777,9 +2775,9 @@ static void __mem_cgroup_cancel_local_charge(struct mem_cgroup *memcg,
 
 /*
  * A helper function to get mem_cgroup from ID. must be called under
- * rcu_read_lock().  The caller is responsible for calling css_tryget if
- * the mem_cgroup is used for charging. (dropping refcnt from swap can be
- * called against removed memcg.)
+ * rcu_read_lock().  The caller is responsible for calling
+ * css_tryget_online() if the mem_cgroup is used for charging. (dropping
+ * refcnt from swap can be called against removed memcg.)
  */
 static struct mem_cgroup *mem_cgroup_lookup(unsigned short id)
 {
@@ -2802,14 +2800,14 @@ struct mem_cgroup *try_get_mem_cgroup_from_page(struct page *page)
 	lock_page_cgroup(pc);
 	if (PageCgroupUsed(pc)) {
 		memcg = pc->mem_cgroup;
-		if (memcg && !css_tryget(&memcg->css))
+		if (memcg && !css_tryget_online(&memcg->css))
 			memcg = NULL;
 	} else if (PageSwapCache(page)) {
 		ent.val = page_private(page);
 		id = lookup_swap_cgroup_id(ent);
 		rcu_read_lock();
 		memcg = mem_cgroup_lookup(id);
-		if (memcg && !css_tryget(&memcg->css))
+		if (memcg && !css_tryget_online(&memcg->css))
 			memcg = NULL;
 		rcu_read_unlock();
 	}
@@ -3373,7 +3371,7 @@ struct kmem_cache *__memcg_kmem_get_cache(struct kmem_cache *cachep,
 	}
 
 	/* The corresponding put will be done in the workqueue. */
-	if (!css_tryget(&memcg->css))
+	if (!css_tryget_online(&memcg->css))
 		goto out;
 	rcu_read_unlock();
 
@@ -4141,8 +4139,8 @@ void mem_cgroup_uncharge_swap(swp_entry_t ent)
 	memcg = mem_cgroup_lookup(id);
 	if (memcg) {
 		/*
-		 * We uncharge this because swap is freed.
-		 * This memcg can be obsolete one. We avoid calling css_tryget
+		 * We uncharge this because swap is freed.  This memcg can
+		 * be obsolete one. We avoid calling css_tryget_online().
 		 */
 		if (!mem_cgroup_is_root(memcg))
 			res_counter_uncharge(&memcg->memsw, PAGE_SIZE);
@@ -4780,14 +4778,15 @@ static int mem_cgroup_force_empty(struct mem_cgroup *memcg)
 	return 0;
 }
 
-static int mem_cgroup_force_empty_write(struct cgroup_subsys_state *css,
-					unsigned int event)
+static ssize_t mem_cgroup_force_empty_write(struct kernfs_open_file *of,
+					    char *buf, size_t nbytes,
+					    loff_t off)
 {
-	struct mem_cgroup *memcg = mem_cgroup_from_css(css);
+	struct mem_cgroup *memcg = mem_cgroup_from_css(of_css(of));
 
 	if (mem_cgroup_is_root(memcg))
 		return -EINVAL;
-	return mem_cgroup_force_empty(memcg);
+	return mem_cgroup_force_empty(memcg) ?: nbytes;
 }
 
 static u64 mem_cgroup_hierarchy_read(struct cgroup_subsys_state *css,
@@ -5037,17 +5036,18 @@ static int memcg_update_kmem_limit(struct mem_cgroup *memcg,
  * The user of this function is...
  * RES_LIMIT.
  */
-static int mem_cgroup_write(struct cgroup_subsys_state *css, struct cftype *cft,
-			    char *buffer)
+static ssize_t mem_cgroup_write(struct kernfs_open_file *of,
+				char *buf, size_t nbytes, loff_t off)
 {
-	struct mem_cgroup *memcg = mem_cgroup_from_css(css);
+	struct mem_cgroup *memcg = mem_cgroup_from_css(of_css(of));
 	enum res_type type;
 	int name;
 	unsigned long long val;
 	int ret;
 
-	type = MEMFILE_TYPE(cft->private);
-	name = MEMFILE_ATTR(cft->private);
+	buf = strstrip(buf);
+	type = MEMFILE_TYPE(of_cft(of)->private);
+	name = MEMFILE_ATTR(of_cft(of)->private);
 
 	switch (name) {
 	case RES_LIMIT:
@@ -5056,7 +5056,7 @@ static int mem_cgroup_write(struct cgroup_subsys_state *css, struct cftype *cft,
 			break;
 		}
 		/* This function does all necessary parse...reuse it */
-		ret = res_counter_memparse_write_strategy(buffer, &val);
+		ret = res_counter_memparse_write_strategy(buf, &val);
 		if (ret)
 			break;
 		if (type == _MEM)
@@ -5069,7 +5069,7 @@ static int mem_cgroup_write(struct cgroup_subsys_state *css, struct cftype *cft,
 			return -EINVAL;
 		break;
 	case RES_SOFT_LIMIT:
-		ret = res_counter_memparse_write_strategy(buffer, &val);
+		ret = res_counter_memparse_write_strategy(buf, &val);
 		if (ret)
 			break;
 		/*
@@ -5086,7 +5086,7 @@ static int mem_cgroup_write(struct cgroup_subsys_state *css, struct cftype *cft,
 		ret = -EINVAL; /* should be BUG() ? */
 		break;
 	}
-	return ret;
+	return ret ?: nbytes;
 }
 
 static void memcg_get_hierarchical_limit(struct mem_cgroup *memcg,
@@ -5113,14 +5113,15 @@ out:
 	*memsw_limit = min_memsw_limit;
 }
 
-static int mem_cgroup_reset(struct cgroup_subsys_state *css, unsigned int event)
+static ssize_t mem_cgroup_reset(struct kernfs_open_file *of, char *buf,
+				size_t nbytes, loff_t off)
 {
-	struct mem_cgroup *memcg = mem_cgroup_from_css(css);
+	struct mem_cgroup *memcg = mem_cgroup_from_css(of_css(of));
 	int name;
 	enum res_type type;
 
-	type = MEMFILE_TYPE(event);
-	name = MEMFILE_ATTR(event);
+	type = MEMFILE_TYPE(of_cft(of)->private);
+	name = MEMFILE_ATTR(of_cft(of)->private);
 
 	switch (name) {
 	case RES_MAX_USAGE:
@@ -5145,7 +5146,7 @@ static int mem_cgroup_reset(struct cgroup_subsys_state *css, unsigned int event)
 		break;
 	}
 
-	return 0;
+	return nbytes;
 }
 
 static u64 mem_cgroup_move_charge_read(struct cgroup_subsys_state *css,
@@ -5721,10 +5722,10 @@ static void kmem_cgroup_css_offline(struct mem_cgroup *memcg)
 	 * which is then paired with css_put during uncharge resp. here.
 	 *
 	 * Although this might sound strange as this path is called from
-	 * css_offline() when the referencemight have dropped down to 0
-	 * and shouldn't be incremented anymore (css_tryget would fail)
-	 * we do not have other options because of the kmem allocations
-	 * lifetime.
+	 * css_offline() when the referencemight have dropped down to 0 and
+	 * shouldn't be incremented anymore (css_tryget_online() would
+	 * fail) we do not have other options because of the kmem
+	 * allocations lifetime.
 	 */
 	css_get(&memcg->css);
 
@@ -5843,9 +5844,10 @@ static void memcg_event_ptable_queue_proc(struct file *file,
  * Input must be in format '<event_fd> <control_fd> <args>'.
  * Interpretation of args is defined by control file implementation.
  */
-static int memcg_write_event_control(struct cgroup_subsys_state *css,
-				     struct cftype *cft, char *buffer)
+static ssize_t memcg_write_event_control(struct kernfs_open_file *of,
+					 char *buf, size_t nbytes, loff_t off)
 {
+	struct cgroup_subsys_state *css = of_css(of);
 	struct mem_cgroup *memcg = mem_cgroup_from_css(css);
 	struct mem_cgroup_event *event;
 	struct cgroup_subsys_state *cfile_css;
@@ -5856,15 +5858,17 @@ static int memcg_write_event_control(struct cgroup_subsys_state *css,
 	char *endp;
 	int ret;
 
-	efd = simple_strtoul(buffer, &endp, 10);
+	buf = strstrip(buf);
+
+	efd = simple_strtoul(buf, &endp, 10);
 	if (*endp != ' ')
 		return -EINVAL;
-	buffer = endp + 1;
+	buf = endp + 1;
 
-	cfd = simple_strtoul(buffer, &endp, 10);
+	cfd = simple_strtoul(buf, &endp, 10);
 	if ((*endp != ' ') && (*endp != '\0'))
 		return -EINVAL;
-	buffer = endp + 1;
+	buf = endp + 1;
 
 	event = kzalloc(sizeof(*event), GFP_KERNEL);
 	if (!event)
@@ -5932,8 +5936,8 @@ static int memcg_write_event_control(struct cgroup_subsys_state *css,
 	 * automatically removed on cgroup destruction but the removal is
 	 * asynchronous, so take an extra ref on @css.
 	 */
-	cfile_css = css_tryget_from_dir(cfile.file->f_dentry->d_parent,
-					&memory_cgrp_subsys);
+	cfile_css = css_tryget_online_from_dir(cfile.file->f_dentry->d_parent,
+					       &memory_cgrp_subsys);
 	ret = -EINVAL;
 	if (IS_ERR(cfile_css))
 		goto out_put_cfile;
@@ -5942,7 +5946,7 @@ static int memcg_write_event_control(struct cgroup_subsys_state *css,
 		goto out_put_cfile;
 	}
 
-	ret = event->register_event(memcg, event->eventfd, buffer);
+	ret = event->register_event(memcg, event->eventfd, buf);
 	if (ret)
 		goto out_put_css;
 
@@ -5955,7 +5959,7 @@ static int memcg_write_event_control(struct cgroup_subsys_state *css,
 	fdput(cfile);
 	fdput(efile);
 
-	return 0;
+	return nbytes;
 
 out_put_css:
 	css_put(css);
@@ -5980,25 +5984,25 @@ static struct cftype mem_cgroup_files[] = {
 	{
 		.name = "max_usage_in_bytes",
 		.private = MEMFILE_PRIVATE(_MEM, RES_MAX_USAGE),
-		.trigger = mem_cgroup_reset,
+		.write = mem_cgroup_reset,
 		.read_u64 = mem_cgroup_read_u64,
 	},
 	{
 		.name = "limit_in_bytes",
 		.private = MEMFILE_PRIVATE(_MEM, RES_LIMIT),
-		.write_string = mem_cgroup_write,
+		.write = mem_cgroup_write,
 		.read_u64 = mem_cgroup_read_u64,
 	},
 	{
 		.name = "soft_limit_in_bytes",
 		.private = MEMFILE_PRIVATE(_MEM, RES_SOFT_LIMIT),
-		.write_string = mem_cgroup_write,
+		.write = mem_cgroup_write,
 		.read_u64 = mem_cgroup_read_u64,
 	},
 	{
 		.name = "failcnt",
 		.private = MEMFILE_PRIVATE(_MEM, RES_FAILCNT),
-		.trigger = mem_cgroup_reset,
+		.write = mem_cgroup_reset,
 		.read_u64 = mem_cgroup_read_u64,
 	},
 	{
@@ -6007,7 +6011,7 @@ static struct cftype mem_cgroup_files[] = {
 	},
 	{
 		.name = "force_empty",
-		.trigger = mem_cgroup_force_empty_write,
+		.write = mem_cgroup_force_empty_write,
 	},
 	{
 		.name = "use_hierarchy",
@@ -6017,7 +6021,7 @@ static struct cftype mem_cgroup_files[] = {
 	},
 	{
 		.name = "cgroup.event_control",		/* XXX: for compat */
-		.write_string = memcg_write_event_control,
+		.write = memcg_write_event_control,
 		.flags = CFTYPE_NO_PREFIX,
 		.mode = S_IWUGO,
 	},
@@ -6050,7 +6054,7 @@ static struct cftype mem_cgroup_files[] = {
 	{
 		.name = "kmem.limit_in_bytes",
 		.private = MEMFILE_PRIVATE(_KMEM, RES_LIMIT),
-		.write_string = mem_cgroup_write,
+		.write = mem_cgroup_write,
 		.read_u64 = mem_cgroup_read_u64,
 	},
 	{
@@ -6061,13 +6065,13 @@ static struct cftype mem_cgroup_files[] = {
 	{
 		.name = "kmem.failcnt",
 		.private = MEMFILE_PRIVATE(_KMEM, RES_FAILCNT),
-		.trigger = mem_cgroup_reset,
+		.write = mem_cgroup_reset,
 		.read_u64 = mem_cgroup_read_u64,
 	},
 	{
 		.name = "kmem.max_usage_in_bytes",
 		.private = MEMFILE_PRIVATE(_KMEM, RES_MAX_USAGE),
-		.trigger = mem_cgroup_reset,
+		.write = mem_cgroup_reset,
 		.read_u64 = mem_cgroup_read_u64,
 	},
 #ifdef CONFIG_SLABINFO
@@ -6090,19 +6094,19 @@ static struct cftype memsw_cgroup_files[] = {
 	{
 		.name = "memsw.max_usage_in_bytes",
 		.private = MEMFILE_PRIVATE(_MEMSWAP, RES_MAX_USAGE),
-		.trigger = mem_cgroup_reset,
+		.write = mem_cgroup_reset,
 		.read_u64 = mem_cgroup_read_u64,
 	},
 	{
 		.name = "memsw.limit_in_bytes",
 		.private = MEMFILE_PRIVATE(_MEMSWAP, RES_LIMIT),
-		.write_string = mem_cgroup_write,
+		.write = mem_cgroup_write,
 		.read_u64 = mem_cgroup_read_u64,
 	},
 	{
 		.name = "memsw.failcnt",
 		.private = MEMFILE_PRIVATE(_MEMSWAP, RES_FAILCNT),
-		.trigger = mem_cgroup_reset,
+		.write = mem_cgroup_reset,
 		.read_u64 = mem_cgroup_read_u64,
 	},
 	{ },	/* terminate */
@@ -6282,7 +6286,7 @@ mem_cgroup_css_online(struct cgroup_subsys_state *css)
 	struct mem_cgroup *memcg = mem_cgroup_from_css(css);
 	struct mem_cgroup *parent = mem_cgroup_from_css(css_parent(css));
 
-	if (css->cgroup->id > MEM_CGROUP_ID_MAX)
+	if (css->id > MEM_CGROUP_ID_MAX)
 		return -ENOSPC;
 
 	if (!parent)
@@ -6377,7 +6381,7 @@ static void mem_cgroup_css_free(struct cgroup_subsys_state *css)
 	/*
 	 * XXX: css_offline() would be where we should reparent all
 	 * memory to prepare the cgroup for destruction.  However,
-	 * memcg does not do css_tryget() and res_counter charging
+	 * memcg does not do css_tryget_online() and res_counter charging
 	 * under the same RCU lock region, which means that charging
 	 * could race with offlining.  Offlining only happens to
 	 * cgroups with no tasks in them but charges can show up
@@ -6391,9 +6395,9 @@ static void mem_cgroup_css_free(struct cgroup_subsys_state *css)
 	 *                           lookup_swap_cgroup_id()
 	 *                           rcu_read_lock()
 	 *                           mem_cgroup_lookup()
-	 *                           css_tryget()
+	 *                           css_tryget_online()
 	 *                           rcu_read_unlock()
-	 * disable css_tryget()
+	 * disable css_tryget_online()
 	 * call_rcu()
 	 *   offline_css()
 	 *     reparent_charges()

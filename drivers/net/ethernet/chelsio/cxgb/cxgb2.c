@@ -281,7 +281,7 @@ static int cxgb_close(struct net_device *dev)
 	if (adapter->params.stats_update_period &&
 	    !(adapter->open_device_map & PORT_MASK)) {
 		/* Stop statistics accumulation. */
-		smp_mb__after_clear_bit();
+		smp_mb__after_atomic();
 		spin_lock(&adapter->work_lock);   /* sync with update task */
 		spin_unlock(&adapter->work_lock);
 		cancel_mac_stats_update(adapter);
@@ -1100,7 +1100,7 @@ static int init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 		netif_napi_add(netdev, &adapter->napi, t1_poll, 64);
 
-		SET_ETHTOOL_OPS(netdev, &t1_ethtool_ops);
+		netdev->ethtool_ops = &t1_ethtool_ops;
 	}
 
 	if (t1_init_sw_modules(adapter, bi) < 0) {

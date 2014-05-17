@@ -1831,6 +1831,10 @@ int of_update_property(struct device_node *np, struct property *newprop)
 	if (!found)
 		return -ENODEV;
 
+	/* At early boot, bail out and defer setup to of_init() */
+	if (!of_kset)
+		return found ? 0 : -ENODEV;
+
 	/* Update the sysfs attribute */
 	sysfs_remove_bin_file(&np->kobj, &oldprop->attr);
 	__of_add_property_sysfs(np, newprop);
@@ -2036,8 +2040,8 @@ void of_alias_scan(void * (*dt_alloc)(u64 size, u64 align))
  * @np:		Pointer to the given device_node
  * @stem:	Alias stem of the given device_node
  *
- * The function travels the lookup table to get alias id for the given
- * device_node and alias stem.  It returns the alias id if find it.
+ * The function travels the lookup table to get the alias id for the given
+ * device_node and alias stem.  It returns the alias id if found.
  */
 int of_alias_get_id(struct device_node *np, const char *stem)
 {
