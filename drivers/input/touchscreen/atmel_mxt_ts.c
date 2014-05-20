@@ -2293,7 +2293,10 @@ static int mxt_initialize_t100_input_device(struct mxt_data *data)
 		return -ENOMEM;
 	}
 
-	input_dev->name = "atmel_mxt_ts T100 touchscreen";
+	if (data->pdata->input_name)
+		input_dev->name = data->pdata->input_name;
+	else
+		input_dev->name = "atmel_mxt_ts T100 touchscreen";
 
 	input_dev->phys = data->phys;
 	input_dev->id.bustype = BUS_I2C;
