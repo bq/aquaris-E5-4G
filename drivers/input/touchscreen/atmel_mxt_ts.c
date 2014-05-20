@@ -1591,7 +1591,7 @@ static int mxt_check_reg_init(struct mxt_data *data)
 	} else {
 		dev_warn(dev,
 			 "Warning: Info CRC error - device=0x%06X file=0x%06X\n",
-			data->info_crc, info_crc);
+			 data->info_crc, info_crc);
 	}
 
 	/* Malloc memory to store configuration */
@@ -1789,16 +1789,16 @@ recheck:
 			retry = true;
 			goto recheck;
 		} else {
-		    dev_dbg(dev, "T7 cfg zero after reset, overriding\n");
-		    data->t7_cfg.active = 20;
-		    data->t7_cfg.idle = 100;
-		    return mxt_set_t7_power_cfg(data, MXT_POWER_CFG_RUN);
+			dev_dbg(dev, "T7 cfg zero after reset, overriding\n");
+			data->t7_cfg.active = 20;
+			data->t7_cfg.idle = 100;
+			return mxt_set_t7_power_cfg(data, MXT_POWER_CFG_RUN);
 		}
 	}
 
 	dev_dbg(dev, "Initialized power cfg: ACTV %d, IDLE %d\n",
-				data->t7_cfg.active, data->t7_cfg.idle);
-		return 0;
+		data->t7_cfg.active, data->t7_cfg.idle);
+	return 0;
 }
 
 static int mxt_acquire_irq(struct mxt_data *data)
@@ -2113,7 +2113,7 @@ static int mxt_read_t9_resolution(struct mxt_data *data)
 	}
 
 	dev_dbg(&client->dev,
-		 "Touchscreen size X%uY%u\n", data->max_x, data->max_y);
+		"Touchscreen size X%uY%u\n", data->max_x, data->max_y);
 
 	return 0;
 }
@@ -2382,9 +2382,7 @@ retry_bootloader:
 			goto retry_bootloader;
 		} else {
 			if (retry) {
-				dev_err(&client->dev,
-						"Could not recover device from "
-						"bootloader mode\n");
+				dev_err(&client->dev, "Could not recover from bootloader mode\n");
 				/*
 				 * We can reflash from this state, so do not
 				 * abort init
@@ -2657,12 +2655,12 @@ static int mxt_load_fw(struct device *dev)
 
 		if (frame % 50 == 0)
 			dev_dbg(dev, "Sent %d frames, %d/%zd bytes\n",
-				 frame, pos, fw->size);
+				frame, pos, fw->size);
 	}
 
 	/* Wait for flash. */
 	ret = mxt_wait_for_completion(data, &data->bl_completion,
-				MXT_FW_RESET_TIME);
+				      MXT_FW_RESET_TIME);
 	if (ret)
 		goto disable_irq;
 
@@ -3128,7 +3126,7 @@ err_free_mem:
 }
 
 static int mxt_probe(struct i2c_client *client,
-			       const struct i2c_device_id *id)
+		const struct i2c_device_id *id)
 {
 	struct mxt_data *data;
 	int error;
