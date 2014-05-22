@@ -274,11 +274,7 @@ static inline void get_bh(struct buffer_head *bh)
         atomic_inc(&bh->b_count);
 }
 
-static inline void put_bh(struct buffer_head *bh)
-{
-        smp_mb__before_atomic();
-        atomic_dec(&bh->b_count);
-}
+void put_bh(struct buffer_head *bh);
 
 static inline void brelse(struct buffer_head *bh)
 {
