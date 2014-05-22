@@ -1,0 +1,1 @@
+make MHL_BUILD_NUM=22 I2C_BUS_NUM=4 MHL_PRODUCT_NUM=8620 ARCH=arm KERNELPATH=~/kernel_panda_linaro1304/src CROSS_COMPILE=arm-eabi- clean
