@@ -44,6 +44,7 @@
 #include <acpi/video.h>
 #include <linux/pm.h>
 #include <linux/pm_runtime.h>
+#include <linux/oom.h>
 
 #define LP_RING(d) (&((struct drm_i915_private *)(d))->ring[RCS])
 
@@ -1017,6 +1018,9 @@ static int i915_getparam(struct drm_device *dev, void *data,
 	case I915_PARAM_HAS_EXEC_HANDLE_LUT:
 		value = 1;
 		break;
+	case I915_PARAM_CMD_PARSER_VERSION:
+		value = i915_cmd_parser_get_version();
+		break;
 	default:
 		DRM_DEBUG("Unknown parameter %d\n", param->param);
 		return -EINVAL;
@@ -1277,12 +1281,13 @@ static void i915_switcheroo_set_state(struct pci_dev *pdev, enum vga_switcheroo_
 static bool i915_switcheroo_can_switch(struct pci_dev *pdev)
 {
 	struct drm_device *dev = pci_get_drvdata(pdev);
-	bool can_switch;
 
-	spin_lock(&dev->count_lock);
-	can_switch = (dev->open_count == 0);
-	spin_unlock(&dev->count_lock);
-	return can_switch;
+	/*
+	 * FIXME: open_count is protected by drm_global_mutex but that would lead to
+	 * locking inversion with the driver load path. And the access here is
+	 * completely racy anyway. So don't bother with locking for now.
+	 */
+	return dev->open_count == 0;
 }
 
 static const struct vga_switcheroo_client_ops i915_switcheroo_ops = {
@@ -1326,7 +1331,7 @@ static int i915_load_modeset_init(struct drm_device *dev)
 
 	intel_power_domains_init_hw(dev_priv);
 
-	ret = drm_irq_install(dev);
+	ret = drm_irq_install(dev, dev->pdev->irq);
 	if (ret)
 		goto cleanup_gem_stolen;
 
@@ -1336,7 +1341,7 @@ static int i915_load_modeset_init(struct drm_device *dev)
 
 	ret = i915_gem_init(dev);
 	if (ret)
-		goto cleanup_power;
+		goto cleanup_irq;
 
 	INIT_WORK(&dev_priv->console_resume_work, intel_console_resume);
 
@@ -1345,10 +1350,8 @@ static int i915_load_modeset_init(struct drm_device *dev)
 	/* Always safe in the mode setting case. */
 	/* FIXME: do pre/post-mode set stuff in core KMS code */
 	dev->vblank_disable_allowed = true;
-	if (INTEL_INFO(dev)->num_pipes == 0) {
-		intel_display_power_put(dev_priv, POWER_DOMAIN_VGA);
+	if (INTEL_INFO(dev)->num_pipes == 0)
 		return 0;
-	}
 
 	ret = intel_fbdev_init(dev);
 	if (ret)
@@ -1383,8 +1386,7 @@ cleanup_gem:
 	mutex_unlock(&dev->struct_mutex);
 	WARN_ON(dev_priv->mm.aliasing_ppgtt);
 	drm_mm_takedown(&dev_priv->gtt.base.mm);
-cleanup_power:
-	intel_display_power_put(dev_priv, POWER_DOMAIN_VGA);
+cleanup_irq:
 	drm_irq_uninstall(dev);
 cleanup_gem_stolen:
 	i915_gem_cleanup_stolen(dev);
@@ -1569,6 +1571,7 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 	spin_lock_init(&dev_priv->backlight_lock);
 	spin_lock_init(&dev_priv->uncore.lock);
 	spin_lock_init(&dev_priv->mm.object_stat_lock);
+	dev_priv->ring_index = 0;
 	mutex_init(&dev_priv->dpio_lock);
 	mutex_init(&dev_priv->modeset_restore_lock);
 
@@ -1739,8 +1742,8 @@ out_power_well:
 	intel_power_domains_remove(dev_priv);
 	drm_vblank_cleanup(dev);
 out_gem_unload:
-	if (dev_priv->mm.inactive_shrinker.scan_objects)
-		unregister_shrinker(&dev_priv->mm.inactive_shrinker);
+	WARN_ON(unregister_oom_notifier(&dev_priv->mm.oom_notifier));
+	unregister_shrinker(&dev_priv->mm.shrinker);
 
 	if (dev->pdev->msi_enabled)
 		pci_disable_msi(dev->pdev);
@@ -1791,8 +1794,8 @@ int i915_driver_unload(struct drm_device *dev)
 
 	i915_teardown_sysfs(dev);
 
-	if (dev_priv->mm.inactive_shrinker.scan_objects)
-		unregister_shrinker(&dev_priv->mm.inactive_shrinker);
+	WARN_ON(unregister_oom_notifier(&dev_priv->mm.oom_notifier));
+	unregister_shrinker(&dev_priv->mm.shrinker);
 
 	io_mapping_free(dev_priv->gtt.mappable);
 	arch_phys_wc_del(dev_priv->gtt.mtrr);
@@ -1865,7 +1868,7 @@ int i915_driver_unload(struct drm_device *dev)
 		kmem_cache_destroy(dev_priv->slab);
 
 	pci_dev_put(dev_priv->bridge_dev);
-	kfree(dev->dev_private);
+	kfree(dev_priv);
 
 	return 0;
 }
@@ -1926,6 +1929,8 @@ void i915_driver_postclose(struct drm_device *dev, struct drm_file *file)
 {
 	struct drm_i915_file_private *file_priv = file->driver_priv;
 
+	if (file_priv && file_priv->bsd_ring)
+		file_priv->bsd_ring = NULL;
 	kfree(file_priv);
 }
 
@@ -1979,6 +1984,7 @@ const struct drm_ioctl_desc i915_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(I915_GEM_CONTEXT_DESTROY, i915_gem_context_destroy_ioctl, DRM_UNLOCKED|DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(I915_REG_READ, i915_reg_read_ioctl, DRM_UNLOCKED|DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(I915_GET_RESET_STATS, i915_get_reset_stats_ioctl, DRM_UNLOCKED|DRM_RENDER_ALLOW),
+	DRM_IOCTL_DEF_DRV(I915_GEM_USERPTR, i915_gem_userptr_ioctl, DRM_UNLOCKED|DRM_RENDER_ALLOW),
 };
 
 int i915_max_ioctl = DRM_ARRAY_SIZE(i915_ioctls);

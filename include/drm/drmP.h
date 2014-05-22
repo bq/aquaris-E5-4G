@@ -83,6 +83,7 @@ struct drm_device;
 
 struct device_node;
 struct videomode;
+struct reservation_object;
 
 #include <drm/drm_os_linux.h>
 #include <drm/drm_hashtab.h>
@@ -142,11 +143,6 @@ int drm_err(const char *func, const char *format, ...);
 #define DRIVER_MODESET     0x2000
 #define DRIVER_PRIME       0x4000
 #define DRIVER_RENDER      0x8000
-
-#define DRIVER_BUS_PCI 0x1
-#define DRIVER_BUS_PLATFORM 0x2
-#define DRIVER_BUS_USB 0x3
-#define DRIVER_BUS_HOST1X 0x4
 
 /***********************************************************************/
 /** \name Begin the DRM... */
@@ -731,13 +727,7 @@ struct drm_master {
 #define DRM_SCANOUTPOS_ACCURATE     (1 << 2)
 
 struct drm_bus {
-	int bus_type;
-	int (*get_irq)(struct drm_device *dev);
-	const char *(*get_name)(struct drm_device *dev);
 	int (*set_busid)(struct drm_device *dev, struct drm_master *master);
-	int (*set_unique)(struct drm_device *dev, struct drm_master *master,
-			  struct drm_unique *unique);
-	int (*irq_by_busid)(struct drm_device *dev, struct drm_irq_busid *p);
 };
 
 /**
@@ -936,6 +926,8 @@ struct drm_driver {
 	/* low-level interface used by drm_gem_prime_{import,export} */
 	int (*gem_prime_pin)(struct drm_gem_object *obj);
 	void (*gem_prime_unpin)(struct drm_gem_object *obj);
+	struct reservation_object * (*gem_prime_res_obj)(
+				struct drm_gem_object *obj);
 	struct sg_table *(*gem_prime_get_sg_table)(struct drm_gem_object *obj);
 	struct drm_gem_object *(*gem_prime_import_sg_table)(
 				struct drm_device *dev, size_t size,
@@ -974,11 +966,6 @@ struct drm_driver {
 	const struct drm_ioctl_desc *ioctls;
 	int num_ioctls;
 	const struct file_operations *fops;
-	union {
-		struct pci_driver *pci;
-		struct platform_device *platform_device;
-		struct usb_driver *usb;
-	} kdriver;
 	struct drm_bus *bus;
 
 	/* List of devices hanging off this driver with stealth attach. */
@@ -1058,7 +1045,6 @@ struct drm_vblank_crtc {
  */
 struct drm_device {
 	struct list_head legacy_dev_list;/**< list of devices per driver for stealth attach cleanup */
-	char *devname;			/**< For /proc/interrupts */
 	int if_version;			/**< Highest interface version set */
 
 	/** \name Lifetime Management */
@@ -1076,14 +1062,14 @@ struct drm_device {
 
 	/** \name Locks */
 	/*@{ */
-	spinlock_t count_lock;		/**< For inuse, drm_device::open_count, drm_device::buf_use */
 	struct mutex struct_mutex;	/**< For others */
 	struct mutex master_mutex;      /**< For drm_minor::master and drm_file::is_master */
 	/*@} */
 
 	/** \name Usage Counters */
 	/*@{ */
-	int open_count;			/**< Outstanding files open */
+	int open_count;			/**< Outstanding files open, protected by drm_global_mutex. */
+	spinlock_t buf_lock;		/**< For drm_device::buf_use and a few other things. */
 	int buf_use;			/**< Buffers in use -- cannot alloc */
 	atomic_t buf_alloc;		/**< Buffer allocation in progress */
 	/*@} */
@@ -1114,6 +1100,8 @@ struct drm_device {
 	/** \name Context support */
 	/*@{ */
 	bool irq_enabled;		/**< True if irq handler is enabled */
+	int irq;
+
 	__volatile__ long context_flag;	/**< Context swapping flag */
 	int last_context;		/**< Last current context */
 	/*@} */
@@ -1184,11 +1172,6 @@ static __inline__ int drm_core_check_feature(struct drm_device *dev,
 					     int feature)
 {
 	return ((dev->driver->driver_features & feature) ? 1 : 0);
-}
-
-static inline int drm_dev_to_irq(struct drm_device *dev)
-{
-	return dev->driver->bus->get_irq(dev);
 }
 
 static inline void drm_device_set_unplugged(struct drm_device *dev)
@@ -1310,7 +1293,7 @@ extern int drm_remove_magic(struct drm_master *master, drm_magic_t magic);
 /* Cache management (drm_cache.c) */
 void drm_clflush_pages(struct page *pages[], unsigned long num_pages);
 void drm_clflush_sg(struct sg_table *st);
-void drm_clflush_virt_range(char *addr, unsigned long length);
+void drm_clflush_virt_range(void *addr, unsigned long length);
 
 				/* Locking IOCTL support (drm_lock.h) */
 extern int drm_lock(struct drm_device *dev, void *data,
@@ -1363,7 +1346,7 @@ extern void drm_core_reclaim_buffers(struct drm_device *dev,
 				/* IRQ support (drm_irq.h) */
 extern int drm_control(struct drm_device *dev, void *data,
 		       struct drm_file *file_priv);
-extern int drm_irq_install(struct drm_device *dev);
+extern int drm_irq_install(struct drm_device *dev, int irq);
 extern int drm_irq_uninstall(struct drm_device *dev);
 
 extern int drm_vblank_init(struct drm_device *dev, int num_crtcs);
@@ -1522,6 +1505,9 @@ extern drm_dma_handle_t *drm_pci_alloc(struct drm_device *dev, size_t size,
 				       size_t align);
 extern void __drm_pci_free(struct drm_device *dev, drm_dma_handle_t * dmah);
 extern void drm_pci_free(struct drm_device *dev, drm_dma_handle_t * dmah);
+extern int drm_pci_set_unique(struct drm_device *dev,
+			      struct drm_master *master,
+			      struct drm_unique *u);
 
 			       /* sysfs support (drm_sysfs.c) */
 struct drm_sysfs_class;

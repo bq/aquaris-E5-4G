@@ -169,7 +169,8 @@ err:
 	return ERR_PTR(ret);
 }
 
-struct tegra_bo *tegra_bo_import(struct drm_device *drm, struct dma_buf *buf)
+static struct tegra_bo *tegra_bo_import(struct drm_device *drm,
+					struct dma_buf *buf)
 {
 	struct dma_buf_attachment *attach;
 	struct tegra_bo *bo;
@@ -419,7 +420,7 @@ struct dma_buf *tegra_gem_prime_export(struct drm_device *drm,
 				       int flags)
 {
 	return dma_buf_export(gem, &tegra_gem_prime_dmabuf_ops, gem->size,
-			      flags);
+			      flags, NULL);
 }
 
 struct drm_gem_object *tegra_gem_prime_import(struct drm_device *drm,

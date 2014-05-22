@@ -642,7 +642,7 @@ static int create_snapshot(struct btrfs_root *root, struct inode *dir,
 		return -EINVAL;
 
 	atomic_inc(&root->will_be_snapshoted);
-	smp_mb__after_atomic_inc();
+	smp_mb__after_atomic();
 	btrfs_wait_nocow_write(root);
 
 	ret = btrfs_start_delalloc_inodes(root, 0);
@@ -2301,9 +2301,7 @@ static noinline int btrfs_ioctl_snap_destroy(struct file *file,
 	}
 
 	mutex_lock(&inode->i_mutex);
-	err = d_invalidate(dentry);
-	if (err)
-		goto out_unlock;
+	d_invalidate(dentry);
 
 	down_write(&root->fs_info->subvol_sem);
 
@@ -2388,7 +2386,6 @@ out_release:
 	btrfs_subvolume_release_metadata(root, &block_rsv, qgroup_reserved);
 out_up_write:
 	up_write(&root->fs_info->subvol_sem);
-out_unlock:
 	mutex_unlock(&inode->i_mutex);
 	if (!err) {
 		shrink_dcache_sb(root->fs_info->sb);

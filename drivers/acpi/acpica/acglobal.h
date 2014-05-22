@@ -44,54 +44,15 @@
 #ifndef __ACGLOBAL_H__
 #define __ACGLOBAL_H__
 
-/*
- * Ensure that the globals are actually defined and initialized only once.
- *
- * The use of these macros allows a single list of globals (here) in order
- * to simplify maintenance of the code.
- */
-#ifdef DEFINE_ACPI_GLOBALS
-#define ACPI_GLOBAL(type,name) \
-	extern type name; \
-	type name
-
-#define ACPI_INIT_GLOBAL(type,name,value) \
-	type name=value
-
-#else
-#define ACPI_GLOBAL(type,name) \
-	extern type name
-
-#define ACPI_INIT_GLOBAL(type,name,value) \
-	extern type name
-#endif
-
-#ifdef DEFINE_ACPI_GLOBALS
-
-/* Public globals, available from outside ACPICA subsystem */
-
 /*****************************************************************************
  *
- * Runtime configuration (static defaults that can be overriden at runtime)
+ * Globals related to the ACPI tables
  *
  ****************************************************************************/
 
-/*
- * Enable "slack" in the AML interpreter?  Default is FALSE, and the
- * interpreter strictly follows the ACPI specification. Setting to TRUE
- * allows the interpreter to ignore certain errors and/or bad AML constructs.
- *
- * Currently, these features are enabled by this flag:
- *
- * 1) Allow "implicit return" of last value in a control method
- * 2) Allow access beyond the end of an operation region
- * 3) Allow access to uninitialized locals/args (auto-init to integer 0)
- * 4) Allow ANY object type to be a source operand for the Store() operator
- * 5) Allow unresolved references (invalid target name) in package objects
- * 6) Enable warning messages for behavior that is not ACPI spec compliant
- */
-ACPI_INIT_GLOBAL(u8, acpi_gbl_enable_interpreter_slack, FALSE);
+/* Master list of all ACPI tables that were found in the RSDT/XSDT */
 
+<<<<<<< HEAD
 /*
  * Automatically serialize all methods that create named objects? Default
  * is TRUE, meaning that all non_serialized methods are scanned once at
@@ -182,6 +143,8 @@ ACPI_INIT_GLOBAL(u8, acpi_gbl_osi_data, 0);
 /*
  * Master list of all ACPI tables that were found in the RSDT/XSDT.
  */
+=======
+>>>>>>> linux-next/akpm-base
 ACPI_GLOBAL(struct acpi_table_list, acpi_gbl_root_table_list);
 
 /* DSDT information. Used to check for DSDT corruption */
@@ -279,7 +242,6 @@ ACPI_GLOBAL(acpi_exception_handler, acpi_gbl_exception_handler);
 ACPI_GLOBAL(acpi_init_handler, acpi_gbl_init_handler);
 ACPI_GLOBAL(acpi_table_handler, acpi_gbl_table_handler);
 ACPI_GLOBAL(void *, acpi_gbl_table_handler_context);
-ACPI_GLOBAL(struct acpi_walk_state *, acpi_gbl_breakpoint_walk);
 ACPI_GLOBAL(acpi_interface_handler, acpi_gbl_interface_handler);
 ACPI_GLOBAL(struct acpi_sci_handler_info *, acpi_gbl_sci_handler_list);
 
@@ -296,7 +258,6 @@ ACPI_GLOBAL(u8, acpi_gbl_reg_methods_executed);
 /* Misc */
 
 ACPI_GLOBAL(u32, acpi_gbl_original_mode);
-ACPI_GLOBAL(u32, acpi_gbl_rsdp_original_location);
 ACPI_GLOBAL(u32, acpi_gbl_ns_lookup_count);
 ACPI_GLOBAL(u32, acpi_gbl_ps_find_count);
 ACPI_GLOBAL(u16, acpi_gbl_pm1_enable_register_save);
@@ -483,11 +444,6 @@ ACPI_GLOBAL(u16, acpi_gbl_node_type_count_misc);
 ACPI_GLOBAL(u32, acpi_gbl_num_nodes);
 ACPI_GLOBAL(u32, acpi_gbl_num_objects);
 
-ACPI_GLOBAL(u32, acpi_gbl_size_of_parse_tree);
-ACPI_GLOBAL(u32, acpi_gbl_size_of_method_trees);
-ACPI_GLOBAL(u32, acpi_gbl_size_of_node_entries);
-ACPI_GLOBAL(u32, acpi_gbl_size_of_acpi_objects);
-
 #endif				/* ACPI_DEBUGGER */
 
 /*****************************************************************************
@@ -509,5 +465,6 @@ ACPI_INIT_GLOBAL(ACPI_FILE, acpi_gbl_debug_file, NULL);
  ****************************************************************************/
 
 extern const struct ah_predefined_name asl_predefined_info[];
+extern const struct ah_device_id asl_device_ids[];
 
 #endif				/* __ACGLOBAL_H__ */
