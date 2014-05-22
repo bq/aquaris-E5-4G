@@ -27,13 +27,9 @@
 #define MAPPING_POOL_SIZE 1024
 #define PRISON_CELLS 1024
 #define COMMIT_PERIOD HZ
-<<<<<<< HEAD
-#define NO_SPACE_TIMEOUT (HZ * 60)
-=======
 #define NO_SPACE_TIMEOUT_SECS 60
 
 static unsigned no_space_timeout_secs = NO_SPACE_TIMEOUT_SECS;
->>>>>>> linux-next/akpm-base
 
 DECLARE_DM_KCOPYD_THROTTLE_WITH_MODULE_PARM(snapshot_copy_throttle,
 		"A percentage of time allocated for copy on write");
@@ -1755,13 +1751,8 @@ static void set_pool_mode(struct pool *pool, enum pool_mode new_mode)
 		pool->process_prepared_mapping = process_prepared_mapping;
 		pool->process_prepared_discard = process_prepared_discard_passdown;
 
-<<<<<<< HEAD
-		if (!pool->pf.error_if_no_space)
-			queue_delayed_work(pool->wq, &pool->no_space_timeout, NO_SPACE_TIMEOUT);
-=======
 		if (!pool->pf.error_if_no_space && no_space_timeout)
 			queue_delayed_work(pool->wq, &pool->no_space_timeout, no_space_timeout);
->>>>>>> linux-next/akpm-base
 		break;
 
 	case PM_WRITE:

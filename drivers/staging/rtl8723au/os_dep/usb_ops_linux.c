@@ -18,25 +18,6 @@
 #include <usb_ops_linux.h>
 #include <rtw_sreset.h>
 
-<<<<<<< HEAD
-unsigned int ffaddr2pipehdl23a(struct dvobj_priv *pdvobj, u32 addr)
-{
-	struct usb_device *pusbd = pdvobj->pusbdev;
-	unsigned int pipe = 0, ep_num = 0;
-
-	if (addr == RECV_BULK_IN_ADDR) {
-		pipe = usb_rcvbulkpipe(pusbd, pdvobj->RtInPipe[0]);
-	} else if (addr == RECV_INT_IN_ADDR) {
-		pipe = usb_rcvintpipe(pusbd, pdvobj->RtInPipe[1]);
-	} else if (addr < HW_QUEUE_ENTRY) {
-		ep_num = pdvobj->Queue2Pipe[addr];
-		pipe = usb_sndbulkpipe(pusbd, ep_num);
-	}
-	return pipe;
-}
-
-=======
->>>>>>> linux-next/akpm-base
 struct zero_bulkout_context {
 	void *pbuf;
 	void *purb;

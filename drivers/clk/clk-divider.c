@@ -173,8 +173,6 @@ static int _round_up_table(const struct clk_div_table *table, int div)
 	return up;
 }
 
-<<<<<<< HEAD
-=======
 static int _round_down_table(const struct clk_div_table *table, int div)
 {
 	const struct clk_div_table *clkt;
@@ -193,7 +191,6 @@ static int _round_down_table(const struct clk_div_table *table, int div)
 	return down;
 }
 
->>>>>>> linux-next/akpm-base
 static int _div_round_up(struct clk_divider *divider,
 		unsigned long parent_rate, unsigned long rate)
 {
@@ -207,8 +204,6 @@ static int _div_round_up(struct clk_divider *divider,
 	return div;
 }
 
-<<<<<<< HEAD
-=======
 static int _div_round_closest(struct clk_divider *divider,
 		unsigned long parent_rate, unsigned long rate)
 {
@@ -257,7 +252,6 @@ static int _next_div(struct clk_divider *divider, int div)
 	return div;
 }
 
->>>>>>> linux-next/akpm-base
 static int clk_divider_bestdiv(struct clk_hw *hw, unsigned long rate,
 		unsigned long *best_parent_rate)
 {
@@ -273,11 +267,7 @@ static int clk_divider_bestdiv(struct clk_hw *hw, unsigned long rate,
 
 	if (!(__clk_get_flags(hw->clk) & CLK_SET_RATE_PARENT)) {
 		parent_rate = *best_parent_rate;
-<<<<<<< HEAD
-		bestdiv = _div_round_up(divider, parent_rate, rate);
-=======
 		bestdiv = _div_round(divider, parent_rate, rate);
->>>>>>> linux-next/akpm-base
 		bestdiv = bestdiv == 0 ? 1 : bestdiv;
 		bestdiv = bestdiv > maxdiv ? maxdiv : bestdiv;
 		return bestdiv;

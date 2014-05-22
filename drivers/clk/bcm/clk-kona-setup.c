@@ -91,11 +91,7 @@ static bool peri_clk_data_offsets_valid(struct kona_clk *bcm_clk)
 
 	BUG_ON(bcm_clk->type != bcm_clk_peri);
 	peri = bcm_clk->u.peri;
-<<<<<<< HEAD
-	name = bcm_clk->name;
-=======
 	name = bcm_clk->init_data.name;
->>>>>>> linux-next/akpm-base
 	range = bcm_clk->ccu->range;
 
 	limit = range - sizeof(u32);
@@ -426,16 +422,12 @@ peri_clk_data_valid(struct kona_clk *bcm_clk)
 		return false;
 
 	peri = bcm_clk->u.peri;
-<<<<<<< HEAD
-	name = bcm_clk->name;
-=======
 	name = bcm_clk->init_data.name;
 
 	policy = &peri->policy;
 	if (policy_exists(policy) && !policy_valid(policy, name))
 		return false;
 
->>>>>>> linux-next/akpm-base
 	gate = &peri->gate;
 	if (gate_exists(gate) && !gate_valid(gate, "gate", name))
 		return false;
@@ -739,11 +731,6 @@ struct clk *kona_clk_setup(struct kona_clk *bcm_clk)
 			(int)bcm_clk->type, init_data->name);
 		return NULL;
 	}
-<<<<<<< HEAD
-	bcm_clk->type = type;
-	bcm_clk->u.data = data;
-=======
->>>>>>> linux-next/akpm-base
 
 	/* Make sure everything makes sense before we set it up */
 	if (!kona_clk_valid(bcm_clk)) {

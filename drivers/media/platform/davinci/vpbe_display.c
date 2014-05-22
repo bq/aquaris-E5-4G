@@ -1,4 +1,4 @@
-/*
+q/*
  * Copyright (C) 2010 Texas Instruments Incorporated - http://www.ti.com/
  *
  * This program is free software; you can redistribute it and/or
@@ -398,10 +398,6 @@ static void vpbe_stop_streaming(struct vb2_queue *vq)
 		vb2_buffer_done(&layer->next_frm->vb, VB2_BUF_STATE_ERROR);
 	}
 	spin_unlock_irqrestore(&disp->dma_queue_lock, flags);
-<<<<<<< HEAD
-	return 0;
-=======
->>>>>>> linux-next/akpm-base
 }
 
 static struct vb2_ops video_qops = {

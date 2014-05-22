@@ -919,11 +919,7 @@ static print_func acpi_print_funcs[ACPI_BATTERY_NUMFILES] = {
 static int acpi_battery_read(int fid, struct seq_file *seq)
 {
 	struct acpi_battery *battery = seq->private;
-<<<<<<< HEAD
-	int result = acpi_battery_update(battery);
-=======
 	int result = acpi_battery_update(battery, false);
->>>>>>> linux-next/akpm-base
 	return acpi_print_funcs[fid](seq, result);
 }
 

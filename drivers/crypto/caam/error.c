@@ -11,23 +11,6 @@
 #include "jr.h"
 #include "error.h"
 
-<<<<<<< HEAD
-#define SPRINTFCAT(str, format, param, max_alloc)		\
-{								\
-	char *tmp;						\
-								\
-	tmp = kmalloc(sizeof(format) + max_alloc, GFP_ATOMIC);	\
-	if (likely(tmp)) {					\
-		sprintf(tmp, format, param);			\
-		strcat(str, tmp);				\
-		kfree(tmp);					\
-	} else {						\
-		strcat(str, "kmalloc failure in SPRINTFCAT");	\
-	}							\
-}
-
-static void report_jump_idx(u32 status, char *outstr)
-=======
 static const struct {
 	u8 value;
 	const char *error_text;
@@ -136,7 +119,6 @@ static const char * const rng_err_id_list[] = {
 
 static void report_ccb_status(struct device *jrdev, const u32 status,
 			      const char *error)
->>>>>>> linux-next/akpm-base
 {
 	u8 cha_id = (status & JRSTA_CCBERR_CHAID_MASK) >>
 		    JRSTA_CCBERR_CHAID_SHIFT;

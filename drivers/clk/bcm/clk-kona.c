@@ -1146,11 +1146,7 @@ static bool __peri_clk_init(struct kona_clk *bcm_clk)
 {
 	struct ccu_data *ccu = bcm_clk->ccu;
 	struct peri_clk_data *peri = bcm_clk->u.peri;
-<<<<<<< HEAD
-	const char *name = bcm_clk->name;
-=======
 	const char *name = bcm_clk->init_data.name;
->>>>>>> linux-next/akpm-base
 	struct bcm_clk_trig *trig;
 
 	BUG_ON(bcm_clk->type != bcm_clk_peri);

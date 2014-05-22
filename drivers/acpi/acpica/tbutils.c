@@ -318,27 +318,6 @@ acpi_status __init acpi_tb_parse_root_table(acpi_physical_address rsdp_address)
 	 */
 	acpi_os_unmap_memory(rsdp, sizeof(struct acpi_table_rsdp));
 
-<<<<<<< HEAD
-	/*
-	 * If it is present and used, validate the XSDT for access/size
-	 * and ensure that all table entries are at least non-NULL
-	 */
-	if (table_entry_size == ACPI_XSDT_ENTRY_SIZE) {
-		status = acpi_tb_validate_xsdt(address);
-		if (ACPI_FAILURE(status)) {
-			ACPI_BIOS_WARNING((AE_INFO,
-					   "XSDT is invalid (%s), using RSDT",
-					   acpi_format_exception(status)));
-
-			/* Fall back to the RSDT */
-
-			address = rsdt_address;
-			table_entry_size = ACPI_RSDT_ENTRY_SIZE;
-		}
-	}
-
-=======
->>>>>>> linux-next/akpm-base
 	/* Map the RSDT/XSDT table header to get the full table length */
 
 	table = acpi_os_map_memory(address, sizeof(struct acpi_table_header));

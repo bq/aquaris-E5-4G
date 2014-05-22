@@ -300,11 +300,7 @@ static int freezer_read(struct seq_file *m, void *v)
 
 	/* update states bottom-up */
 	css_for_each_descendant_post(pos, css) {
-<<<<<<< HEAD
-		if (!css_tryget(pos))
-=======
 		if (!css_tryget_online(pos))
->>>>>>> linux-next/akpm-base
 			continue;
 		rcu_read_unlock();
 
@@ -404,11 +400,7 @@ static void freezer_change_state(struct freezer *freezer, bool freeze)
 		struct freezer *pos_f = css_freezer(pos);
 		struct freezer *parent = parent_freezer(pos_f);
 
-<<<<<<< HEAD
-		if (!css_tryget(pos))
-=======
 		if (!css_tryget_online(pos))
->>>>>>> linux-next/akpm-base
 			continue;
 		rcu_read_unlock();
 
