@@ -269,10 +269,15 @@ void __sync_icache_dcache(pte_t pteval)
 		return;
 
 	page = pfn_to_page(pfn);
-	if (cache_is_vipt_aliasing())
-		mapping = page_mapping(page);
-	else
-		mapping = NULL;
+	mapping = page_mapping(page);
+
+	/*
+	 * Anonymous executable pages aren't guaranteed to be I-side
+	 * clean, so there's no need to flush if we don't have aliases
+	 * on the D-side.
+	 */
+	if (cache_is_vipt_nonaliasing() && !mapping)
+		return;
 
 	if (!test_and_set_bit(PG_dcache_clean, &page->flags))
 		__flush_dcache_page(mapping, page);
