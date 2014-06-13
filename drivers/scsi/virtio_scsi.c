@@ -514,10 +514,6 @@ static int virtscsi_queuecommand(struct virtio_scsi *vscsi,
 
 	BUG_ON(sc->cmd_len > VIRTIO_SCSI_CDB_SIZE);
 
-<<<<<<< HEAD
-	if (virtscsi_kick_cmd(req_vq, cmd,
-			      sizeof cmd->req.cmd, sizeof cmd->resp.cmd) != 0)
-=======
 	if (virtio_has_feature(vscsi->vdev, VIRTIO_SCSI_F_T10_PI)) {
 		virtio_scsi_init_hdr_pi(&cmd->req.cmd_pi, sc);
 		memcpy(cmd->req.cmd_pi.cdb, sc->cmnd, sc->cmd_len);
@@ -529,7 +525,6 @@ static int virtscsi_queuecommand(struct virtio_scsi *vscsi,
 	}
 
 	if (virtscsi_kick_cmd(req_vq, cmd, req_size, sizeof cmd->resp.cmd) != 0)
->>>>>>> linux-next/akpm-base
 		return SCSI_MLQUEUE_HOST_BUSY;
 	return 0;
 }
