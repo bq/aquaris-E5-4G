@@ -47,6 +47,14 @@ static int fsync_buffers_list(spinlock_t *lock, struct list_head *list);
 
 #define BH_ENTRY(list) list_entry((list), struct buffer_head, b_assoc_buffers)
 
+void put_bh(struct buffer_head *bh)
+{
+	WARN_ON(atomic_read(&bh->b_count) <= 0);
+	smp_mb__before_atomic_dec();
+	atomic_dec(&bh->b_count);
+}
+EXPORT_SYMBOL(put_bh);
+
 void init_buffer(struct buffer_head *bh, bh_end_io_t *handler, void *private)
 {
 	bh->b_end_io = handler;
