@@ -3483,7 +3483,6 @@ F:	include/linux/ext2*
 
 EXT3 FILE SYSTEM
 M:	Jan Kara <jack@suse.cz>
-M:	Andrew Morton <akpm@linux-foundation.org>
 M:	Andreas Dilger <adilger.kernel@dilger.ca>
 L:	linux-ext4@vger.kernel.org
 S:	Maintained
@@ -5007,7 +5006,6 @@ F:	fs/jffs2/
 F:	include/uapi/linux/jffs2.h
 
 JOURNALLING LAYER FOR BLOCK DEVICES (JBD)
-M:	Andrew Morton <akpm@linux-foundation.org>
 M:	Jan Kara <jack@suse.cz>
 L:	linux-ext4@vger.kernel.org
 S:	Maintained
@@ -5784,6 +5782,7 @@ Q:	http://patchwork.ozlabs.org/project/netdev/list/
 F:	drivers/net/ethernet/mellanox/mlx4/en_*
 
 MEMORY MANAGEMENT
+M:	Andrew Morton <akpm@linux-foundation.org>
 L:	linux-mm@kvack.org
 W:	http://www.linux-mm.org
 S:	Maintained
