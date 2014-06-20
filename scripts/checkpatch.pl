@@ -1956,6 +1956,14 @@ sub process {
 			      "Remove Gerrit Change-Id's before submitting upstream.\n" . $herecurr);
 		}
 
+# Check for improperly formed commit descriptions
+		if ($in_commit_log &&
+		    $line =~ /\bcommit\s+[0-9a-f]{5,}/i &&
+		    $line !~ /\bcommit [0-9a-f]{12,16} \("/) {
+			ERROR("GIT_COMMIT_ID",
+			      "Please use 12-16 chars for the git commit IDs like 'commit 0123456789ab (\"commit description\"\)'\n" . $herecurr);
+		}
+
 # Check for wrappage within a valid hunk of the file
 		if ($realcnt != 0 && $line !~ m{^(?:\+|-| |\\ No newline|$)}) {
 			ERROR("CORRUPTED_PATCH",
