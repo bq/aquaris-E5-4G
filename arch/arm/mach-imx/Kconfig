@@ -1,6 +1,5 @@
-config ARCH_MXC
+menuconfig ARCH_MXC
 	bool "Freescale i.MX family" if ARCH_MULTI_V4_V5 || ARCH_MULTI_V6_V7
-	select ARCH_HAS_CPUFREQ
 	select ARCH_HAS_OPP
 	select ARCH_REQUIRE_GPIOLIB
 	select ARM_CPU_SUSPEND if PM
@@ -13,8 +12,7 @@ config ARCH_MXC
 	help
 	  Support for Freescale MXC/iMX-based family of processors
 
-menu "Freescale i.MX support"
-	depends on ARCH_MXC
+if ARCH_MXC
 
 config MXC_TZIC
 	bool
@@ -99,7 +97,6 @@ config SOC_IMX25
 
 config SOC_IMX27
 	bool
-	select ARCH_HAS_CPUFREQ
 	select ARCH_HAS_OPP
 	select CPU_ARM926T
 	select IMX_HAVE_IOMUX_V1
@@ -121,19 +118,6 @@ config SOC_IMX35
 	select MXC_AVIC
 	select PINCTRL_IMX35
 	select SMP_ON_UP if SMP
-
-config SOC_IMX5
-	bool
-	select ARCH_HAS_CPUFREQ
-	select ARCH_HAS_OPP
-	select ARCH_MXC_IOMUX_V3
-	select MXC_TZIC
-
-config	SOC_IMX51
-	bool
-	select HAVE_IMX_SRC
-	select PINCTRL_IMX51
-	select SOC_IMX5
 
 if ARCH_MULTI_V4T
 
@@ -704,24 +688,29 @@ if ARCH_MULTI_V7
 
 comment "Device tree only"
 
+config SOC_IMX5
+	bool
+	select ARCH_HAS_OPP
+	select HAVE_IMX_SRC
+	select MXC_TZIC
+
 config	SOC_IMX50
 	bool "i.MX50 support"
-	select HAVE_IMX_SRC
 	select PINCTRL_IMX50
 	select SOC_IMX5
 
 	help
 	  This enables support for Freescale i.MX50 processor.
 
-config MACH_IMX51_DT
+config SOC_IMX51
 	bool "i.MX51 support"
-	select SOC_IMX51
+	select PINCTRL_IMX51
+	select SOC_IMX5
 	help
 	  This enables support for Freescale i.MX51 processor
 
 config	SOC_IMX53
 	bool "i.MX53 support"
-	select HAVE_IMX_SRC
 	select PINCTRL_IMX53
 	select SOC_IMX5
 
@@ -786,4 +775,4 @@ endif
 
 source "arch/arm/mach-imx/devices/Kconfig"
 
-endmenu
+endif
