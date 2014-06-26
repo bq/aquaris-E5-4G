@@ -25,7 +25,6 @@
 
 #define EXYNOS5420_CPUS_PER_CLUSTER	4
 #define EXYNOS5420_NR_CLUSTERS		2
-#define MCPM_BOOT_ADDR_OFFSET		0x1c
 
 /*
  * The common v7_exit_coherency_flush API could not be used because of the
@@ -197,7 +196,7 @@ static void exynos_power_down(void)
 	if (last_man && __mcpm_outbound_enter_critical(cpu, cluster)) {
 		arch_spin_unlock(&exynos_mcpm_lock);
 
-		if (read_cpuid_part_number() == ARM_CPU_PART_CORTEX_A15) {
+		if (read_cpuid_part() == ARM_CPU_PART_CORTEX_A15) {
 			/*
 			 * On the Cortex-A15 we need to disable
 			 * L2 prefetching before flushing the cache.
@@ -343,11 +342,13 @@ static int __init exynos_mcpm_init(void)
 	pr_info("Exynos MCPM support installed\n");
 
 	/*
-	 * Future entries into the kernel can now go
-	 * through the cluster entry vectors.
+	 * U-Boot SPL is hardcoded to jump to the start of ns_sram_base_addr
+	 * as part of secondary_cpu_start().  Let's redirect it to the
+	 * mcpm_entry_point().
 	 */
-	__raw_writel(virt_to_phys(mcpm_entry_point),
-			ns_sram_base_addr + MCPM_BOOT_ADDR_OFFSET);
+	__raw_writel(0xe59f0000, ns_sram_base_addr);     /* ldr r0, [pc, #0] */
+	__raw_writel(0xe12fff10, ns_sram_base_addr + 4); /* bx  r0 */
+	__raw_writel(virt_to_phys(mcpm_entry_point), ns_sram_base_addr + 8);
 
 	iounmap(ns_sram_base_addr);
 
