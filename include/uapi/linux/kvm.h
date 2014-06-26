@@ -939,6 +939,19 @@ struct kvm_device_attr {
 #define   KVM_DEV_VFIO_GROUP_ADD			1
 #define   KVM_DEV_VFIO_GROUP_DEL			2
 
+#define  KVM_DEV_ARM_SMMU_V2_CFG		1
+#define   KVM_DEV_ARM_SMMU_V2_CFG_INIT			1
+#define   KVM_DEV_ARM_SMMU_V2_CFG_IRQ			2
+#define   KVM_DEV_ARM_SMMU_V2_CFG_SIZE			3
+#define  KVM_DEV_ARM_SMMU_V2_VFIO		2
+#define   KVM_DEV_ARM_SMMU_V2_VFIO_GROUP_ADD		1
+#define   KVM_DEV_ARM_SMMU_V2_VFIO_GROUP_DEL		2
+
+struct arm_smmu_v2_vfio_group_sid {
+	__u32	fd;	/* file descriptor of the VFIO group */
+	__u16	sid;
+};
+
 enum kvm_device_type {
 	KVM_DEV_TYPE_FSL_MPIC_20	= 1,
 #define KVM_DEV_TYPE_FSL_MPIC_20	KVM_DEV_TYPE_FSL_MPIC_20
@@ -952,6 +965,8 @@ enum kvm_device_type {
 #define KVM_DEV_TYPE_ARM_VGIC_V2	KVM_DEV_TYPE_ARM_VGIC_V2
 	KVM_DEV_TYPE_FLIC,
 #define KVM_DEV_TYPE_FLIC		KVM_DEV_TYPE_FLIC
+	KVM_DEV_TYPE_ARM_SMMU_V2,
+#define KVM_DEV_TYPE_ARM_SMMU_V2	KVM_DEV_TYPE_ARM_SMMU_V2
 	KVM_DEV_TYPE_MAX,
 };
 

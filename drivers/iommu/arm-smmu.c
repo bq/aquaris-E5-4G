@@ -140,14 +140,17 @@
 #define ID0_S2TS			(1 << 29)
 #define ID0_NTS				(1 << 28)
 #define ID0_SMS				(1 << 27)
+#define ID0_ATOSNS			(1 << 26)
 #define ID0_PTFS_SHIFT			24
 #define ID0_PTFS_MASK			0x2
 #define ID0_PTFS_V8_ONLY		0x2
-#define ID0_CTTW			(1 << 14)
 #define ID0_NUMIRPT_SHIFT		16
 #define ID0_NUMIRPT_MASK		0xff
+#define ID0_CTTW			(1 << 14)
+#define ID0_BTM				(1 << 13)
 #define ID0_NUMSIDB_SHIFT		9
 #define ID0_NUMSIDB_MASK		0xf
+#define ID0_EXIDS			(1 << 8)
 #define ID0_NUMSMRG_SHIFT		0
 #define ID0_NUMSMRG_MASK		0xff
 
@@ -156,6 +159,7 @@
 #define ID1_NUMPAGENDXB_MASK		7
 #define ID1_NUMS2CB_SHIFT		16
 #define ID1_NUMS2CB_MASK		0xff
+#define ID1_SMCD			(1 << 15)
 #define ID1_NUMCB_SHIFT			0
 #define ID1_NUMCB_MASK			0xff
 
@@ -205,6 +209,9 @@
 #define CBAR_S1_BPSHCFG_SHIFT		8
 #define CBAR_S1_BPSHCFG_MASK		3
 #define CBAR_S1_BPSHCFG_NSH		3
+#define CBAR_S1_S2_CBNDX_SHIFT		8
+#define CBAR_S1_S2_CBNDX_MASK		0xff
+#define CBAR_S1_HYPC			(1 << 10)
 #define CBAR_S1_MEMATTR_SHIFT		12
 #define CBAR_S1_MEMATTR_MASK		0xf
 #define CBAR_S1_MEMATTR_WB		0xf
@@ -214,8 +221,13 @@
 #define CBAR_TYPE_S1_TRANS_S2_BYPASS	(1 << CBAR_TYPE_SHIFT)
 #define CBAR_TYPE_S1_TRANS_S2_FAULT	(2 << CBAR_TYPE_SHIFT)
 #define CBAR_TYPE_S1_TRANS_S2_TRANS	(3 << CBAR_TYPE_SHIFT)
+#define CBAR_S1_BSU_SHIFT		18
+#define CBAR_S1_BSU_MASK		3
 #define CBAR_IRPTNDX_SHIFT		24
 #define CBAR_IRPTNDX_MASK		0xff
+
+/* Just rolls off the tongue... */
+#define ARM_SMMU_GR1_CBFRSYNRA(n)	(0x400 + ((n) << 2))
 
 #define ARM_SMMU_GR1_CBA2R(n)		(0x800 + ((n) << 2))
 #define CBA2R_RW64_32BIT		(0 << 0)
@@ -226,6 +238,7 @@
 #define ARM_SMMU_CB(smmu, n)		((n) * (1 << (smmu)->pgshift))
 
 #define ARM_SMMU_CB_SCTLR		0x0
+#define ARM_SMMU_CB_ACTLR		0x4
 #define ARM_SMMU_CB_RESUME		0x8
 #define ARM_SMMU_CB_TTBCR2		0x10
 #define ARM_SMMU_CB_TTBR0_LO		0x20
@@ -360,6 +373,7 @@ struct arm_smmu_device {
 	unsigned long			size;
 	unsigned long			pgshift;
 
+	u32				idr[3];
 #define ARM_SMMU_FEAT_COHERENT_WALK	(1 << 0)
 #define ARM_SMMU_FEAT_STREAM_MATCH	(1 << 1)
 #define ARM_SMMU_FEAT_TRANS_S1		(1 << 2)
@@ -401,7 +415,8 @@ struct arm_smmu_cfg {
 #define INVALID_IRPTNDX			0xff
 
 #define ARM_SMMU_CB_ASID(cfg)		((cfg)->cbndx)
-#define ARM_SMMU_CB_VMID(cfg)		((cfg)->cbndx + 1)
+#define ARM_SMMU_CBNDX_TO_VMID(cbndx)	((cbndx) + 1)
+#define ARM_SMMU_CB_VMID(cfg)		ARM_SMMU_CBNDX_TO_VMID((cfg)->cbndx)
 
 enum arm_smmu_domain_stage {
 	ARM_SMMU_DOMAIN_S1 = 0,
@@ -614,6 +629,13 @@ static void arm_smmu_tlb_sync(struct arm_smmu_device *smmu)
 	}
 }
 
+static void
+arm_smmu_tlb_inv_context_by_vmid(struct arm_smmu_device *smmu, u32 vmid)
+{
+	void __iomem *base = ARM_SMMU_GR0(smmu);
+	writel_relaxed(vmid, base + ARM_SMMU_GR0_TLBIVMID);
+}
+
 static void arm_smmu_tlb_inv_context(struct arm_smmu_domain *smmu_domain)
 {
 	struct arm_smmu_cfg *cfg = &smmu_domain->cfg;
@@ -626,9 +648,7 @@ static void arm_smmu_tlb_inv_context(struct arm_smmu_domain *smmu_domain)
 		writel_relaxed(ARM_SMMU_CB_ASID(cfg),
 			       base + ARM_SMMU_CB_S1_TLBIASID);
 	} else {
-		base = ARM_SMMU_GR0(smmu);
-		writel_relaxed(ARM_SMMU_CB_VMID(cfg),
-			       base + ARM_SMMU_GR0_TLBIVMID);
+		arm_smmu_tlb_inv_context_by_vmid(smmu, ARM_SMMU_CB_VMID(cfg));
 	}
 
 	arm_smmu_tlb_sync(smmu);
@@ -739,10 +759,8 @@ static void arm_smmu_init_context_bank(struct arm_smmu_domain *smmu_domain)
 	bool stage1;
 	struct arm_smmu_cfg *cfg = &smmu_domain->cfg;
 	struct arm_smmu_device *smmu = smmu_domain->smmu;
-	void __iomem *cb_base, *gr0_base, *gr1_base;
+	void __iomem *cb_base, *gr1_base = ARM_SMMU_GR1(smmu);
 
-	gr0_base = ARM_SMMU_GR0(smmu);
-	gr1_base = ARM_SMMU_GR1(smmu);
 	stage1 = cfg->cbar != CBAR_TYPE_S2_TRANS;
 	cb_base = ARM_SMMU_CB_BASE(smmu) + ARM_SMMU_CB(smmu, cfg->cbndx);
 
@@ -923,7 +941,7 @@ static int arm_smmu_init_domain_context(struct iommu_domain *domain,
 	 *     S1             S1+S2            S1
 	 *     S1               S2             S2
 	 *     S1               S1             S1
-	 *     N                N              N
+	 *     N                N              S2
 	 *     N              S1+S2            S2
 	 *     N                S2             S2
 	 *     N                S1             S1
@@ -941,10 +959,6 @@ static int arm_smmu_init_domain_context(struct iommu_domain *domain,
 		start = smmu->num_s2_context_banks;
 		break;
 	case ARM_SMMU_DOMAIN_NESTED:
-		/*
-		 * We will likely want to change this if/when KVM gets
-		 * involved.
-		 */
 	case ARM_SMMU_DOMAIN_S2:
 		cfg->cbar = CBAR_TYPE_S2_TRANS;
 		start = 0;
@@ -1886,6 +1900,7 @@ static int arm_smmu_device_cfg_probe(struct arm_smmu_device *smmu)
 		smmu->num_mapping_groups = (id >> ID0_NUMSIDB_SHIFT) &
 					   ID0_NUMSIDB_MASK;
 	}
+	smmu->idr[0] = id;
 
 	/* ID1 */
 	id = readl_relaxed(gr0_base + ARM_SMMU_GR0_ID1);
@@ -1909,6 +1924,7 @@ static int arm_smmu_device_cfg_probe(struct arm_smmu_device *smmu)
 	}
 	dev_notice(smmu->dev, "\t%u context banks (%u stage-2 only)\n",
 		   smmu->num_context_banks, smmu->num_s2_context_banks);
+	smmu->idr[1] = id;
 
 	/* ID2 */
 	id = readl_relaxed(gr0_base + ARM_SMMU_GR0_ID2);
@@ -1954,6 +1970,7 @@ static int arm_smmu_device_cfg_probe(struct arm_smmu_device *smmu)
 		dev_notice(smmu->dev, "\tStage-2: %lu-bit IPA -> %lu-bit PA\n",
 			   smmu->s2_input_size, smmu->s2_output_size);
 
+	smmu->idr[2] = id;
 	return 0;
 }
 
@@ -2141,6 +2158,1200 @@ static struct platform_driver arm_smmu_driver = {
 	.remove	= arm_smmu_device_remove,
 };
 
+/*
+ * Virtual SMMU (vSMMU) interface for KVM.
+ * Theory of operation:
+ *
+ * We expose a virtual SMMU interface to a guest OS. This virtual interface
+ * has the following properties:
+ *
+ * - A single combined interrupt
+ * - Stream-indexing only (i.e. no SMRs)
+ * - One context bank per virtual StreamID (vSID)
+ * - At least one S2CR entry per vSID (i.e. capped by max vSID)
+ * - Stage-1 translation only
+ * - Backed by a single physical SMMU (i.e. 1:1 mapping between virtual
+ *   and physical interfaces)
+ *
+ * When the host creates a nested domain on a physical SMMU, we only
+ * allocate and configure a stage-2 context initially. A stage-1 context
+ * is later allocated by the vSMMU code for each device in the domain.
+ *
+ * Userspace initialises a virtual SMMU interface via the KVM_CREATE_DEVICE
+ * ioctl; VFIO groups are added to the vSMMU using the
+ * KVM_DEV_ARM_SMMU_V2_VFIO_GROUP_ADD attribute whilst other attributes
+ * are provided to configure and probe the basic geometry of the vSMMU
+ * device and its connected masters.
+ *
+ * Once a vSMMU has been instantiated with the KVM_DEV_ARM_SMMU_V2_CFG_INIT
+ * attribute, other attributes can no longer be modified and are treated as
+ * read-only from that point on. In an ideal world, instantiation allocates
+ * stage-1 contexts on the corresponding physical SMMU and maps then directly
+ * into the guest address space (i.e. no trapping). However, hardware issues
+ * (e.g. combined context interrupts) may force us to trap access to the
+ * stage-1 context banks too.  For trapping regions of the vSMMU, they are
+ * emulated as follows (note that each region occupies 1 << smmu->pgshift
+ * bytes, which can differ from the PAGE_SIZE in use by Linux):
+ *
+ *   Trapped Region (in order from offset 0x0)             |       Behaviour
+ *   ------------------------------------------------------+--------------------
+ *   Global register space 0:
+ *     Global Configuration                                |       Emulate (r/w)
+ *     Identification                                      |       Emulate (r)
+ *     Global Faults                                       |         RAZ/WI
+ *     Global TLBI                                         |       Emulate (r/w)
+ *     Global ATOS                                         |         RAZ/WI
+ *     SMRs                                                |         RAZ/WI
+ *     S2CRs                                               |       Emulate (r/w)
+ *   Global register space 1:
+ *     CBARs                                               |       Emulate (r/w)
+ *     Context Faults                                      |       Emulate (r/w)
+ *     CBA2Rs                                              |         RAZ/WI
+ *   IMPDEF:                                               |         RAZ/WI
+ *   PMU:                                                  |         RAZ/WI
+ *   SSD:                                                  |         RAZ/WI
+ *   V2PAD:                                                |         RAZ/WI
+ *   IMPDEF (extending to GLOBAL_TOP):                     |         RAZ/WI
+ *   ------------------------------------------------------+--------------------
+ *
+ * An identically sized region follows, containing the mapped stage-1 context
+ * banks as a prefix (then padded with RAZ/WI).
+ *
+ * Most of the emulation highlighted above boils down to masking/forcing
+ * bits in the register values being read/written. However, writes to the
+ * S2CR are a lot more interesting.
+ *
+ * When the guest writes a vS2CR, it will write to index vSID and attempt
+ * to install a linkage to vCBARn for the stage-1 mapping. The vSMMU will
+ * actually look up CBARn (allocated by the vSMMU at instantiation time),
+ * modify it to be CBAR_TYPE_S1_TRANS_S2_TRANS and install a linkage to
+ * the stage-2 CBAR currently indexed by the S2CR.
+ */
+
+#ifdef CONFIG_KVM
+#include <linux/kvm_host.h>
+#include <linux/uaccess.h>
+
+/* Why on Earth isn't this in /include ? */
+#include "../../virt/kvm/iodev.h"
+
+/*
+ * We need both of these, as KVM_PHYS_MASK is in different places for arm
+ * and arm64.
+ * */
+#include <asm/kvm_arm.h>
+#include <asm/kvm_mmu.h>
+
+enum arm_vsmmu_global_trap_page {
+	ARM_VSMMU_TRAP_PAGE_GR0 = 0,
+	ARM_VSMMU_TRAP_PAGE_GR1,
+	ARM_VSMMU_TRAP_PAGE_IMPDEF,
+	ARM_VSMMU_TRAP_PAGE_PMU,
+	ARM_VSMMU_TRAP_PAGE_SSD,
+
+	/* We must have a power-of-2 number of pages to populate IDR1 */
+	ARM_VSMMU_TRAP_PAGE_PAD0,
+	ARM_VSMMU_TRAP_PAGE_PAD1,
+	ARM_VSMMU_TRAP_PAGE_PAD2,
+
+	ARM_VSMMU_MIN_GLOBAL_PAGES,
+};
+
+/* R/W registers in global register space 0 */
+struct arm_vsmmu_gr0_reg_state {
+	#define GR0_SCR0_RESET_VAL	sCR0_CLIENTPD
+	#define GR0_SCR0_RAZ_WI		0xf020c3f8
+	u32	scr0;
+
+	#define GR0_S2CR_RAZ_WI		0xf00c0000
+	u32	s2cr[ARM_SMMU_MAX_SMRS];
+};
+
+/* R/W registers in global register space 1 */
+struct arm_vsmmu_gr1_reg_state {
+	#define GR1_CBAR_RESET_VAL	CBAR_TYPE_S1_TRANS_S2_BYPASS
+	#define GR1_CBAR_WI		((CBAR_TYPE_MASK << CBAR_TYPE_SHIFT) |\
+					 (CBAR_S1_BSU_MASK << CBAR_S1_BSU_SHIFT))
+	u32	cbar[ARM_SMMU_MAX_CBS];
+};
+
+struct arm_vsmmu_device {
+	/* KVM context for the virtual machine using this vSMMU */
+	struct kvm			*kvm;
+	/* Emulated accesses */
+	struct kvm_io_device		mmio_gr_dev;
+	/* We really shouldn't need to trap this */
+	struct kvm_io_device		mmio_cb_dev;
+
+	/* Geometry */
+	phys_addr_t			base;
+	phys_addr_t			size;
+	atomic_t			num_context_banks;
+	unsigned int			virq;
+
+	/* Virtual register state */
+	struct arm_vsmmu_gr0_reg_state	gr0;
+	struct arm_vsmmu_gr1_reg_state	gr1;
+
+	/* Virtual StreamID allocation */
+	DECLARE_BITMAP(vsid_map, ARM_SMMU_MAX_SMRS);
+
+	/* Virtual -> s1 physical context bank mapping */
+	int				*cbs;
+
+	/* vSID -> s2 physical context bank mapping */
+	int				s2_cbs[ARM_SMMU_MAX_CBS];
+
+	/* vSID -> IOMMU group mapping */
+	struct iommu_group		*groups[ARM_SMMU_MAX_SMRS];
+
+	/* Corresponding physical SMMU */
+	struct arm_smmu_device		*smmu;
+
+	/* Lock to protect vSMMU state */
+	spinlock_t			lock;
+};
+
+static int arm_vsmmu_global_top(struct arm_vsmmu_device *vsmmu)
+{
+	int num_cbs;
+	u32 numpages;
+	unsigned long pagesize = 1 << vsmmu->smmu->pgshift;
+
+	num_cbs = atomic_read(&vsmmu->num_context_banks);
+	if (num_cbs > 0)
+		num_cbs = roundup_pow_of_two(num_cbs);
+
+	numpages = max_t(u32, num_cbs, ARM_VSMMU_MIN_GLOBAL_PAGES);
+	return numpages * pagesize;
+}
+
+static int arm_smmu_id_bits_to_size(int bits)
+{
+	switch (bits) {
+	case 32:
+		return 0;
+	case 36:
+		return 1;
+	case 39: /* Advertise 39-bit input size as 40-bit */
+	case 40:
+		return 2;
+	case 42:
+		return 3;
+	case 44:
+		return 4;
+	case 48:
+	default:
+		return 5;
+	}
+}
+
+static int
+arm_vsmmu_read_id(struct arm_vsmmu_device *vsmmu, u32 offset, u32 *val)
+{
+	u32 data, numpagendxb, ubs, oas;
+	int num_cbs;
+	struct arm_smmu_device *smmu = vsmmu->smmu;
+
+	switch (offset) {
+	case ARM_SMMU_GR0_ID0:
+		data = smmu->idr[0];
+
+		data |= ID0_S1TS | ID0_ATOSNS |
+			(ID0_NUMSIDB_MASK << ID0_NUMSIDB_SHIFT);
+		data &= ~(ID0_S2TS | ID0_NTS | ID0_SMS |
+			  (ID0_NUMIRPT_MASK << ID0_NUMIRPT_SHIFT) |
+			  ID0_BTM | ID0_EXIDS |
+			  (ID0_NUMSMRG_MASK << ID0_NUMSMRG_SHIFT));
+
+		*val = cpu_to_le32(data);
+		break;
+	case ARM_SMMU_GR0_ID1:
+		data = smmu->idr[1];
+		num_cbs = atomic_read(&vsmmu->num_context_banks);
+		numpagendxb =
+			ilog2(arm_vsmmu_global_top(vsmmu) >> smmu->pgshift) - 1;
+
+		data &= ~((ID1_NUMPAGENDXB_MASK << ID1_NUMPAGENDXB_SHIFT) |
+			  (ID1_NUMS2CB_MASK << ID1_NUMS2CB_SHIFT) |
+			  ID1_SMCD |
+			  (ID1_NUMCB_MASK << ID1_NUMCB_SHIFT));
+		data |= ((numpagendxb << ID1_NUMPAGENDXB_SHIFT) |
+			 (num_cbs << ID1_NUMCB_SHIFT));
+
+		*val = cpu_to_le32(data);
+		break;
+	case ARM_SMMU_GR0_ID2:
+		data = smmu->idr[2];
+		ubs = arm_smmu_id_bits_to_size(smmu->s1_input_size);
+		oas = arm_smmu_id_bits_to_size(smmu->s2_input_size);
+
+		data &= ~((ID2_UBS_MASK << ID2_UBS_SHIFT) |
+			  (ID2_OAS_MASK << ID2_OAS_SHIFT) |
+			  (ID2_IAS_MASK << ID2_IAS_SHIFT));
+		data |= ((ubs << ID2_UBS_SHIFT) |
+			 (oas << ID2_OAS_SHIFT) |
+			 (oas << ID2_IAS_SHIFT));
+
+		*val = cpu_to_le32(data);
+		break;
+	default:
+		return -EFAULT;
+	}
+
+	return 0;
+}
+
+static int
+arm_vsmmu_gr0_read(struct arm_vsmmu_device *vsmmu, u32 offset, u32 *val)
+{
+	int vs2crndx;
+
+	/* Global config */
+	if (offset == ARM_SMMU_GR0_sCR0) {
+		*val = vsmmu->gr0.scr0;
+		return 0;
+	}
+
+	/* Identification */
+	if (offset >= ARM_SMMU_GR0_ID0 && offset <= ARM_SMMU_GR0_ID7)
+		return arm_vsmmu_read_id(vsmmu, offset, val);
+
+	/* TODO: fault registers */
+
+	/* S2CRs */
+	if (offset >= ARM_SMMU_GR0_S2CR(0) &&
+			offset < ARM_SMMU_GR0_S2CR(ARM_SMMU_MAX_SMRS)) {
+		vs2crndx = (offset - ARM_SMMU_GR0_S2CR(0)) >> 2;
+		*val = vsmmu->gr0.s2cr[vs2crndx];
+		return 0;
+	}
+
+	/* PrimecellID. It's IMPDEF, but this driver prints it out... */
+	if (offset == ARM_SMMU_GR0_PIDR2) {
+		*val = cpu_to_le32(1 << PIDR2_ARCH_SHIFT);
+		return 0;
+	}
+
+	*val = 0;
+	return 0;
+}
+
+static int
+arm_vsmmu_inject_cfg_fault(struct arm_vsmmu_device *vsmmu, int vcbndx)
+{
+	/*
+	 * TODO: Report global cfg fault for vcbndx. This means:
+	 *
+	 * - Updating GFSR (cfg, multi), GFSYNR0 (0), GFAR (vcb offset)
+	 * - Injecting a virq
+	 */
+
+	if (!vsmmu->virq)
+		return 0;
+
+	return kvm_vgic_inject_irq(vsmmu->kvm, 0, vsmmu->virq, 1);
+}
+
+static int
+arm_vsmmu_sync_s2crs_get_vcbndx(struct arm_vsmmu_device *vsmmu, int vsid)
+{
+	u32 s2cr;
+	bool s1_bypass;
+	int i, vcbndx = -1;
+	void __iomem *gr0_base = ARM_SMMU_GR0(vsmmu->smmu);
+	struct iommu_group *group = vsmmu->groups[vsid];
+	struct arm_smmu_master_cfg *cfg = iommu_group_get_iommudata(group);
+
+	/* If global bypass is enabled, force stage-2 only */
+	s1_bypass = !!(vsmmu->gr0.scr0 & sCR0_CLIENTPD);
+
+	/* Parse the vS2CR */
+	s2cr = vsmmu->gr0.s2cr[vsid];
+	switch (s2cr & (S2CR_TYPE_MASK << S2CR_TYPE_SHIFT)) {
+	case S2CR_TYPE_TRANS:
+		/* Follow the breadcrumbs */
+		vcbndx = (s2cr >> S2CR_CBNDX_SHIFT) & S2CR_CBNDX_MASK;
+		break;
+	case S2CR_TYPE_BYPASS:
+		s1_bypass = true;
+		break;
+	case S2CR_TYPE_FAULT:
+		break;
+	default:
+		s2cr = S2CR_TYPE_FAULT;
+		/* End of the line. This translation terminates here. */
+	}
+
+	if (s1_bypass) {
+		u32 s2cbndx = vsmmu->s2_cbs[vsid];
+		/* Convert to stage-2 translation only */
+		s2cr &= ~((S2CR_TYPE_MASK << S2CR_TYPE_SHIFT) |
+			  (S2CR_CBNDX_MASK << S2CR_CBNDX_SHIFT));
+		s2cr |= S2CR_TYPE_TRANS | (s2cbndx << S2CR_CBNDX_SHIFT);
+	}
+
+	/* Update physical S2CRs */
+	for (i = 0; i < cfg->num_streamids; ++i) {
+		u32 idx = cfg->smrs ? cfg->smrs[i].idx : cfg->streamids[i];
+		writel_relaxed(s2cr, gr0_base + ARM_SMMU_GR0_S2CR(idx));
+	}
+
+	return vcbndx < atomic_read(&vsmmu->num_context_banks) ? vcbndx : -1;
+}
+
+static void
+arm_vsmmu_sync_s1_cbar(struct arm_vsmmu_device *vsmmu, int vsid, u32 vcbndx)
+{
+	u32 cbar, s1cbndx = vsmmu->cbs[vcbndx], s2cbndx = vsmmu->s2_cbs[vsid];
+	void __iomem *gr1_base = ARM_SMMU_GR1(vsmmu->smmu);
+
+	/* Grab the vCBAR and check that it's valid */
+	cbar = vsmmu->gr1.cbar[vcbndx];
+
+	/*
+	 * We can't give the guest a hypervisor context and
+	 * God only knows why the architecture allows this.
+	 */
+	if (cbar & CBAR_S1_HYPC)
+		arm_vsmmu_inject_cfg_fault(vsmmu, vcbndx);
+
+	/*
+	 * Weird and whacky VMIDs strike again! If the guest
+	 * tries to use them, slap its wrists.
+	 */
+	if (cbar & (CBAR_VMID_MASK << CBAR_VMID_SHIFT))
+		arm_vsmmu_inject_cfg_fault(vsmmu, vcbndx);
+
+	/*
+	 * Link the two context banks for nested translation.
+	 * We use the same VMID as stage-2 so that TLB-invalidation
+	 * isn't insane.
+	 */
+	cbar &= ~((CBAR_VMID_MASK << CBAR_VMID_SHIFT) |
+		  (CBAR_TYPE_MASK << CBAR_TYPE_SHIFT) |
+		  (CBAR_S1_S2_CBNDX_MASK << CBAR_S1_S2_CBNDX_SHIFT));
+	cbar |= (ARM_SMMU_CBNDX_TO_VMID(s2cbndx) << CBAR_VMID_SHIFT) |
+		CBAR_TYPE_S1_TRANS_S2_TRANS |
+		(s2cbndx << CBAR_S1_S2_CBNDX_SHIFT);
+
+	/* Update physical stage-1 CBAR */
+	writel_relaxed(cbar, gr1_base + ARM_SMMU_GR1_CBAR(s1cbndx));
+}
+
+static void
+arm_vsmmu_tlb_inv_context_by_vsid(struct arm_vsmmu_device *vsmmu, int vsid)
+{
+	u32 vmid = ARM_SMMU_CBNDX_TO_VMID(vsmmu->s2_cbs[vsid]);
+	arm_smmu_tlb_inv_context_by_vmid(vsmmu->smmu, vmid);
+}
+
+/*
+ * Synchronise the real SMMU hardware based on the vSMMU state. This
+ * could be optimised by keeping track of the dirty portions of the
+ * vSMMU register file, but simply recompute everything for now (dirty
+ * tracking would require a lock around the fault handling code)
+ */
+static void arm_vsmmu_sync_vsid(struct arm_vsmmu_device *vsmmu, int vsid)
+{
+	/* Program S2CRs and determine the vCB index */
+	int vcbndx = arm_vsmmu_sync_s2crs_get_vcbndx(vsmmu, vsid);
+	if (vcbndx >= 0) {
+		/* We have a vCB, so update the stage-1 pCB */
+		arm_vsmmu_sync_s1_cbar(vsmmu, vsid, vcbndx);
+	}
+
+	/* Nuke the TLB. This is where the dirty tracking would really help */
+	arm_vsmmu_tlb_inv_context_by_vsid(vsmmu, vsid);
+}
+
+static void arm_vsmmu_sync(struct arm_vsmmu_device *vsmmu)
+{
+	int vsid;
+
+	for_each_set_bit(vsid, vsmmu->vsid_map, ARM_SMMU_MAX_SMRS)
+		arm_vsmmu_sync_vsid(vsmmu, vsid);
+
+	arm_smmu_tlb_sync(vsmmu->smmu);
+}
+
+static int
+arm_vsmmu_gr0_write(struct arm_vsmmu_device *vsmmu, u32 offset, u32 data)
+{
+	int vs2crndx;
+
+	/* Global config */
+	if (offset == ARM_SMMU_GR0_sCR0) {
+		data &= ~GR0_SCR0_RAZ_WI;
+		vsmmu->gr0.scr0 = data;
+		return 0;
+	}
+
+	/* TODO: fault registers */
+
+	/* S2CRs */
+	if (offset >= ARM_SMMU_GR0_S2CR(0) &&
+	    offset < ARM_SMMU_GR0_S2CR(ARM_SMMU_MAX_SMRS)) {
+		vs2crndx = (offset - ARM_SMMU_GR0_S2CR(0)) >> 2;
+		data &= ~GR0_S2CR_RAZ_WI;
+		vsmmu->gr0.s2cr[vs2crndx] = data;
+		return 0;
+	}
+
+	/*
+	 * The SMMU architecture has a spaced out understanding of VMIDs, so
+	 * just nuke the entire TLB for the relevant CBs and get on with our
+	 * lives.
+	 */
+	if (offset >= ARM_SMMU_GR0_TLBIVMID &&
+	    offset <= ARM_SMMU_GR0_TLBIALLH) {
+		return 0;
+	}
+
+	return 0;
+}
+
+static int
+arm_vsmmu_gr1_read(struct arm_vsmmu_device *vsmmu, u32 offset, u32 *val)
+{
+	int num_cbs, vcbndx;
+
+	/* CBARs */
+	num_cbs = atomic_read(&vsmmu->num_context_banks);
+	if (offset >= ARM_SMMU_GR1_CBAR(0) &&
+	    offset < ARM_SMMU_GR1_CBAR(num_cbs)) {
+		vcbndx = (offset - ARM_SMMU_GR1_CBAR(0)) >> 2;
+		*val = vsmmu->gr1.cbar[vcbndx];
+		return 0;
+	}
+
+	/* CBFRSYNRAs */
+	if (offset >= ARM_SMMU_GR1_CBFRSYNRA(0) &&
+	    offset < ARM_SMMU_GR1_CBFRSYNRA(num_cbs)) {
+		/* TODO: fault reporting */
+		return -EFAULT;
+	}
+
+	*val = 0;
+	return 0;
+}
+
+static int
+arm_vsmmu_gr1_write(struct arm_vsmmu_device *vsmmu, u32 offset, u32 data)
+{
+	int num_cbs, vcbndx;
+
+	/* CBARs */
+	num_cbs = atomic_read(&vsmmu->num_context_banks);
+	if (offset >= ARM_SMMU_GR1_CBAR(0) &&
+	    offset < ARM_SMMU_GR1_CBAR(num_cbs)) {
+		vcbndx = (offset - ARM_SMMU_GR1_CBAR(0)) >> 2;
+		data &= ~GR1_CBAR_WI;
+		vsmmu->gr1.cbar[vcbndx] = data;
+		return 0;
+	}
+
+	return 0;
+}
+
+static int
+arm_vsmmu_gr_read(struct kvm_io_device *this, gpa_t addr, int len, void *val)
+{
+	struct arm_vsmmu_device *vsmmu
+		= container_of(&this->ops, struct arm_vsmmu_device,
+			       mmio_gr_dev.ops);
+	u32 pgshift = vsmmu->smmu->pgshift;
+	u32 page = (addr - vsmmu->base) >> pgshift;
+	u32 offset = addr & ((1 << pgshift) - 1);
+
+	if ((addr & 0x3) || (len != 4))
+		return -EFAULT;
+
+	switch (page) {
+	case ARM_VSMMU_TRAP_PAGE_GR0:
+		return arm_vsmmu_gr0_read(vsmmu, offset, val);
+	case ARM_VSMMU_TRAP_PAGE_GR1:
+		return arm_vsmmu_gr1_read(vsmmu, offset, val);
+	default:
+		/* RAZ */
+		memset(val, 0, len);
+	}
+
+	return 0;
+}
+
+static int arm_vsmmu_gr_write(struct kvm_io_device *this, gpa_t addr, int len,
+			      const void *val)
+{
+	struct arm_vsmmu_device *vsmmu
+		= container_of(&this->ops, struct arm_vsmmu_device,
+			       mmio_gr_dev.ops);
+	u32 pgshift = vsmmu->smmu->pgshift;
+	u32 page = (addr - vsmmu->base) >> pgshift;
+	u32 offset = addr & ((1 << pgshift) - 1);
+	int ret;
+	u32 data;
+
+	if ((addr & 0x3) || (len != 4))
+		return -EFAULT;
+
+	data = *(u32 *)val;
+
+	switch (page) {
+	case ARM_VSMMU_TRAP_PAGE_GR0:
+		ret = arm_vsmmu_gr0_write(vsmmu, offset, data);
+		break;
+	case ARM_VSMMU_TRAP_PAGE_GR1:
+		ret = arm_vsmmu_gr1_write(vsmmu, offset, data);
+		break;
+	}
+
+	if (!ret)
+		arm_vsmmu_sync(vsmmu);
+
+	/* WI */
+	return 0;
+}
+
+static struct kvm_io_device_ops arm_vsmmu_mmio_gr_ops = {
+	.read	= arm_vsmmu_gr_read,
+	.write	= arm_vsmmu_gr_write,
+};
+
+/*
+ * TODO: Context interrupts are difficult to get right.
+ * We can't let the guest have direct access to the fault registers, because
+ * it could spam the host with physical interrupts. Instead, we need to install
+ * a handler on the s1 context, then on an exception we do:
+ *
+ *  - Kill CFIE so we don't see further irqs
+ *  - Inject a level-triggered virq for the vcb
+ *  - When the guest has handled the virq, unmask the physical interrupt
+ *    -> Note that IRQ forwarding won't work because the irq : virq relation
+ *       isn't 1:1.
+ *
+ * To detect that the guest has handled the virq, need to look at writes to the
+ * fsr (cb and global).
+ *
+ */
+static int
+arm_vsmmu_cb_read(struct kvm_io_device *this, gpa_t addr, int len, void *val)
+{
+	struct arm_vsmmu_device *vsmmu
+		= container_of(&this->ops, struct arm_vsmmu_device,
+			       mmio_cb_dev.ops);
+	struct arm_smmu_device *smmu = vsmmu->smmu;
+	u32 pgshift = smmu->pgshift;
+	u32 offset = addr & ((1 << pgshift) - 1);
+	phys_addr_t vcb_base = vsmmu->base + arm_vsmmu_global_top(vsmmu);
+	u32 vcbndx = (addr - vcb_base) >> pgshift;
+	void __iomem *base = ARM_SMMU_CB_BASE(smmu);
+	u32 data;
+
+	if ((addr & 0x3) || (len != 4))
+		return -EFAULT;
+
+	if (vcbndx >= atomic_read(&vsmmu->num_context_banks))
+		return -EFAULT;
+
+	/* Filter out tricky registers */
+	switch (offset) {
+	case ARM_SMMU_CB_ACTLR:
+		/* Oh no you don't! */
+		*(u32 *)val = 0;
+		return 0;
+	}
+
+	data = readl_relaxed(base + ARM_SMMU_CB(smmu, vsmmu->cbs[vcbndx]));
+	*(u32 *)val = data;
+	return 0;
+}
+
+static int arm_vsmmu_cb_write(struct kvm_io_device *this, gpa_t addr, int len,
+			      const void *val)
+{
+	struct arm_vsmmu_device *vsmmu
+		= container_of(&this->ops, struct arm_vsmmu_device,
+			       mmio_cb_dev.ops);
+	struct arm_smmu_device *smmu = vsmmu->smmu;
+	u32 pgshift = smmu->pgshift;
+	u32 offset = addr & ((1 << pgshift) - 1);
+	phys_addr_t vcb_base = vsmmu->base + arm_vsmmu_global_top(vsmmu);
+	u32 vcbndx = (addr - vcb_base) >> pgshift;
+	void __iomem *base = ARM_SMMU_CB_BASE(smmu);
+	u32 data;
+
+	if ((addr & 0x3) || (len != 4))
+		return -EFAULT;
+
+	if (vcbndx >= atomic_read(&vsmmu->num_context_banks))
+		return -EFAULT;
+
+	switch (offset) {
+	case ARM_SMMU_CB_ACTLR:
+		return 0;
+	}
+
+	data = *(u32 *)val;
+	writel_relaxed(data, base + ARM_SMMU_CB(smmu, vsmmu->cbs[vcbndx]));
+	return 0;
+}
+
+static struct kvm_io_device_ops arm_vsmmu_mmio_cb_ops = {
+	.read	= arm_vsmmu_cb_read,
+	.write	= arm_vsmmu_cb_write,
+};
+
+static int arm_vsmmu_alloc_s1_contexts(struct arm_vsmmu_device *vsmmu)
+{
+	int i, num_vcbs, start, end, ret;
+	struct arm_smmu_device *smmu = vsmmu->smmu;
+
+	start = smmu->num_s2_context_banks;
+	end = smmu->num_context_banks;
+	num_vcbs = atomic_read(&vsmmu->num_context_banks);
+
+	if (WARN(vsmmu->cbs, "vSMMU context map already initialised?!"))
+		return -EEXIST;
+
+	vsmmu->cbs = kmalloc_array(num_vcbs, sizeof(*vsmmu->cbs), GFP_KERNEL);
+	if (!vsmmu->cbs)
+		return -ENOMEM;
+
+	for (i = 0; i < num_vcbs; ++i) {
+		ret = __arm_smmu_alloc_bitmap(smmu->context_map, start, end);
+		if (IS_ERR_VALUE(ret))
+			goto out_free_cbs;
+
+		vsmmu->cbs[i] = ret;
+	}
+
+	/*
+	 * TODO: request_irq for s1 context fault handlers. This is a
+	 * PITA because shared irqs on the smmu mean we can't just pass
+	 * the vsmmu pointer as data.
+	 */
+
+	return 0;
+
+out_free_cbs:
+	while (--i >= 0)
+		__arm_smmu_free_bitmap(smmu->context_map, vsmmu->cbs[i]);
+
+	kfree(vsmmu->cbs);
+	vsmmu->cbs = NULL;
+	return ret;
+}
+
+static int arm_vsmmu_size(struct kvm_device *dev, u64 __user *addr)
+{
+	u64 size;
+	struct arm_vsmmu_device *vsmmu = dev->private;
+
+	spin_lock(&vsmmu->lock);
+	size = arm_vsmmu_global_top(vsmmu) * 2;
+	spin_unlock(&vsmmu->lock);
+
+	return put_user(size, addr);
+}
+
+static void arm_vsmmu_init_register_file(struct arm_vsmmu_device *vsmmu)
+{
+	int i, num_vcbs = atomic_read(&vsmmu->num_context_banks);
+
+	vsmmu->gr0.scr0 = GR0_SCR0_RESET_VAL;
+
+	for (i = 0; i < num_vcbs; ++i)
+		vsmmu->gr1.cbar[i] = GR1_CBAR_RESET_VAL;
+}
+
+static int arm_vsmmu_init(struct kvm_device *dev, u64 __user *addr)
+{
+	int len, ret;
+	u64 base;
+	phys_addr_t size;
+	struct arm_vsmmu_device *vsmmu = dev->private;
+	struct arm_smmu_device *smmu = vsmmu->smmu;
+
+	if (!smmu)
+		return -ENODEV;
+
+	/* FIXME: I think get_user_8 is going in for 3.17 */
+	/* get_user can't deal with 64-bit quantities on ARM */
+	if (copy_from_user(&base, addr, sizeof(base)))
+		return -EFAULT;
+
+	if (base & ((1 << smmu->pgshift) - 1))
+		return -EINVAL;
+
+	/* Guard against parallel instantiation */
+	spin_lock(&vsmmu->lock);
+	if (vsmmu->size) {
+		ret = -EEXIST;
+		goto err_unlock;
+	}
+
+	len = arm_vsmmu_global_top(vsmmu);
+	size = len * 2;
+	if ((base + size) & ~KVM_PHYS_MASK) {
+		ret = -E2BIG;
+		goto err_unlock;
+	}
+
+	vsmmu->base = base;
+	vsmmu->size = size;
+	vsmmu->mmio_gr_dev.ops = &arm_vsmmu_mmio_gr_ops;
+	vsmmu->mmio_cb_dev.ops = &arm_vsmmu_mmio_cb_ops;
+	spin_unlock(&vsmmu->lock);
+
+	mutex_lock(&dev->kvm->slots_lock);
+	ret = kvm_io_bus_register_dev(dev->kvm, KVM_MMIO_BUS, base, len,
+				      &vsmmu->mmio_gr_dev);
+	if (ret)
+		goto err_reset;
+
+	base += len;
+	ret = kvm_io_bus_register_dev(dev->kvm, KVM_MMIO_BUS, base, len,
+				      &vsmmu->mmio_cb_dev);
+	if (ret)
+		goto err_reset;
+	mutex_unlock(&dev->kvm->slots_lock);
+
+	ret = arm_vsmmu_alloc_s1_contexts(vsmmu);
+	if (ret)
+		return ret;
+
+	arm_vsmmu_init_register_file(vsmmu);
+	return 0;
+
+err_reset:
+	mutex_unlock(&dev->kvm->slots_lock);
+	spin_lock(&vsmmu->lock);
+	vsmmu->base = vsmmu->size = 0;
+err_unlock:
+	spin_unlock(&vsmmu->lock);
+	return ret;
+}
+
+static int arm_vsmmu_irq(struct kvm_device *dev, u32 __user *addr)
+{
+	u32 virq;
+	int ret = 0;
+	struct arm_vsmmu_device *vsmmu = dev->private;
+
+	if (get_user(virq, addr))
+		return -EFAULT;
+
+	spin_lock(&vsmmu->lock);
+	if (vsmmu->size)
+		ret = -EBUSY;
+	else
+		vsmmu->virq = virq;
+	spin_unlock(&vsmmu->lock);
+
+	return ret;
+}
+
+static int arm_vsmmu_cfg_set(struct kvm_device *dev, u64 attr, u64 addr)
+{
+	switch (attr) {
+	case KVM_DEV_ARM_SMMU_V2_CFG_INIT:
+		return arm_vsmmu_init(dev, (u64 __user *)(unsigned long)addr);
+	case KVM_DEV_ARM_SMMU_V2_CFG_IRQ:
+		return arm_vsmmu_irq(dev, (u32 __user *)(unsigned long)addr);
+	default:
+		return -ENXIO;
+	}
+}
+
+static int arm_vsmmu_cfg_get(struct kvm_device *dev, u64 attr, u64 addr)
+{
+	switch (attr) {
+	case KVM_DEV_ARM_SMMU_V2_CFG_SIZE:
+		return arm_vsmmu_size(dev, (u64 __user *)(unsigned long)addr);
+	default:
+		return -ENXIO;
+	}
+}
+
+#ifdef CONFIG_VFIO
+#include <linux/file.h>
+#include <linux/vfio.h>
+
+/* For IOMMU groups, find the first device in the group */
+static int __arm_vsmmu_get_group_dev(struct device *dev, void *data)
+{
+	struct device **devp = data;
+
+	*devp = dev;
+	return 1;
+}
+
+static int arm_vsmmu_get_s2_cbndx(struct device *dev)
+{
+	unsigned long flags;
+	struct arm_smmu_domain *smmu_domain;
+	struct iommu_domain *domain = dev->archdata.iommu;
+	int ret = -ENODEV;
+
+	if (!domain)
+		return ret;
+
+	smmu_domain = domain->priv;
+	if (!smmu_domain)
+		return ret;
+
+	spin_lock_irqsave(&smmu_domain->lock, flags);
+	if (smmu_domain->stage == ARM_SMMU_DOMAIN_NESTED)
+		ret = smmu_domain->cfg.cbndx;
+	spin_unlock_irqrestore(&smmu_domain->lock, flags);
+
+	return ret;
+}
+
+static int arm_vsmmu_find_vsid_by_group(struct arm_vsmmu_device *vsmmu,
+					struct iommu_group *group)
+{
+	int i;
+
+	for (i = 0; i < ARM_SMMU_MAX_SMRS; ++i)
+		if (vsmmu->groups[i] == group)
+			return i;
+
+	return -ENODEV;
+}
+
+/*
+ * Add an IOMMU group to the vsmmu. Note that we hold a reference to
+ * the VFIO group, so we can rely on the stage-2 mapping staying around
+ * in the physical SMMU.
+ */
+static int arm_vsmmu_iommu_group_add(struct arm_vsmmu_device *vsmmu,
+				     struct iommu_group *group,
+				     u16 vsid)
+{
+	struct arm_smmu_device *smmu;
+	struct arm_smmu_master_cfg *cfg;
+	struct device *dev;
+	int cbndx, ret = 0;
+
+	if (vsid >= ARM_SMMU_MAX_SMRS)
+		return -ERANGE;
+
+	iommu_group_for_each_dev(group, &dev, __arm_vsmmu_get_group_dev);
+	if (!dev)
+		return -ENODEV;
+
+	smmu = find_smmu_for_device(dev);
+	if (!smmu)
+		return -ENODEV;
+
+	cfg = find_smmu_master_cfg(dev);
+	if (!cfg)
+		return -ENODEV;
+
+	/* Check that we have a stage-2 configured for nesting */
+	cbndx = arm_vsmmu_get_s2_cbndx(dev);
+	if (IS_ERR_VALUE(cbndx))
+		return cbndx;
+
+	spin_lock(&vsmmu->lock);
+
+	/* Avoid duplicate registrations */
+	if (arm_vsmmu_find_vsid_by_group(vsmmu, group) > 0) {
+		ret = -EEXIST;
+		goto err_unlock;
+	}
+
+	/* Allocate the vSID on the vSMMU */
+	if (__test_and_set_bit(vsid, vsmmu->vsid_map)) {
+		ret = -ENOSPC;
+		goto err_unlock;
+	}
+
+	if (vsmmu->size) {
+		ret = -EBUSY;
+		goto err_free_vsid;
+	}
+
+	if (!vsmmu->smmu) {
+		if (smmu->version > 1 &&
+		    (smmu->features & ARM_SMMU_FEAT_TRANS_NESTED)) {
+			vsmmu->smmu = smmu;
+		} else {
+			ret = -EOPNOTSUPP;
+			goto err_free_vsid;
+		}
+	} else if (vsmmu->smmu != smmu) {
+		ret = -EINVAL;
+		goto err_free_vsid;
+	}
+
+	vsmmu->groups[vsid] = group;
+	vsmmu->s2_cbs[vsid] = cbndx;
+	atomic_inc(&vsmmu->num_context_banks);
+
+	spin_unlock(&vsmmu->lock);
+	return ret;
+
+err_free_vsid:
+	__arm_smmu_free_bitmap(vsmmu->vsid_map, vsid);
+err_unlock:
+	spin_unlock(&vsmmu->lock);
+	return ret;
+}
+
+static int arm_vsmmu_iommu_group_del(struct arm_vsmmu_device *vsmmu,
+				     struct iommu_group *group)
+{
+	int vsid, ret = 0;
+
+	spin_lock(&vsmmu->lock);
+	if (vsmmu->size) {
+		ret = -EBUSY;
+		goto out_unlock;
+	}
+
+	vsid = arm_vsmmu_find_vsid_by_group(vsmmu, group);
+	if (vsid < 0) {
+		ret = -ENODEV;
+		goto out_unlock;
+	}
+
+	vsmmu->groups[vsid] = NULL;
+	__arm_smmu_free_bitmap(vsmmu->vsid_map, vsid);
+
+	if (!atomic_dec_return(&vsmmu->num_context_banks))
+		vsmmu->smmu = NULL;
+
+out_unlock:
+	spin_unlock(&vsmmu->lock);
+	return ret;
+}
+
+/* External vfio_group accessors copied blindly from virt/kvm/vfio.c */
+static struct vfio_group *kvm_vfio_group_get_external_user(struct file *filep)
+{
+	struct vfio_group *vfio_group;
+	struct vfio_group *(*fn)(struct file *);
+
+	fn = symbol_get(vfio_group_get_external_user);
+	if (!fn)
+		return ERR_PTR(-EINVAL);
+
+	vfio_group = fn(filep);
+
+	symbol_put(vfio_group_get_external_user);
+
+	return vfio_group;
+}
+
+static void kvm_vfio_group_put_external_user(struct vfio_group *vfio_group)
+{
+	void (*fn)(struct vfio_group *);
+
+	fn = symbol_get(vfio_group_put_external_user);
+	if (!fn)
+		return;
+
+	fn(vfio_group);
+
+	symbol_put(vfio_group_put_external_user);
+}
+
+static int arm_vsmmu_vfio_external_user_iommu_id(struct vfio_group *vfio_group)
+{
+	int ret;
+	int (*fn)(struct vfio_group *);
+
+	fn = symbol_get(vfio_external_user_iommu_id);
+	if (!fn)
+		return -EINVAL;
+
+	ret = fn(vfio_group);
+
+	symbol_put(vfio_external_user_iommu_id);
+
+	return ret;
+}
+
+static struct vfio_group *arm_vsmmu_get_vfio_group(int fd)
+{
+	struct fd f;
+	struct vfio_group *vfio_group;
+
+	f = fdget(fd);
+	if (!f.file)
+		return ERR_PTR(-EBADF);
+
+	vfio_group = kvm_vfio_group_get_external_user(f.file);
+	fdput(f);
+
+	return vfio_group;
+}
+
+static void arm_vsmmu_put_vfio_group(struct vfio_group *vfio_group)
+{
+	kvm_vfio_group_put_external_user(vfio_group);
+}
+
+static struct iommu_group *
+arm_vsmmu_vfio_to_iommu_group(struct vfio_group *vfio_group)
+{
+	struct iommu_group *iommu_group;
+	int id = arm_vsmmu_vfio_external_user_iommu_id(vfio_group);
+
+	if (id < 0)
+		return ERR_PTR(id);
+
+	iommu_group = iommu_group_get_by_id(id);
+	return iommu_group ?: ERR_PTR(-ENODEV);
+}
+
+static int arm_vsmmu_vfio_set(struct kvm_device *dev, u64 attr, u64 addr)
+{
+	int fd, ret;
+	struct vfio_group *vfio_group;
+	struct iommu_group *iommu_group;
+	struct arm_smmu_v2_vfio_group_sid group_sid;
+	struct arm_vsmmu_device *vsmmu = dev->private;
+	void __user *uaddr = (void __user *)(unsigned long)addr;
+
+	switch (attr) {
+	case KVM_DEV_ARM_SMMU_V2_VFIO_GROUP_ADD:
+		if (copy_from_user(&group_sid, uaddr, sizeof(group_sid)))
+			return -EFAULT;
+		fd = group_sid.fd;
+		break;
+	case KVM_DEV_ARM_SMMU_V2_VFIO_GROUP_DEL:
+		if (get_user(fd, (int __user *)uaddr))
+			return -EFAULT;
+		break;
+	default:
+		return -ENXIO;
+	}
+
+	vfio_group = arm_vsmmu_get_vfio_group(fd);
+	if (IS_ERR(vfio_group))
+		return PTR_ERR(vfio_group);
+
+	iommu_group = arm_vsmmu_vfio_to_iommu_group(vfio_group);
+	if (IS_ERR(iommu_group))
+		goto out_put_group;
+
+	switch (attr) {
+	case KVM_DEV_ARM_SMMU_V2_VFIO_GROUP_ADD:
+		ret = arm_vsmmu_iommu_group_add(vsmmu, iommu_group,
+						group_sid.sid);
+		break;
+	case KVM_DEV_ARM_SMMU_V2_VFIO_GROUP_DEL:
+		ret = arm_vsmmu_iommu_group_del(vsmmu, iommu_group);
+		break;
+	}
+
+out_put_group:
+	arm_vsmmu_put_vfio_group(vfio_group);
+	return ret;
+}
+#else
+static int arm_vsmmu_vfio_set(struct kvm_device *dev, u64 attr, u64 addr)
+{
+	return -ENXIO;
+}
+#endif	/* CONFIG_VFIO */
+
+static int arm_vsmmu_create(struct kvm_device *dev, u32 type)
+{
+	struct arm_vsmmu_device *vsmmu;
+
+	vsmmu = kzalloc(sizeof(*vsmmu), GFP_KERNEL);
+	if (!vsmmu)
+		return -ENOMEM;
+
+	spin_lock_init(&vsmmu->lock);
+	dev->private = vsmmu;
+	vsmmu->kvm = dev->kvm;
+	return 0;
+}
+
+static void arm_vsmmu_destroy(struct kvm_device *dev)
+{
+	int i, num_vcbs;
+	struct arm_vsmmu_device *vsmmu = dev->private;
+
+	if (!vsmmu->size)
+		goto out_free_vsmmu;
+
+	num_vcbs = atomic_read(&vsmmu->num_context_banks);
+	for (i = 0; i < num_vcbs; ++i)
+		__arm_smmu_free_bitmap(vsmmu->smmu->context_map, vsmmu->cbs[i]);
+
+	kfree(vsmmu->cbs);
+out_free_vsmmu:
+	kfree(vsmmu);
+}
+
+static int
+arm_vsmmu_set_attr(struct kvm_device *dev, struct kvm_device_attr *attr)
+{
+	switch (attr->group) {
+	case KVM_DEV_ARM_SMMU_V2_CFG:
+		return arm_vsmmu_cfg_set(dev, attr->attr, attr->addr);
+	case KVM_DEV_ARM_SMMU_V2_VFIO:
+		return arm_vsmmu_vfio_set(dev, attr->attr, attr->addr);
+	default:
+		return -ENXIO;
+	}
+}
+
+static int
+arm_vsmmu_get_attr(struct kvm_device *dev, struct kvm_device_attr *attr)
+{
+	switch (attr->group) {
+	case KVM_DEV_ARM_SMMU_V2_CFG:
+		return arm_vsmmu_cfg_get(dev, attr->attr, attr->addr);
+	default:
+		return -ENXIO;
+	}
+}
+
+static int
+arm_vsmmu_has_attr(struct kvm_device *dev, struct kvm_device_attr *attr)
+{
+	switch (attr->group) {
+	case KVM_DEV_ARM_SMMU_V2_CFG:
+		switch (attr->attr) {
+		case KVM_DEV_ARM_SMMU_V2_CFG_INIT:
+		case KVM_DEV_ARM_SMMU_V2_CFG_IRQ:
+		case KVM_DEV_ARM_SMMU_V2_CFG_SIZE:
+			return 0;
+		}
+		break;
+#ifdef CONFIG_VFIO
+	case KVM_DEV_ARM_SMMU_V2_VFIO:
+		switch (attr->attr) {
+		case KVM_DEV_ARM_SMMU_V2_VFIO_GROUP_ADD:
+		case KVM_DEV_ARM_SMMU_V2_VFIO_GROUP_DEL:
+			return 0;
+		}
+		break;
+#endif
+	}
+
+	return -ENXIO;
+}
+
+static struct kvm_device_ops kvm_arm_vsmmu_v2_ops = {
+	.name		= "kvm-arm-vsmmu-v2",
+	.create		= arm_vsmmu_create,
+	.destroy	= arm_vsmmu_destroy,
+	.set_attr	= arm_vsmmu_set_attr,
+	.get_attr	= arm_vsmmu_get_attr,
+	.has_attr	= arm_vsmmu_has_attr,
+};
+
+#endif /* CONFIG_KVM */
+
 static int __init arm_smmu_init(void)
 {
 	struct device_node *np;
@@ -2175,7 +3386,11 @@ static int __init arm_smmu_init(void)
 		bus_set_iommu(&pci_bus_type, &arm_smmu_ops);
 #endif
 
-	return 0;
+#ifdef CONFIG_KVM
+	ret = kvm_register_device_ops(&kvm_arm_vsmmu_v2_ops,
+				      KVM_DEV_TYPE_ARM_SMMU_V2);
+#endif
+	return ret;
 }
 
 static void __exit arm_smmu_exit(void)
