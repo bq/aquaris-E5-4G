@@ -117,17 +117,18 @@ static void intel_dsi_device_ready(struct intel_encoder *encoder)
 	/* bandgap reset is needed after everytime we do power gate */
 	band_gap_reset(dev_priv);
 
+	I915_WRITE(MIPI_DEVICE_READY(pipe), ULPS_STATE_ENTER);
+	usleep_range(2500, 3000);
+
 	val = I915_READ(MIPI_PORT_CTRL(pipe));
 	I915_WRITE(MIPI_PORT_CTRL(pipe), val | LP_OUTPUT_HOLD);
 	usleep_range(1000, 1500);
-	I915_WRITE(MIPI_DEVICE_READY(pipe), DEVICE_READY | ULPS_STATE_EXIT);
-	usleep_range(2000, 2500);
+
+	I915_WRITE(MIPI_DEVICE_READY(pipe), ULPS_STATE_EXIT);
+	usleep_range(2500, 3000);
+
 	I915_WRITE(MIPI_DEVICE_READY(pipe), DEVICE_READY);
-	usleep_range(2000, 2500);
-	I915_WRITE(MIPI_DEVICE_READY(pipe), 0x00);
-	usleep_range(2000, 2500);
-	I915_WRITE(MIPI_DEVICE_READY(pipe), DEVICE_READY);
-	usleep_range(2000, 2500);
+	usleep_range(2500, 3000);
 }
 
 static void intel_dsi_enable(struct intel_encoder *encoder)
@@ -271,22 +272,22 @@ static void intel_dsi_clear_device_ready(struct intel_encoder *encoder)
 
 	DRM_DEBUG_KMS("\n");
 
-	I915_WRITE(MIPI_DEVICE_READY(pipe), ULPS_STATE_ENTER);
+	I915_WRITE(MIPI_DEVICE_READY(pipe), DEVICE_READY | ULPS_STATE_ENTER);
 	usleep_range(2000, 2500);
 
-	I915_WRITE(MIPI_DEVICE_READY(pipe), ULPS_STATE_EXIT);
+	I915_WRITE(MIPI_DEVICE_READY(pipe), DEVICE_READY | ULPS_STATE_EXIT);
 	usleep_range(2000, 2500);
 
-	I915_WRITE(MIPI_DEVICE_READY(pipe), ULPS_STATE_ENTER);
+	I915_WRITE(MIPI_DEVICE_READY(pipe), DEVICE_READY | ULPS_STATE_ENTER);
 	usleep_range(2000, 2500);
-
-	val = I915_READ(MIPI_PORT_CTRL(pipe));
-	I915_WRITE(MIPI_PORT_CTRL(pipe), val & ~LP_OUTPUT_HOLD);
-	usleep_range(1000, 1500);
 
 	if (wait_for(((I915_READ(MIPI_PORT_CTRL(pipe)) & AFE_LATCHOUT)
 					== 0x00000), 30))
 		DRM_ERROR("DSI LP not going Low\n");
+
+	val = I915_READ(MIPI_PORT_CTRL(pipe));
+	I915_WRITE(MIPI_PORT_CTRL(pipe), val & ~LP_OUTPUT_HOLD);
+	usleep_range(1000, 1500);
 
 	I915_WRITE(MIPI_DEVICE_READY(pipe), 0x00);
 	usleep_range(2000, 2500);
@@ -657,7 +658,7 @@ static const struct drm_connector_funcs intel_dsi_connector_funcs = {
 	.fill_modes = drm_helper_probe_single_connector_modes,
 };
 
-bool intel_dsi_init(struct drm_device *dev)
+void intel_dsi_init(struct drm_device *dev)
 {
 	struct intel_dsi *intel_dsi;
 	struct intel_encoder *intel_encoder;
@@ -673,28 +674,28 @@ bool intel_dsi_init(struct drm_device *dev)
 
 	/* There is no detection method for MIPI so rely on VBT */
 	if (!dev_priv->vbt.has_mipi)
-		return false;
-
-	intel_dsi = kzalloc(sizeof(*intel_dsi), GFP_KERNEL);
-	if (!intel_dsi)
-		return false;
-
-	intel_connector = kzalloc(sizeof(*intel_connector), GFP_KERNEL);
-	if (!intel_connector) {
-		kfree(intel_dsi);
-		return false;
-	}
-
-	intel_encoder = &intel_dsi->base;
-	encoder = &intel_encoder->base;
-	intel_dsi->attached_connector = intel_connector;
+		return;
 
 	if (IS_VALLEYVIEW(dev)) {
 		dev_priv->mipi_mmio_base = VLV_MIPI_BASE;
 	} else {
 		DRM_ERROR("Unsupported Mipi device to reg base");
-		return false;
+		return;
 	}
+
+	intel_dsi = kzalloc(sizeof(*intel_dsi), GFP_KERNEL);
+	if (!intel_dsi)
+		return;
+
+	intel_connector = kzalloc(sizeof(*intel_connector), GFP_KERNEL);
+	if (!intel_connector) {
+		kfree(intel_dsi);
+		return;
+	}
+
+	intel_encoder = &intel_dsi->base;
+	encoder = &intel_encoder->base;
+	intel_dsi->attached_connector = intel_connector;
 
 	connector = &intel_connector->base;
 
@@ -742,7 +743,7 @@ bool intel_dsi_init(struct drm_device *dev)
 
 	intel_connector_attach_encoder(intel_connector, intel_encoder);
 
-	drm_sysfs_connector_add(connector);
+	drm_connector_register(connector);
 
 	fixed_mode = dsi->dev_ops->get_modes(&intel_dsi->dev);
 	if (!fixed_mode) {
@@ -753,12 +754,10 @@ bool intel_dsi_init(struct drm_device *dev)
 	fixed_mode->type |= DRM_MODE_TYPE_PREFERRED;
 	intel_panel_init(&intel_connector->panel, fixed_mode, NULL);
 
-	return true;
+	return;
 
 err:
 	drm_encoder_cleanup(&intel_encoder->base);
 	kfree(intel_dsi);
 	kfree(intel_connector);
-
-	return false;
 }

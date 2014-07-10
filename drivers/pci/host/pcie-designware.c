@@ -497,9 +497,8 @@ int __init dw_pcie_host_init(struct pcie_port *pp)
 
 	pci_common_init_dev(pp->dev, &dw_pci);
 	pci_assign_unassigned_resources();
-#ifdef CONFIG_PCI_DOMAINS
-	dw_pci.domain++;
-#endif
+	if (IS_ENABLED(CONFIG_PCI_DOMAINS))
+		dw_pci.domain++;
 
 	return 0;
 }
