@@ -470,10 +470,6 @@ static int f2fs_rename(struct inode *old_dir, struct dentry *old_dentry,
 	return 0;
 
 put_out_dir:
-<<<<<<< HEAD
-=======
-	f2fs_unlock_op(sbi);
->>>>>>> linux-next/akpm-base
 	kunmap(new_page);
 	f2fs_put_page(new_page, 0);
 out_dir:
