@@ -37,7 +37,7 @@ struct i915_params i915 __read_mostly = {
 	.enable_fbc = -1,
 	.enable_hangcheck = true,
 	.enable_ppgtt = -1,
-	.enable_psr = 0,
+	.enable_psr = 1,
 	.preliminary_hw_support = IS_ENABLED(CONFIG_DRM_I915_PRELIMINARY_HW_SUPPORT),
 	.disable_power_well = 1,
 	.enable_ips = 1,
@@ -48,6 +48,7 @@ struct i915_params i915 __read_mostly = {
 	.disable_display = 0,
 	.enable_cmd_parser = 1,
 	.disable_vtd_wa = 0,
+	.use_mmio_flip = 0,
 };
 
 module_param_named(modeset, i915.modeset, int, 0400);
@@ -117,7 +118,7 @@ MODULE_PARM_DESC(enable_ppgtt,
 	"(-1=auto [default], 0=disabled, 1=aliasing, 2=full)");
 
 module_param_named(enable_psr, i915.enable_psr, int, 0600);
-MODULE_PARM_DESC(enable_psr, "Enable PSR (default: false)");
+MODULE_PARM_DESC(enable_psr, "Enable PSR (default: true)");
 
 module_param_named(preliminary_hw_support, i915.preliminary_hw_support, int, 0600);
 MODULE_PARM_DESC(preliminary_hw_support,
@@ -156,3 +157,7 @@ MODULE_PARM_DESC(disable_vtd_wa, "Disable all VT-d workarounds (default: false)"
 module_param_named(enable_cmd_parser, i915.enable_cmd_parser, int, 0600);
 MODULE_PARM_DESC(enable_cmd_parser,
 		 "Enable command parsing (1=enabled [default], 0=disabled)");
+
+module_param_named(use_mmio_flip, i915.use_mmio_flip, int, 0600);
+MODULE_PARM_DESC(use_mmio_flip,
+		 "use MMIO flips (-1=never, 0=driver discretion [default], 1=always)");
