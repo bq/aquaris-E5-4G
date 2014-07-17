@@ -711,22 +711,6 @@ static void iwl_build_channel_cfg(struct iwl_mvm *mvm,
 				  u32 ssid_bitmap,
 				  struct iwl_mvm_scan_params *params)
 {
-<<<<<<< HEAD
-	int i, index = 0;
-
-	for (i = 0; i < req->n_channels; i++) {
-		struct ieee80211_channel *chan = req->channels[i];
-
-		if (chan->band != band)
-			continue;
-
-		index = *head;
-		(*head)++;
-
-		channels->channel_number[index] = cpu_to_le16(chan->hw_value);
-		channels->dwell_time[index][0] = params->dwell[band].active;
-		channels->dwell_time[index][1] = params->dwell[band].passive;
-=======
 	u32 n_channels = mvm->fw->ucode_capa.n_scan_channels;
 	__le32 *type = (__le32 *)channels_buffer;
 	__le16 *channel_number = (__le16 *)(type + n_channels);
@@ -748,23 +732,11 @@ static void iwl_build_channel_cfg(struct iwl_mvm *mvm,
 		channel_number[index] = cpu_to_le16(chan->hw_value);
 		active_dwell[index] = params->dwell[band].active;
 		passive_dwell[index] = params->dwell[band].passive;
->>>>>>> linux-next/akpm-base
 
 		iter_count[index] = cpu_to_le16(1);
 		iter_interval[index] = 0;
 
 		if (!(chan->flags & IEEE80211_CHAN_NO_IR))
-<<<<<<< HEAD
-			channels->type[index] |=
-				cpu_to_le32(IWL_SCAN_OFFLOAD_CHANNEL_ACTIVE);
-
-		channels->type[index] |=
-				cpu_to_le32(IWL_SCAN_OFFLOAD_CHANNEL_FULL |
-					    IWL_SCAN_OFFLOAD_CHANNEL_PARTIAL);
-
-		if (chan->flags & IEEE80211_CHAN_NO_HT40)
-			channels->type[index] |=
-=======
 			type[index] |=
 				cpu_to_le32(IWL_SCAN_OFFLOAD_CHANNEL_ACTIVE);
 
@@ -773,7 +745,6 @@ static void iwl_build_channel_cfg(struct iwl_mvm *mvm,
 
 		if (chan->flags & IEEE80211_CHAN_NO_HT40)
 			type[index] |=
->>>>>>> linux-next/akpm-base
 				cpu_to_le32(IWL_SCAN_OFFLOAD_CHANNEL_NARROW);
 
 		/* scan for all SSIDs from req->ssids */
@@ -826,13 +797,8 @@ int iwl_mvm_config_sched_scan(struct iwl_mvm *mvm,
 		iwl_scan_offload_build_tx_cmd(mvm, vif, ies,
 					      IEEE80211_BAND_2GHZ,
 					      &scan_cfg->scan_cmd.tx_cmd[0],
-<<<<<<< HEAD
-					      scan_cfg->data);
-		iwl_build_channel_cfg(mvm, req, &scan_cfg->channel_cfg,
-=======
 					      probes);
 		iwl_build_channel_cfg(mvm, req, scan_cfg->data,
->>>>>>> linux-next/akpm-base
 				      IEEE80211_BAND_2GHZ, &head,
 				      ssid_bitmap, &params);
 	}
@@ -842,11 +808,7 @@ int iwl_mvm_config_sched_scan(struct iwl_mvm *mvm,
 					      &scan_cfg->scan_cmd.tx_cmd[1],
 					      probes +
 						SCAN_OFFLOAD_PROBE_REQ_SIZE);
-<<<<<<< HEAD
-		iwl_build_channel_cfg(mvm, req, &scan_cfg->channel_cfg,
-=======
 		iwl_build_channel_cfg(mvm, req, scan_cfg->data,
->>>>>>> linux-next/akpm-base
 				      IEEE80211_BAND_5GHZ, &head,
 				      ssid_bitmap, &params);
 	}

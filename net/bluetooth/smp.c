@@ -391,19 +391,12 @@ static const u8 gen_method[5][5] = {
 
 static u8 get_auth_method(struct smp_chan *smp, u8 local_io, u8 remote_io)
 {
-<<<<<<< HEAD
-	/* If either side has unknown io_caps, use JUST WORKS */
-	if (local_io > SMP_IO_KEYBOARD_DISPLAY ||
-	    remote_io > SMP_IO_KEYBOARD_DISPLAY)
-		return JUST_WORKS;
-=======
 	/* If either side has unknown io_caps, use JUST_CFM (which gets
 	 * converted later to JUST_WORKS if we're initiators.
 	 */
 	if (local_io > SMP_IO_KEYBOARD_DISPLAY ||
 	    remote_io > SMP_IO_KEYBOARD_DISPLAY)
 		return JUST_CFM;
->>>>>>> linux-next/akpm-base
 
 	return gen_method[remote_io][local_io];
 }
@@ -423,18 +416,6 @@ static int tk_request(struct l2cap_conn *conn, u8 remote_oob, u8 auth,
 
 	BT_DBG("tk_request: auth:%d lcl:%d rem:%d", auth, local_io, remote_io);
 
-<<<<<<< HEAD
-	/* If neither side wants MITM, use JUST WORKS */
-	/* Otherwise, look up method from the table */
-	if (!(auth & SMP_AUTH_MITM))
-		method = JUST_WORKS;
-	else
-		method = get_auth_method(smp, local_io, remote_io);
-
-	/* If not bonding, don't ask user to confirm a Zero TK */
-	if (!(auth & SMP_AUTH_BONDING) && method == JUST_CFM)
-		method = JUST_WORKS;
-=======
 	/* If neither side wants MITM, either "just" confirm an incoming
 	 * request or use just-works for outgoing ones. The JUST_CFM
 	 * will be converted to JUST_WORKS if necessary later in this
@@ -445,7 +426,6 @@ static int tk_request(struct l2cap_conn *conn, u8 remote_oob, u8 auth,
 		method = JUST_CFM;
 	else
 		method = get_auth_method(smp, local_io, remote_io);
->>>>>>> linux-next/akpm-base
 
 	/* Don't confirm locally initiated pairing attempts */
 	if (method == JUST_CFM && test_bit(SMP_FLAG_INITIATOR, &smp->flags))
@@ -927,12 +907,9 @@ static u8 smp_cmd_security_req(struct l2cap_conn *conn, struct sk_buff *skb)
 		return SMP_CMD_NOTSUPP;
 
 	sec_level = authreq_to_seclevel(rp->auth_req);
-<<<<<<< HEAD
-=======
 	if (smp_sufficient_security(hcon, sec_level))
 		return 0;
 
->>>>>>> linux-next/akpm-base
 	if (sec_level > hcon->pending_sec_level)
 		hcon->pending_sec_level = sec_level;
 
@@ -984,11 +961,7 @@ int smp_conn_security(struct hci_conn *hcon, __u8 sec_level)
 	if (sec_level > hcon->pending_sec_level)
 		hcon->pending_sec_level = sec_level;
 
-<<<<<<< HEAD
-	if (hcon->link_mode & HCI_LM_MASTER)
-=======
 	if (test_bit(HCI_CONN_MASTER, &hcon->flags))
->>>>>>> linux-next/akpm-base
 		if (smp_ltk_encrypt(conn, hcon->pending_sec_level))
 			return 0;
 
