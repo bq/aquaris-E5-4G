@@ -168,7 +168,7 @@ int io_mem_abort(struct kvm_vcpu *vcpu, struct kvm_run *run,
 	struct kvm_exit_mmio mmio;
 	unsigned long data;
 	unsigned long rt;
-	int ret;
+	int err, handled = 0;
 
 	/*
 	 * Prepare MMIO operation. First stash it in a private
@@ -178,9 +178,9 @@ int io_mem_abort(struct kvm_vcpu *vcpu, struct kvm_run *run,
 	 */
 
 	if (kvm_vcpu_dabt_isvalid(vcpu)) {
-		ret = decode_hsr(vcpu, fault_ipa, &mmio);
-		if (ret)
-			return ret;
+		err = decode_hsr(vcpu, fault_ipa, &mmio);
+		if (err)
+			return err;
 	} else {
 		kvm_err("load/store instruction decoding not implemented\n");
 		return -ENOSYS;
@@ -195,14 +195,23 @@ int io_mem_abort(struct kvm_vcpu *vcpu, struct kvm_run *run,
 		trace_kvm_mmio(KVM_TRACE_MMIO_WRITE, mmio.len,
 			       fault_ipa, data);
 		mmio_write_buf(mmio.data, mmio.len, data);
+		handled = !kvm_io_bus_write(vcpu->kvm, KVM_MMIO_BUS,
+					    mmio.phys_addr, mmio.len,
+					    mmio.data);
 	} else {
 		trace_kvm_mmio(KVM_TRACE_MMIO_READ_UNSATISFIED, mmio.len,
 			       fault_ipa, 0);
+		handled = !kvm_io_bus_read(vcpu->kvm, KVM_MMIO_BUS,
+					   mmio.phys_addr, mmio.len,
+					   mmio.data);
 	}
 
-	if (vgic_handle_mmio(vcpu, run, &mmio))
+	if (!handled && vgic_handle_mmio(vcpu, run, &mmio))
 		return 1;
 
 	kvm_prepare_mmio(run, &mmio);
-	return 0;
+	if (handled)
+		kvm_handle_mmio_return(vcpu, run);
+
+	return handled;
 }
