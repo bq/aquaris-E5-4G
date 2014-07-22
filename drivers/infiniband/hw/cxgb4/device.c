@@ -33,6 +33,7 @@
 #include <linux/moduleparam.h>
 #include <linux/debugfs.h>
 #include <linux/vmalloc.h>
+#include <linux/math64.h>
 
 #include <rdma/ib_verbs.h>
 
@@ -142,6 +143,11 @@ void c4iw_log_wr_stats(struct t4_wq *wq, struct t4_cqe *cqe)
 	wq->rdev->wr_log[idx] = le;
 }
 
+static u64 ts2ns(struct c4iw_dev *dev, u64 ts)
+{
+	return div64_u64(ts * dev->rdev.lldi.cclk_ps, 1000);
+}
+
 static int wr_log_show(struct seq_file *seq, void *v)
 {
 	struct c4iw_dev *dev = seq->private;
@@ -149,8 +155,6 @@ static int wr_log_show(struct seq_file *seq, void *v)
 	struct wr_log_entry *lep;
 	int prev_ts_set = 0;
 	int idx, end;
-
-#define ts2ns(ts) ((ts) * dev->rdev.lldi.cclk_ps / 1000)
 
 	idx = atomic_read(&dev->rdev.wr_log_idx) &
 		(dev->rdev.wr_log_size - 1);
@@ -184,8 +188,10 @@ static int wr_log_show(struct seq_file *seq, void *v)
 						lep->post_host_ts).tv_nsec,
 				   lep->post_sge_ts, lep->cqe_sge_ts,
 				   lep->poll_sge_ts,
-				   ts2ns(lep->poll_sge_ts - lep->post_sge_ts),
-				   ts2ns(lep->poll_sge_ts - lep->cqe_sge_ts));
+				   ts2ns(dev, lep->poll_sge_ts -
+						lep->post_sge_ts),
+				   ts2ns(dev, lep->poll_sge_ts -
+						lep->cqe_sge_ts));
 			prev_ts = lep->poll_host_ts;
 		}
 		idx++;
@@ -193,7 +199,6 @@ static int wr_log_show(struct seq_file *seq, void *v)
 			idx = 0;
 		lep = &dev->rdev.wr_log[idx];
 	}
-#undef ts2ns
 	return 0;
 }
 
