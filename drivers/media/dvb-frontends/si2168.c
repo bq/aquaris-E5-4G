@@ -362,8 +362,6 @@ static int si2168_init(struct dvb_frontend *fe)
 	if (ret)
 		goto err;
 
-<<<<<<< HEAD
-=======
 	cmd.args[0] = 0x05;
 	cmd.args[1] = 0x00;
 	cmd.args[2] = 0xaa;
@@ -400,7 +398,6 @@ static int si2168_init(struct dvb_frontend *fe)
 		goto err;
 	}
 
->>>>>>> linux-next/akpm-base
 	/* cold state - try to download firmware */
 	dev_info(&s->client->dev, "%s: found a '%s' in cold state\n",
 			KBUILD_MODNAME, si2168_ops.info.name);
