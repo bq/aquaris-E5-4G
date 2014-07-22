@@ -12,6 +12,7 @@ menuconfig ARCH_SHMOBILE_MULTI
 	select NO_IOPORT_MAP
 	select PINCTRL
 	select ARCH_REQUIRE_GPIOLIB
+	select ARCH_HAS_OPP
 
 if ARCH_SHMOBILE_MULTI
 
@@ -25,6 +26,11 @@ config ARCH_R7S72100
 	bool "RZ/A1H (R7S72100)"
 	select SYS_SUPPORTS_SH_MTU2
 
+config ARCH_R8A7779
+	bool "R-Car H1 (R8A77790)"
+	select RENESAS_INTC_IRQPIN
+	select SYS_SUPPORTS_SH_TMU
+
 config ARCH_R8A7790
 	bool "R-Car H2 (R8A77900)"
 	select RENESAS_IRQC
@@ -37,10 +43,6 @@ config ARCH_R8A7791
 
 comment "Renesas ARM SoCs Board Type"
 
-config MACH_GENMAI
-	bool "Genmai board"
-	depends on ARCH_R7S72100
-
 config MACH_KOELSCH
 	bool "Koelsch board"
 	depends on ARCH_R8A7791
@@ -50,6 +52,11 @@ config MACH_LAGER
 	bool "Lager board"
 	depends on ARCH_R8A7790
 	select MICREL_PHY if SH_ETH
+
+config MACH_MARZEN
+	bool "MARZEN board"
+	depends on ARCH_R8A7779
+	select REGULATOR_FIXED_VOLTAGE if REGULATOR
 
 comment "Renesas ARM SoCs System Configuration"
 endif
@@ -139,14 +146,6 @@ config ARCH_R8A7791
 	select SYS_SUPPORTS_SH_CMT
 	select ARCH_DMA_ADDR_T_64BIT if ARM_LPAE
 
-config ARCH_R7S72100
-	bool "RZ/A1H (R7S72100)"
-	select ARCH_WANT_OPTIONAL_GPIOLIB
-	select ARM_GIC
-	select CPU_V7
-	select SH_CLK_CPG
-	select SYS_SUPPORTS_SH_MTU2
-
 comment "Renesas ARM SoCs Board Type"
 
 config MACH_APE6EVM
@@ -222,30 +221,12 @@ config MACH_BOCKW_REFERENCE
 
 	   This is intended to aid developers
 
-config MACH_GENMAI
-	bool "Genmai board"
-	depends on ARCH_R7S72100
-	select USE_OF
-
 config MACH_MARZEN
 	bool "MARZEN board"
 	depends on ARCH_R8A7779
 	select ARCH_REQUIRE_GPIOLIB
 	select REGULATOR_FIXED_VOLTAGE if REGULATOR
 	select USE_OF
-
-config MACH_MARZEN_REFERENCE
-	bool "MARZEN board - Reference Device Tree Implementation"
-	depends on ARCH_R8A7779
-	select ARCH_REQUIRE_GPIOLIB
-	select REGULATOR_FIXED_VOLTAGE if REGULATOR
-	select USE_OF
-	---help---
-	   Use reference implementation of Marzen board support
-	   which makes use of device tree at the expense
-	   of not supporting a number of devices.
-
-	   This is intended to aid developers
 
 config MACH_LAGER
 	bool "Lager board"

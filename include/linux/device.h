@@ -124,7 +124,7 @@ struct bus_type {
 
 	const struct dev_pm_ops *pm;
 
-	struct iommu_ops *iommu_ops;
+	const struct iommu_ops *iommu_ops;
 
 	struct subsys_private *p;
 	struct lock_class_key lock_key;
@@ -605,6 +605,10 @@ extern int devres_release_group(struct device *dev, void *id);
 
 /* managed devm_k.alloc/kfree for device drivers */
 extern void *devm_kmalloc(struct device *dev, size_t size, gfp_t gfp);
+extern char *devm_kvasprintf(struct device *dev, gfp_t gfp, const char *fmt,
+			     va_list ap);
+extern char *devm_kasprintf(struct device *dev, gfp_t gfp,
+			    const char *fmt, ...);
 static inline void *devm_kzalloc(struct device *dev, size_t size, gfp_t gfp)
 {
 	return devm_kmalloc(dev, size, gfp | __GFP_ZERO);
@@ -631,8 +635,6 @@ extern unsigned long devm_get_free_pages(struct device *dev,
 extern void devm_free_pages(struct device *dev, unsigned long addr);
 
 void __iomem *devm_ioremap_resource(struct device *dev, struct resource *res);
-void __iomem *devm_request_and_ioremap(struct device *dev,
-			struct resource *res);
 
 /* allows to add/remove a custom action to devres stack */
 int devm_add_action(struct device *dev, void (*action)(void *), void *data);
@@ -906,6 +908,11 @@ static inline int device_trylock(struct device *dev)
 static inline void device_unlock(struct device *dev)
 {
 	mutex_unlock(&dev->mutex);
+}
+
+static inline void device_lock_assert(struct device *dev)
+{
+	lockdep_assert_held(&dev->mutex);
 }
 
 void driver_init(void);
