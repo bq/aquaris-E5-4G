@@ -362,6 +362,13 @@ EXPORT_SYMBOL(seq_lseek);
 int seq_release(struct inode *inode, struct file *file)
 {
 	struct seq_file *m = file->private_data;
+
+	if (m->seq_ops_allocated) {
+		struct dentry *dentry = file->f_dentry;
+		printk("memory leak: '%.*s'\n",
+			dentry->d_name.len, dentry->d_name.name);
+		WARN_ON(1);
+	}
 	kvfree(m->buf);
 	kfree(m);
 	return 0;
@@ -605,9 +612,12 @@ int single_open(struct file *file, int (*show)(struct seq_file *, void *),
 		op->stop = single_stop;
 		op->show = show;
 		res = seq_open(file, op);
-		if (!res)
-			((struct seq_file *)file->private_data)->private = data;
-		else
+		if (!res) {
+			struct seq_file *seq = file->private_data;
+
+			seq->private = data;
+			seq->seq_ops_allocated = 1;
+		} else
 			kfree(op);
 	}
 	return res;
@@ -634,8 +644,13 @@ EXPORT_SYMBOL(single_open_size);
 
 int single_release(struct inode *inode, struct file *file)
 {
-	const struct seq_operations *op = ((struct seq_file *)file->private_data)->op;
-	int res = seq_release(inode, file);
+	struct seq_file *seq = file->private_data;
+	const struct seq_operations *op = seq->op;
+	int res;
+
+	/* All roads lead to seq_release(), so... */
+	seq->seq_ops_allocated = 0;
+	res = seq_release(inode, file);
 	kfree(op);
 	return res;
 }
