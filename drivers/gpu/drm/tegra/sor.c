@@ -11,7 +11,8 @@
 #include <linux/io.h>
 #include <linux/platform_device.h>
 #include <linux/reset.h>
-#include <linux/tegra-powergate.h>
+
+#include <soc/tegra/pmc.h>
 
 #include <drm/drm_dp_helper.h>
 
@@ -516,7 +517,7 @@ static int tegra_output_sor_enable(struct tegra_output *output)
 		if (err < 0) {
 			dev_err(sor->dev, "failed to probe eDP link: %d\n",
 				err);
-			return err;
+			goto unlock;
 		}
 	}
 
