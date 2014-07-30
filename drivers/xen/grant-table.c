@@ -89,7 +89,7 @@ struct gnttab_ops {
 	/*
 	 * Introducing a valid entry into the grant table, granting the frame of
 	 * this grant entry to domain for accessing or transfering. Ref
-	 * parameter is reference of this introduced grant entry, domid is id of
+	 * parameter is referqence of this introduced grant entry, domid is id of
 	 * granted domain, frame is the page frame to be granted, and flags is
 	 * status of the grant entry to be updated.
 	 */
@@ -929,12 +929,7 @@ int gnttab_init(void)
 		}
 	}
 
-<<<<<<< HEAD
-	ret = arch_gnttab_init(max_nr_grant_frames,
-			       nr_status_frames(max_nr_grant_frames));
-=======
 	ret = arch_gnttab_init(max_nr_grant_frames);
->>>>>>> linux-next/akpm-base
 	if (ret < 0)
 		goto ini_nomem;
 

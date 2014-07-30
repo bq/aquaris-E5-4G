@@ -1587,67 +1587,12 @@ int kvm_vgic_hyp_init(void)
 		goto out_free_irq;
 	}
 
-<<<<<<< HEAD
-	ret = of_address_to_resource(vgic_node, 2, &vctrl_res);
-	if (ret) {
-		kvm_err("Cannot obtain VCTRL resource\n");
-		goto out_free_irq;
-	}
-
-	vgic_vctrl_base = of_iomap(vgic_node, 2);
-	if (!vgic_vctrl_base) {
-		kvm_err("Cannot ioremap VCTRL\n");
-		ret = -ENOMEM;
-		goto out_free_irq;
-	}
-
-	vgic_nr_lr = readl_relaxed(vgic_vctrl_base + GICH_VTR);
-	vgic_nr_lr = (vgic_nr_lr & 0x3f) + 1;
-
-	ret = create_hyp_io_mappings(vgic_vctrl_base,
-				     vgic_vctrl_base + resource_size(&vctrl_res),
-				     vctrl_res.start);
-	if (ret) {
-		kvm_err("Cannot map VCTRL into hyp\n");
-		goto out_unmap;
-	}
-
-	if (of_address_to_resource(vgic_node, 3, &vcpu_res)) {
-		kvm_err("Cannot obtain VCPU resource\n");
-		ret = -ENXIO;
-		goto out_unmap;
-	}
-
-	if (!PAGE_ALIGNED(vcpu_res.start)) {
-		kvm_err("GICV physical address 0x%llx not page aligned\n",
-			(unsigned long long)vcpu_res.start);
-		ret = -ENXIO;
-		goto out_unmap;
-	}
-
-	if (!PAGE_ALIGNED(resource_size(&vcpu_res))) {
-		kvm_err("GICV size 0x%llx not a multiple of page size 0x%lx\n",
-			(unsigned long long)resource_size(&vcpu_res),
-			PAGE_SIZE);
-		ret = -ENXIO;
-		goto out_unmap;
-	}
-
-	vgic_vcpu_base = vcpu_res.start;
-
-	kvm_info("%s@%llx IRQ%d\n", vgic_node->name,
-		 vctrl_res.start, vgic_maint_irq);
-	on_each_cpu(vgic_init_maintenance_interrupt, NULL, 1);
-
-	goto out;
-=======
 	on_each_cpu(vgic_init_maintenance_interrupt, NULL, 1);
 
 	/* Callback into for arch code for setup */
 	vgic_arch_setup(vgic);
 
 	return 0;
->>>>>>> linux-next/akpm-base
 
 out_free_irq:
 	free_percpu_irq(vgic->maint_irq, kvm_get_running_vcpus());
