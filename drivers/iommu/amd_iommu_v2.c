@@ -320,13 +320,6 @@ static void unbind_pasid(struct pasid_state *pasid_state)
 
 	/* Make sure no more pending faults are in the queue */
 	flush_workqueue(iommu_wq);
-
-	/*
-	 * No more faults are in the work queue and no new faults will be queued
-	 * from here on. We can safely set pasid_state->mm to NULL now as the
-	 * mm_struct might go away after we return.
-	 */
-	pasid_state->mm = NULL;
 }
 
 static void free_pasid_states_level1(struct pasid_state **tbl)
@@ -374,7 +367,10 @@ static void free_pasid_states(struct device_state *dev_state)
 		mmu_notifier_unregister(&pasid_state->mn, pasid_state->mm);
 
 		put_pasid_state_wait(pasid_state); /* Reference taken in
-						      amd_iommu_pasid_bind */
+						      amd_iommu_bind_pasid */
+
+		/* Drop reference taken in amd_iommu_bind_pasid */
+		put_device_state(dev_state);
 	}
 
 	if (dev_state->pasid_levels == 2)
@@ -411,14 +407,6 @@ static int mn_clear_flush_young(struct mmu_notifier *mn,
 	__mn_flush_page(mn, address);
 
 	return 0;
-}
-
-static void mn_change_pte(struct mmu_notifier *mn,
-			  struct mm_struct *mm,
-			  unsigned long address,
-			  pte_t pte)
-{
-	__mn_flush_page(mn, address);
 }
 
 static void mn_invalidate_page(struct mmu_notifier *mn,
@@ -491,7 +479,6 @@ static void mn_release(struct mmu_notifier *mn, struct mm_struct *mm)
 static struct mmu_notifier_ops iommu_mn = {
 	.release		= mn_release,
 	.clear_flush_young      = mn_clear_flush_young,
-	.change_pte             = mn_change_pte,
 	.invalidate_page        = mn_invalidate_page,
 	.invalidate_range_start = mn_invalidate_range_start,
 	.invalidate_range_end   = mn_invalidate_range_end,
@@ -756,21 +743,18 @@ void amd_iommu_unbind_pasid(struct pci_dev *pdev, int pasid)
 	clear_pasid_state(dev_state, pasid_state->pasid);
 
 	/*
-	 * Check if pasid_state->mm is still valid. If mn_release has already
-	 * run it will be NULL and we can't (and don't need to) call
-	 * mmu_notifier_unregister() on it anymore.
+	 * Call mmu_notifier_unregister to drop our reference
+	 * to pasid_state->mm
 	 */
-	if (pasid_state->mm) {
-		/*
-		 * This will call the mn_release function and unbind
-		 * the PASID.
-		 */
-		mmu_notifier_unregister(&pasid_state->mn, pasid_state->mm);
-	}
+	mmu_notifier_unregister(&pasid_state->mn, pasid_state->mm);
 
 	put_pasid_state_wait(pasid_state); /* Reference taken in
-					      amd_iommu_pasid_bind */
+					      amd_iommu_bind_pasid */
 out:
+	/* Drop reference taken in this function */
+	put_device_state(dev_state);
+
+	/* Drop reference taken in amd_iommu_bind_pasid */
 	put_device_state(dev_state);
 }
 EXPORT_SYMBOL(amd_iommu_unbind_pasid);
