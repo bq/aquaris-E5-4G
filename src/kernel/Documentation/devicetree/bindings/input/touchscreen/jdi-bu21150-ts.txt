@@ -21,10 +21,10 @@ Example:
 			reg = <0>;
 			interrupt-parent = <&msmgpio>;
 			interrupts = <61 0>;
-			spi-max-frequency = <12000000>;
+			spi-max-frequency = <9600000>;
 			irq-gpio = <&msmgpio 61 0>;
 			rst-gpio = <&msmgpio 60 0>;
-			power-supply = "MSM8974_FLUID";
+			power-supply = "apq8074-dragonboard";
 		};
 	};
 
