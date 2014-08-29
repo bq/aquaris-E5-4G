@@ -461,8 +461,8 @@ cifs_atomic_open(struct inode *inode, struct dentry *direntry,
 
 	xid = get_xid();
 
-	cifs_dbg(FYI, "parent inode = 0x%p name is: %s and dentry = 0x%p\n",
-		 inode, direntry->d_name.name, direntry);
+	cifs_dbg(FYI, "parent inode = 0x%p name is: %pd and dentry = 0x%p\n",
+		 inode, direntry, direntry);
 
 	tlink = cifs_sb_tlink(CIFS_SB(inode->i_sb));
 	if (IS_ERR(tlink)) {
@@ -496,6 +496,14 @@ cifs_atomic_open(struct inode *inode, struct dentry *direntry,
 		cifs_del_pending_open(&open);
 		goto out;
 	}
+
+	if (file->f_flags & O_DIRECT &&
+	    CIFS_SB(inode->i_sb)->mnt_cifs_flags & CIFS_MOUNT_STRICT_IO) {
+		if (CIFS_SB(inode->i_sb)->mnt_cifs_flags & CIFS_MOUNT_NO_BRL)
+			file->f_op = &cifs_file_direct_nobrl_ops;
+		else
+			file->f_op = &cifs_file_direct_ops;
+		}
 
 	file_info = cifs_new_fileinfo(&fid, file, tlink, oplock);
 	if (file_info == NULL) {
@@ -532,8 +540,8 @@ int cifs_create(struct inode *inode, struct dentry *direntry, umode_t mode,
 	struct cifs_fid fid;
 	__u32 oplock;
 
-	cifs_dbg(FYI, "cifs_create parent inode = 0x%p name is: %s and dentry = 0x%p\n",
-		 inode, direntry->d_name.name, direntry);
+	cifs_dbg(FYI, "cifs_create parent inode = 0x%p name is: %pd and dentry = 0x%p\n",
+		 inode, direntry, direntry);
 
 	tlink = cifs_sb_tlink(CIFS_SB(inode->i_sb));
 	rc = PTR_ERR(tlink);
@@ -705,8 +713,8 @@ cifs_lookup(struct inode *parent_dir_inode, struct dentry *direntry,
 
 	xid = get_xid();
 
-	cifs_dbg(FYI, "parent inode = 0x%p name is: %s and dentry = 0x%p\n",
-		 parent_dir_inode, direntry->d_name.name, direntry);
+	cifs_dbg(FYI, "parent inode = 0x%p name is: %pd and dentry = 0x%p\n",
+		 parent_dir_inode, direntry, direntry);
 
 	/* check whether path exists */
 
@@ -825,7 +833,7 @@ cifs_d_revalidate(struct dentry *direntry, unsigned int flags)
 {
 	int rc = 0;
 
-	cifs_dbg(FYI, "In cifs d_delete, name = %s\n", direntry->d_name.name);
+	cifs_dbg(FYI, "In cifs d_delete, name = %pd\n", direntry);
 
 	return rc;
 }     */

@@ -152,8 +152,8 @@ F:	drivers/scsi/53c700*
 
 6LOWPAN GENERIC (BTLE/IEEE 802.15.4)
 M:	Alexander Aring <alex.aring@gmail.com>
-L:	linux-zigbee-devel@lists.sourceforge.net (moderated for non-subscribers)
 L:	linux-bluetooth@vger.kernel.org
+L:	linux-wpan@vger.kernel.org
 S:	Maintained
 F:	net/6lowpan/
 F:	include/net/6lowpan.h
@@ -685,6 +685,17 @@ L:	alsa-devel@alsa-project.org (moderated for non-subscribers)
 W:	http://blackfin.uclinux.org/
 S:	Supported
 F:	sound/soc/blackfin/*
+ 
+ANALOG DEVICES INC IIO DRIVERS
+M:	Lars-Peter Clausen <lars@metafoo.de>
+M:	Michael Hennerich <Michael.Hennerich@analog.com>
+W:	http://wiki.analog.com/
+W:	http://ez.analog.com/community/linux-device-drivers
+S:	Supported
+F:	drivers/iio/*/ad*
+X:	drivers/iio/*/adjd*
+F:	drivers/staging/iio/*/ad*
+F:	staging/iio/trigger/iio-trig-bfin-timer.c
 
 AOA (Apple Onboard Audio) ALSA DRIVER
 M:	Johannes Berg <johannes@sipsolutions.net>
@@ -1279,8 +1290,13 @@ M:	Heiko Stuebner <heiko@sntech.de>
 L:	linux-arm-kernel@lists.infradead.org (moderated for non-subscribers)
 L:	linux-rockchip@lists.infradead.org
 S:	Maintained
+F:	arch/arm/boot/dts/rk3*
 F:	arch/arm/mach-rockchip/
+F:	drivers/clk/rockchip/
+F:	drivers/i2c/busses/i2c-rk3x.c
 F:	drivers/*/*rockchip*
+F:	drivers/*/*/*rockchip*
+F:	sound/soc/rockchip/
 
 ARM/SAMSUNG ARM ARCHITECTURES
 M:	Ben Dooks <ben-linux@fluff.org>
@@ -1355,7 +1371,6 @@ F:	arch/arm/boot/dts/sh*
 F:	arch/arm/configs/ape6evm_defconfig
 F:	arch/arm/configs/armadillo800eva_defconfig
 F:	arch/arm/configs/bockw_defconfig
-F:	arch/arm/configs/genmai_defconfig
 F:	arch/arm/configs/koelsch_defconfig
 F:	arch/arm/configs/kzm9g_defconfig
 F:	arch/arm/configs/lager_defconfig
@@ -4591,13 +4606,14 @@ F:	drivers/idle/i7300_idle.c
 
 IEEE 802.15.4 SUBSYSTEM
 M:	Alexander Aring <alex.aring@gmail.com>
-L:	linux-zigbee-devel@lists.sourceforge.net (moderated for non-subscribers)
-W:	http://apps.sourceforge.net/trac/linux-zigbee
-T:	git git://git.kernel.org/pub/scm/linux/kernel/git/lowpan/lowpan.git
+L:	linux-wpan@vger.kernel.org
+W:	https://github.com/linux-wpan
+T:	git git://github.com/linux-wpan/linux-wpan-next.git
 S:	Maintained
 F:	net/ieee802154/
 F:	net/mac802154/
 F:	drivers/net/ieee802154/
+F:	Documentation/networking/ieee802154.txt
 
 IGUANAWORKS USB IR TRANSCEIVER
 M:	Sean Young <sean@mess.org>
@@ -4607,6 +4623,9 @@ F:	drivers/media/rc/iguanair.c
 
 IIO SUBSYSTEM AND DRIVERS
 M:	Jonathan Cameron <jic23@kernel.org>
+R:	Hartmut Knaack <knaack.h@gmx.de>
+R:	Lars-Peter Clausen <lars@metafoo.de>
+R:	Peter Meerwald <pmeerw@pmeerw.net>
 L:	linux-iio@vger.kernel.org
 S:	Maintained
 F:	drivers/iio/
@@ -5594,8 +5613,8 @@ M:	Ingo Molnar <mingo@redhat.com>
 L:	linux-kernel@vger.kernel.org
 T:	git git://git.kernel.org/pub/scm/linux/kernel/git/tip/tip.git core/locking
 S:	Maintained
-F:	Documentation/lockdep*.txt
-F:	Documentation/lockstat.txt
+F:	Documentation/locking/lockdep*.txt
+F:	Documentation/locking/lockstat.txt
 F:	include/linux/lockdep.h
 F:	kernel/locking/
 
@@ -6374,7 +6393,7 @@ M:	Lauro Ramos Venancio <lauro.venancio@openbossa.org>
 M:	Aloisio Almeida Jr <aloisio.almeida@openbossa.org>
 M:	Samuel Ortiz <sameo@linux.intel.com>
 L:	linux-wireless@vger.kernel.org
-L:	linux-nfc@lists.01.org (moderated for non-subscribers)
+L:	linux-nfc@lists.01.org (subscribers-only)
 S:	Supported
 F:	net/nfc/
 F:	include/net/nfc/
@@ -7284,6 +7303,14 @@ T:	git git://linuxtv.org/media_tree.git
 S:	Maintained
 F:	drivers/media/usb/pwc/*
 
+PWM FAN DRIVER
+M:	Kamil Debski <k.debski@samsung.com>
+L:	lm-sensors@lm-sensors.org
+S:	Supported
+F:	Documentation/devicetree/bindings/hwmon/pwm-fan.txt
+F:	Documentation/hwmon/pwm-fan
+F:	drivers/hwmon/pwm-fan.c
+
 PWM SUBSYSTEM
 M:	Thierry Reding <thierry.reding@gmail.com>
 L:	linux-pwm@vger.kernel.org
@@ -7598,6 +7625,7 @@ F:	fs/reiserfs/
 
 REGISTER MAP ABSTRACTION
 M:	Mark Brown <broonie@kernel.org>
+L:	linux-kernel@vger.kernel.org
 T:	git git://git.kernel.org/pub/scm/linux/kernel/git/broonie/regmap.git
 S:	Supported
 F:	drivers/base/regmap/
@@ -9562,6 +9590,14 @@ S:	Maintained
 F:	Documentation/usb/ohci.txt
 F:	drivers/usb/host/ohci*
 
+USB OVER IP DRIVER
+M:	Valentina Manea <valentina.manea.m@gmail.com>
+M:	Shuah Khan <shuah.kh@samsung.com>
+L:	linux-usb@vger.kernel.org
+S:	Maintained
+F:	drivers/usb/usbip/
+F:	tools/usb/usbip/
+
 USB PEGASUS DRIVER
 M:	Petko Manolov <petkan@nucleusys.com>
 L:	linux-usb@vger.kernel.org
@@ -9874,6 +9910,7 @@ F:	drivers/scsi/vmw_pvscsi.h
 VOLTAGE AND CURRENT REGULATOR FRAMEWORK
 M:	Liam Girdwood <lgirdwood@gmail.com>
 M:	Mark Brown <broonie@kernel.org>
+L:	linux-kernel@vger.kernel.org
 W:	http://opensource.wolfsonmicro.com/node/15
 W:	http://www.slimlogic.co.uk/?p=48
 T:	git git://git.kernel.org/pub/scm/linux/kernel/git/broonie/regulator.git

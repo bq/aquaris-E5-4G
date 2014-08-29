@@ -670,7 +670,7 @@ static int svm_hardware_enable(void *garbage)
 
 	if (static_cpu_has(X86_FEATURE_TSCRATEMSR)) {
 		wrmsrl(MSR_AMD64_TSC_RATIO, TSC_RATIO_DEFAULT);
-		__get_cpu_var(current_tsc_ratio) = TSC_RATIO_DEFAULT;
+		__this_cpu_write(current_tsc_ratio, TSC_RATIO_DEFAULT);
 	}
 
 
@@ -1312,8 +1312,8 @@ static void svm_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
 		rdmsrl(host_save_user_msrs[i], svm->host_user_msrs[i]);
 
 	if (static_cpu_has(X86_FEATURE_TSCRATEMSR) &&
-	    svm->tsc_ratio != __get_cpu_var(current_tsc_ratio)) {
-		__get_cpu_var(current_tsc_ratio) = svm->tsc_ratio;
+	    svm->tsc_ratio != __this_cpu_read(current_tsc_ratio)) {
+		__this_cpu_write(current_tsc_ratio, svm->tsc_ratio);
 		wrmsrl(MSR_AMD64_TSC_RATIO, svm->tsc_ratio);
 	}
 }
@@ -4305,6 +4305,10 @@ static void svm_handle_external_intr(struct kvm_vcpu *vcpu)
 	local_irq_enable();
 }
 
+static void svm_sched_in(struct kvm_vcpu *vcpu, int cpu)
+{
+}
+
 static struct kvm_x86_ops svm_x86_ops = {
 	.cpu_has_kvm_support = has_svm,
 	.disabled_by_bios = is_disabled,
@@ -4349,7 +4353,6 @@ static struct kvm_x86_ops svm_x86_ops = {
 	.cache_reg = svm_cache_reg,
 	.get_rflags = svm_get_rflags,
 	.set_rflags = svm_set_rflags,
-	.fpu_activate = svm_fpu_activate,
 	.fpu_deactivate = svm_fpu_deactivate,
 
 	.tlb_flush = svm_flush_tlb,
@@ -4406,6 +4409,8 @@ static struct kvm_x86_ops svm_x86_ops = {
 
 	.check_intercept = svm_check_intercept,
 	.handle_external_intr = svm_handle_external_intr,
+
+	.sched_in = svm_sched_in,
 };
 
 static int __init svm_init(void)

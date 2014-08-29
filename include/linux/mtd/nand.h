@@ -766,6 +766,7 @@ struct nand_chip {
  * @options: stores various chip bit options
  * @id_len: The valid length of the @id.
  * @oobsize: OOB size
+ * @ecc: ECC correctability and step information from the datasheet.
  * @ecc.strength_ds: The ECC correctability from the datasheet, same as the
  *                   @ecc_strength_ds in nand_chip{}.
  * @ecc.step_ds: The ECC step required by the @ecc.strength_ds, same as the
@@ -949,7 +950,7 @@ static inline int jedec_feature(struct nand_chip *chip)
 		: 0;
 }
 
-/**
+/*
  * struct nand_sdr_timings - SDR NAND chip timings
  *
  * This struct defines the timing requirements of a SDR NAND chip.

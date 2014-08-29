@@ -87,8 +87,6 @@ cifs_prime_dcache(struct dentry *parent, struct qstr *name,
 		return;
 
 	if (dentry) {
-		int err;
-
 		inode = dentry->d_inode;
 		if (inode) {
 			/*
@@ -105,10 +103,8 @@ cifs_prime_dcache(struct dentry *parent, struct qstr *name,
 				goto out;
 			}
 		}
-		err = d_invalidate(dentry);
+		d_invalidate(dentry);
 		dput(dentry);
-		if (err)
-			return;
 	}
 
 	/*
@@ -596,8 +592,8 @@ find_cifs_entry(const unsigned int xid, struct cifs_tcon *tcon, loff_t pos,
 		if (server->ops->dir_needs_close(cfile)) {
 			cfile->invalidHandle = true;
 			spin_unlock(&cifs_file_list_lock);
-			if (server->ops->close)
-				server->ops->close(xid, tcon, &cfile->fid);
+			if (server->ops->close_dir)
+				server->ops->close_dir(xid, tcon, &cfile->fid);
 		} else
 			spin_unlock(&cifs_file_list_lock);
 		if (cfile->srch_inf.ntwrk_buf_start) {

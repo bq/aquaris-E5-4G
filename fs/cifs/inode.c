@@ -1419,8 +1419,8 @@ cifs_posix_mkdir(struct inode *inode, struct dentry *dentry, umode_t mode,
 	d_instantiate(dentry, newinode);
 
 #ifdef CONFIG_CIFS_DEBUG2
-	cifs_dbg(FYI, "instantiated dentry %p %s to inode %p\n",
-		 dentry, dentry->d_name.name, newinode);
+	cifs_dbg(FYI, "instantiated dentry %p %pd to inode %p\n",
+		 dentry, dentry, newinode);
 
 	if (newinode->i_nlink != 2)
 		cifs_dbg(FYI, "unexpected number of links %d\n",
@@ -1720,7 +1720,10 @@ cifs_rename2(struct inode *source_dir, struct dentry *source_dentry,
 unlink_target:
 	/* Try unlinking the target dentry if it's not negative */
 	if (target_dentry->d_inode && (rc == -EACCES || rc == -EEXIST)) {
-		tmprc = cifs_unlink(target_dir, target_dentry);
+		if (d_is_dir(target_dentry))
+			tmprc = cifs_rmdir(target_dir, target_dentry);
+		else
+			tmprc = cifs_unlink(target_dir, target_dentry);
 		if (tmprc)
 			goto cifs_rename_exit;
 		rc = cifs_do_rename(xid, source_dentry, from_name,
@@ -2108,8 +2111,8 @@ cifs_setattr_unix(struct dentry *direntry, struct iattr *attrs)
 	struct cifs_unix_set_info_args *args = NULL;
 	struct cifsFileInfo *open_file;
 
-	cifs_dbg(FYI, "setattr_unix on file %s attrs->ia_valid=0x%x\n",
-		 direntry->d_name.name, attrs->ia_valid);
+	cifs_dbg(FYI, "setattr_unix on file %pd attrs->ia_valid=0x%x\n",
+		 direntry, attrs->ia_valid);
 
 	xid = get_xid();
 
@@ -2251,8 +2254,8 @@ cifs_setattr_nounix(struct dentry *direntry, struct iattr *attrs)
 
 	xid = get_xid();
 
-	cifs_dbg(FYI, "setattr on file %s attrs->iavalid 0x%x\n",
-		 direntry->d_name.name, attrs->ia_valid);
+	cifs_dbg(FYI, "setattr on file %pd attrs->iavalid 0x%x\n",
+		 direntry, attrs->ia_valid);
 
 	if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_NO_PERM)
 		attrs->ia_valid |= ATTR_FORCE;
