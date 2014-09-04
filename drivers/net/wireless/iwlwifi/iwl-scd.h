@@ -5,7 +5,6 @@
  *
  * GPL LICENSE SUMMARY
  *
- * Copyright(c) 2014 Intel Corporation. All rights reserved.
  * Copyright(c) 2014 Intel Mobile Communications GmbH
  *
  * This program is free software; you can redistribute it and/or modify
@@ -31,7 +30,6 @@
  *
  * BSD LICENSE
  *
- * Copyright(c) 2014 Intel Corporation. All rights reserved.
  * Copyright(c) 2014 Intel Mobile Communications GmbH
  * All rights reserved.
  *
@@ -63,78 +61,58 @@
  *
  *****************************************************************************/
 
-#include <linux/module.h>
-#include <linux/stringify.h>
-#include "iwl-config.h"
-#include "iwl-agn-hw.h"
+#ifndef __iwl_scd_h__
+#define __iwl_scd_h__
 
-/* Highest firmware API version supported */
-#define IWL8000_UCODE_API_MAX	10
+#include "iwl-trans.h"
+#include "iwl-io.h"
+#include "iwl-prph.h"
 
-/* Oldest version we won't warn about */
-#define IWL8000_UCODE_API_OK	8
 
-/* Lowest firmware API version supported */
-#define IWL8000_UCODE_API_MIN	8
+static inline void iwl_scd_txq_set_inactive(struct iwl_trans *trans,
+					    u16 txq_id)
+{
+	iwl_write_prph(trans, SCD_QUEUE_STATUS_BITS(txq_id),
+		       (0 << SCD_QUEUE_STTS_REG_POS_ACTIVE)|
+		       (1 << SCD_QUEUE_STTS_REG_POS_SCD_ACT_EN));
+}
 
-/* NVM versions */
-#define IWL8000_NVM_VERSION		0x0a1d
-#define IWL8000_TX_POWER_VERSION	0xffff /* meaningless */
+static inline void iwl_scd_txq_set_chain(struct iwl_trans *trans,
+					 u16 txq_id)
+{
+	iwl_set_bits_prph(trans, SCD_QUEUECHAIN_SEL, BIT(txq_id));
+}
 
-#define IWL8000_FW_PRE "iwlwifi-8000-"
-#define IWL8000_MODULE_FIRMWARE(api) IWL8000_FW_PRE __stringify(api) ".ucode"
+static inline void iwl_scd_txq_enable_agg(struct iwl_trans *trans,
+					  u16 txq_id)
+{
+	iwl_set_bits_prph(trans, SCD_AGGR_SEL, BIT(txq_id));
+}
 
-#define NVM_HW_SECTION_NUM_FAMILY_8000		10
-#define DEFAULT_NVM_FILE_FAMILY_8000		"iwl_nvm_8000.bin"
+static inline void iwl_scd_txq_disable_agg(struct iwl_trans *trans,
+					   u16 txq_id)
+{
+	iwl_clear_bits_prph(trans, SCD_AGGR_SEL, BIT(txq_id));
+}
 
-/* Max SDIO RX aggregation size of the ADDBA request/response */
-#define MAX_RX_AGG_SIZE_8260_SDIO	28
+static inline void iwl_scd_disable_agg(struct iwl_trans *trans)
+{
+	iwl_set_bits_prph(trans, SCD_AGGR_SEL, 0);
+}
 
-static const struct iwl_base_params iwl8000_base_params = {
-	.eeprom_size = OTP_LOW_IMAGE_SIZE_FAMILY_8000,
-	.num_of_queues = IWLAGN_NUM_QUEUES,
-	.pll_cfg_val = 0,
-	.shadow_ram_support = true,
-	.led_compensation = 57,
-	.wd_timeout = IWL_LONG_WD_TIMEOUT,
-	.max_event_log_size = 512,
-	.shadow_reg_enable = true,
-	.pcie_l1_allowed = true,
-};
+static inline void iwl_scd_activate_fifos(struct iwl_trans *trans)
+{
+	iwl_write_prph(trans, SCD_TXFACT, IWL_MASK(0, 7));
+}
 
-static const struct iwl_ht_params iwl8000_ht_params = {
-	.ht40_bands = BIT(IEEE80211_BAND_2GHZ) | BIT(IEEE80211_BAND_5GHZ),
-};
+static inline void iwl_scd_deactivate_fifos(struct iwl_trans *trans)
+{
+	iwl_write_prph(trans, SCD_TXFACT, 0);
+}
 
-#define IWL_DEVICE_8000						\
-	.ucode_api_max = IWL8000_UCODE_API_MAX,			\
-	.ucode_api_ok = IWL8000_UCODE_API_OK,			\
-	.ucode_api_min = IWL8000_UCODE_API_MIN,			\
-	.device_family = IWL_DEVICE_FAMILY_8000,		\
-	.max_inst_size = IWL60_RTC_INST_SIZE,			\
-	.max_data_size = IWL60_RTC_DATA_SIZE,			\
-	.base_params = &iwl8000_base_params,			\
-	.led_mode = IWL_LED_RF_STATE,				\
-	.nvm_hw_section_num = NVM_HW_SECTION_NUM_FAMILY_8000
-
-const struct iwl_cfg iwl8260_2ac_cfg = {
-	.name = "Intel(R) Dual Band Wireless AC 8260",
-	.fw_name_pre = IWL8000_FW_PRE,
-	IWL_DEVICE_8000,
-	.ht_params = &iwl8000_ht_params,
-	.nvm_ver = IWL8000_NVM_VERSION,
-	.nvm_calib_ver = IWL8000_TX_POWER_VERSION,
-};
-
-const struct iwl_cfg iwl8260_2ac_sdio_cfg = {
-	.name = "Intel(R) Dual Band Wireless-AC 8260",
-	.fw_name_pre = IWL8000_FW_PRE,
-	IWL_DEVICE_8000,
-	.ht_params = &iwl8000_ht_params,
-	.nvm_ver = IWL8000_NVM_VERSION,
-	.nvm_calib_ver = IWL8000_TX_POWER_VERSION,
-	.default_nvm_file = DEFAULT_NVM_FILE_FAMILY_8000,
-	.max_rx_agg_size = MAX_RX_AGG_SIZE_8260_SDIO,
-};
-
-MODULE_FIRMWARE(IWL8000_MODULE_FIRMWARE(IWL8000_UCODE_API_OK));
+static inline void iwl_scd_enable_set_active(struct iwl_trans *trans,
+					     u32 value)
+{
+	iwl_write_prph(trans, SCD_EN_CTRL, value);
+}
+#endif
