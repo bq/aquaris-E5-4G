@@ -1012,14 +1012,16 @@ config TOUCHSCREEN_BU21150
 	tristate "JDI AFE BU21150"
 	depends on SPI_MASTER
 	help
-	  Say Y here to enable the JDI Touch AFE driver.
+	  This enables support for character device channel for
+	  Rohm BU21150 Touch AFE.
 
 	  If unsure, say N.
 
 config INPUT_MT_WRAPPER
 	tristate "Input Multitouch Wrapper"
 	help
-	  Say Y here to enable Input Multitouch Wrapper.
+	  This enables support for character device channel for
+	  passing to the input system a multi-touch coordinates.
 
 	  If unsure, say N.
 

@@ -83,8 +83,8 @@ int g_afe_display_state;  /* 0:off, 1:on */
 int g_afe_skip_frame_cnt;
 
 /* static function declaration */
-static int __devinit bu21150_probe(struct spi_device *client);
-static int __devexit bu21150_remove(struct spi_device *client);
+static int bu21150_probe(struct spi_device *client);
+static int bu21150_remove(struct spi_device *client);
 static int bu21150_open(struct inode *inode, struct file *filp);
 static int bu21150_release(struct inode *inode, struct file *filp);
 static long bu21150_ioctl(struct file *filp, unsigned int cmd,
@@ -100,8 +100,6 @@ static long bu21150_ioctl_unblock_release(void);
 static irqreturn_t bu21150_irq_handler(int irq, void *dev_id);
 static void bu21150_irq_work_func(struct work_struct *work);
 static void swap_2byte(unsigned char *buf, unsigned int size);
-static void up_priority(void);
-static void down_priority(void);
 static int bu21150_read_register(u32 addr, u16 size, u8 *data);
 static int bu21150_write_register(u32 addr, u16 size, u8 *data);
 static void wake_up_frame_waitq(struct bu21150_data *ts);
@@ -162,13 +160,13 @@ MODULE_LICENSE("GPL v2");
 MODULE_ALIAS("spi:bu21150");
 
 /* static functions */
-static int reg_set_optimum_mode_check(struct regulator *reg, int load_uA)
+static int reg_set_optimum_mode_check(struct regulator *reg, int load_ua)
 {
 	return (regulator_count_voltages(reg) > 0) ?
-		regulator_set_optimum_mode(reg, load_uA) : 0;
+		regulator_set_optimum_mode(reg, load_ua) : 0;
 }
 
-static int __devinit bu21150_probe(struct spi_device *client)
+static int bu21150_probe(struct spi_device *client)
 {
 	struct bu21150_data *ts;
 	int error;
@@ -314,7 +312,7 @@ err1:
 	return error;
 }
 
-static int __devexit bu21150_remove(struct spi_device *client)
+static int bu21150_remove(struct spi_device *client)
 {
 	struct bu21150_data *ts = spi_get_drvdata(client);
 
@@ -594,8 +592,6 @@ static void bu21150_irq_work_func(struct work_struct *work)
 	u8 *psbuf = (u8 *)ts->frame_work;
 	struct spi_device *client = ts->client;
 
-	up_priority();
-
 	/* get frame */
 	ts->frame_work_get = ts->req_get;
 	bu21150_read_register(REG_READ_DATA, ts->frame_work_get.size, psbuf);
@@ -611,21 +607,8 @@ static void bu21150_irq_work_func(struct work_struct *work)
 		copy_frame(ts);
 		wake_up_frame_waitq(ts);
 	}
-	down_priority();
 
 	enable_irq(client->irq);
-}
-
-static void up_priority(void)
-{
-	static struct sched_param param = {.sched_priority = 2};
-	sched_setscheduler(current, SCHED_FIFO, &param);
-}
-
-static void down_priority(void)
-{
-	static struct sched_param param = {.sched_priority = DEFAULT_PRIO};
-	sched_setscheduler(current, SCHED_NORMAL, &param);
 }
 
 static int bu21150_read_register(u32 addr, u16 size, u8 *data)
@@ -639,7 +622,7 @@ static int bu21150_read_register(u32 addr, u16 size, u8 *data)
 
 	input = kzalloc(sizeof(u8)*(size)+SPI_HEADER_SIZE, GFP_KERNEL);
 	output = kzalloc(sizeof(u8)*(size)+SPI_HEADER_SIZE, GFP_KERNEL);
-	req = kzalloc(sizeof *req, GFP_KERNEL);
+	req = kzalloc(sizeof(*req), GFP_KERNEL);
 
 	/* set header */
 	input[0] = 0x03;                 /* read command */
@@ -677,7 +660,7 @@ static int bu21150_write_register(u32 addr, u16 size, u8 *data)
 	u8 *input;
 
 	input = kzalloc(sizeof(u8)*(size)+SPI_HEADER_SIZE, GFP_KERNEL);
-	req = kzalloc(sizeof *req, GFP_KERNEL);
+	req = kzalloc(sizeof(*req), GFP_KERNEL);
 
 	/* set header */
 	input[0] = 0x02;                 /* write command */
@@ -735,10 +718,16 @@ static int is_same_bu21150_ioctl_get_frame_data(
 	struct bu21150_ioctl_get_frame_data *data1,
 	struct bu21150_ioctl_get_frame_data *data2)
 {
-	int ret = 0;
-	ret = !strncmp((char *)data1, (char *)data2,
-			sizeof(struct bu21150_ioctl_get_frame_data));
-	return ret;
+	int i;
+	u8 *p1 = (u8 *)data1;
+	u8 *p2 = (u8 *)data2;
+
+	for (i = 0; i < sizeof(struct bu21150_ioctl_get_frame_data); i++) {
+		if (p1[i] != p2[i])
+			return 0;
+	}
+
+	return 1;
 }
 
 static void copy_frame(struct bu21150_data *ts)
@@ -790,9 +779,9 @@ static bool parse_dtsi(struct device *dev, struct bu21150_data *ts)
 		"power-supply", &str);
 	if (rc && (rc != -EINVAL))
 		dev_err(dev, "Unable to read power-supply\n");
-	if (!strncmp(str, "apq8074-dragonboard", strlen("apq8074-dragonboard")))
+	if (!strcmp(str, "apq8074-dragonboard"))
 		ts->power_supply = APQ8074_DRAGONBOARD;
-	else if (!strncmp(str, "msm8974-fluid", strlen("msm8974-fluid")))
+	else if (!strcmp(str, "msm8974-fluid"))
 		ts->power_supply = MSM8974_FLUID;
 	else
 		return false;
