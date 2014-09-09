@@ -29,7 +29,7 @@
  * calls io_destroy() or the process exits.
  *
  * In the aio code, kill_ioctx() is called when we wish to destroy a kioctx; it
- * calls percpu_ref_kill(), then hlist_del_rcu() and sychronize_rcu() to remove
+ * calls percpu_ref_kill(), then hlist_del_rcu() and synchronize_rcu() to remove
  * the kioctx from the proccess's list of kioctxs - after that, there can't be
  * any new users of the kioctx (from lookup_ioctx()) and it's then safe to drop
  * the initial ref with percpu_ref_put().
@@ -49,6 +49,7 @@
 #include <linux/kernel.h>
 #include <linux/percpu.h>
 #include <linux/rcupdate.h>
+#include <linux/gfp.h>
 
 struct percpu_ref;
 typedef void (percpu_ref_func_t)(struct percpu_ref *);
@@ -66,7 +67,7 @@ struct percpu_ref {
 };
 
 int __must_check percpu_ref_init(struct percpu_ref *ref,
-				 percpu_ref_func_t *release);
+				 percpu_ref_func_t *release, gfp_t gfp);
 void percpu_ref_reinit(struct percpu_ref *ref);
 void percpu_ref_exit(struct percpu_ref *ref);
 void percpu_ref_kill_and_confirm(struct percpu_ref *ref,

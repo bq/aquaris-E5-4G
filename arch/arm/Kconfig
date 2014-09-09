@@ -25,6 +25,7 @@ config ARM
 	select GENERIC_SMP_IDLE_THREAD
 	select GENERIC_STRNCPY_FROM_USER
 	select GENERIC_STRNLEN_USER
+	select HANDLE_DOMAIN_IRQ
 	select HARDIRQS_SW_RESEND
 	select HAVE_ARCH_AUDITSYSCALL if (AEABI && !OABI_COMPAT)
 	select HAVE_ARCH_JUMP_LABEL if !XIP_KERNEL
@@ -388,6 +389,7 @@ config ARCH_CLPS711X
 	select CPU_ARM720T
 	select GENERIC_CLOCKEVENTS
 	select MFD_SYSCON
+	select SOC_BUS
 	help
 	  Support for Cirrus Logic 711x/721x/731x based boards.
 
@@ -651,6 +653,7 @@ config ARCH_SHMOBILE_LEGACY
 	select ARCH_SHMOBILE
 	select ARM_PATCH_PHYS_VIRT if MMU
 	select CLKDEV_LOOKUP
+	select CPU_V7
 	select GENERIC_CLOCKEVENTS
 	select HAVE_ARM_SCU if SMP
 	select HAVE_ARM_TWD if SMP
@@ -661,6 +664,7 @@ config ARCH_SHMOBILE_LEGACY
 	select NO_IOPORT_MAP
 	select PINCTRL
 	select PM_GENERIC_DOMAINS if PM
+	select SH_CLK_CPG
 	select SPARSE_IRQ
 	help
 	  Support for Renesas ARM SoC platforms using a non-multiplatform

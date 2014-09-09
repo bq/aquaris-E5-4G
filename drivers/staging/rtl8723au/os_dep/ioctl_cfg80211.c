@@ -279,6 +279,7 @@ static int rtw_cfg80211_inform_bss(struct rtw_adapter *padapter,
 	}
 
 	bss = cfg80211_inform_bss(wiphy, notify_channel,
+				  CFG80211_BSS_FTYPE_UNKNOWN,
 				  pnetwork->network.MacAddress,
 				  pnetwork->network.tsf,
 				  pnetwork->network.capability,
@@ -1118,7 +1119,7 @@ exit:
 	return ret;
 }
 
-int cfg80211_infrastructure_mode(struct rtw_adapter* padapter,
+int cfg80211_infrastructure_mode(struct rtw_adapter *padapter,
 				 enum nl80211_iftype ifmode)
 {
 	struct mlme_priv *pmlmepriv = &padapter->mlmepriv;
@@ -2379,7 +2380,7 @@ void rtw_cfg80211_indicate_sta_assoc(struct rtw_adapter *padapter,
 						      IEEE80211_BAND_5GHZ);
 
 	cfg80211_rx_mgmt(padapter->rtw_wdev, freq, 0, pmgmt_frame, frame_len,
-			 0, GFP_ATOMIC);
+			 0);
 #endif /* defined(RTW_USE_CFG80211_STA_EVENT) */
 }
 
@@ -2425,7 +2426,7 @@ void rtw_cfg80211_indicate_sta_disassoc(struct rtw_adapter *padapter,
 	frame_len = sizeof(struct ieee80211_hdr_3addr) + 2;
 
 	cfg80211_rx_mgmt(padapter->rtw_wdev, freq, 0, (u8 *)&mgmt, frame_len,
-			 0, GFP_ATOMIC);
+			 0);
 #endif /* defined(RTW_USE_CFG80211_STA_EVENT) */
 }
 

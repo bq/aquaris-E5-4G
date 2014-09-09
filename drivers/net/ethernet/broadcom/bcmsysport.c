@@ -139,6 +139,15 @@ static int bcm_sysport_set_rx_csum(struct net_device *dev,
 	else
 		reg &= ~RXCHK_SKIP_FCS;
 
+	/* If Broadcom tags are enabled (e.g: using a switch), make
+	 * sure we tell the RXCHK hardware to expect a 4-bytes Broadcom
+	 * tag after the Ethernet MAC Source Address.
+	 */
+	if (netdev_uses_dsa(dev))
+		reg |= RXCHK_BRCM_TAG_EN;
+	else
+		reg &= ~RXCHK_BRCM_TAG_EN;
+
 	rxchk_writel(priv, reg, RXCHK_CONTROL);
 
 	return 0;
@@ -534,6 +543,25 @@ static unsigned int bcm_sysport_desc_rx(struct bcm_sysport_priv *priv,
 	while ((processed < to_process) && (processed < budget)) {
 		cb = &priv->rx_cbs[priv->rx_read_ptr];
 		skb = cb->skb;
+
+		processed++;
+		priv->rx_read_ptr++;
+
+		if (priv->rx_read_ptr == priv->num_rx_bds)
+			priv->rx_read_ptr = 0;
+
+		/* We do not have a backing SKB, so we do not a corresponding
+		 * DMA mapping for this incoming packet since
+		 * bcm_sysport_rx_refill always either has both skb and mapping
+		 * or none.
+		 */
+		if (unlikely(!skb)) {
+			netif_err(priv, rx_err, ndev, "out of memory!\n");
+			ndev->stats.rx_dropped++;
+			ndev->stats.rx_errors++;
+			goto refill;
+		}
+
 		dma_unmap_single(kdev, dma_unmap_addr(cb, dma_addr),
 				 RX_BUF_LENGTH, DMA_FROM_DEVICE);
 
@@ -543,22 +571,10 @@ static unsigned int bcm_sysport_desc_rx(struct bcm_sysport_priv *priv,
 		status = (rsb->rx_status_len >> DESC_STATUS_SHIFT) &
 			  DESC_STATUS_MASK;
 
-		processed++;
-		priv->rx_read_ptr++;
-		if (priv->rx_read_ptr == priv->num_rx_bds)
-			priv->rx_read_ptr = 0;
-
 		netif_dbg(priv, rx_status, ndev,
 			  "p=%d, c=%d, rd_ptr=%d, len=%d, flag=0x%04x\n",
 			  p_index, priv->rx_c_index, priv->rx_read_ptr,
 			  len, status);
-
-		if (unlikely(!skb)) {
-			netif_err(priv, rx_err, ndev, "out of memory!\n");
-			ndev->stats.rx_dropped++;
-			ndev->stats.rx_errors++;
-			goto refill;
-		}
 
 		if (unlikely(!(status & DESC_EOP) || !(status & DESC_SOP))) {
 			netif_err(priv, rx_status, ndev, "fragmented packet!\n");
@@ -1062,16 +1078,19 @@ static void bcm_sysport_adj_link(struct net_device *dev)
 	if (!phydev->pause)
 		cmd_bits |= CMD_RX_PAUSE_IGNORE | CMD_TX_PAUSE_IGNORE;
 
-	if (changed) {
+	if (!changed)
+		return;
+
+	if (phydev->link) {
 		reg = umac_readl(priv, UMAC_CMD);
 		reg &= ~((CMD_SPEED_MASK << CMD_SPEED_SHIFT) |
 			CMD_HD_EN | CMD_RX_PAUSE_IGNORE |
 			CMD_TX_PAUSE_IGNORE);
 		reg |= cmd_bits;
 		umac_writel(priv, reg, UMAC_CMD);
-
-		phy_print_status(priv->phydev);
 	}
+
+	phy_print_status(priv->phydev);
 }
 
 static int bcm_sysport_init_tx_ring(struct bcm_sysport_priv *priv,
