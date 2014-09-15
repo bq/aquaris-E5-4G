@@ -953,21 +953,6 @@ void ath9k_calculate_iter_data(struct ath_softc *sc,
 
 	list_for_each_entry(avp, &ctx->vifs, list)
 		ath9k_vif_iter(iter_data, avp->vif->addr, avp->vif);
-
-#ifdef CONFIG_ATH9K_CHANNEL_CONTEXT
-	if (ctx == &sc->offchannel.chan) {
-		struct ieee80211_vif *vif;
-
-		if (sc->offchannel.state < ATH_OFFCHANNEL_ROC_START)
-			vif = sc->offchannel.scan_vif;
-		else
-			vif = sc->offchannel.roc_vif;
-
-		if (vif)
-			ath9k_vif_iter(iter_data, vif->addr, vif);
-		iter_data->beacons = false;
-	}
-#endif
 }
 
 static void ath9k_set_assoc_state(struct ath_softc *sc,
@@ -978,13 +963,6 @@ static void ath9k_set_assoc_state(struct ath_softc *sc,
 	unsigned long flags;
 
 	set_bit(ATH_OP_PRIM_STA_VIF, &common->op_flags);
-	/* Set the AID, BSSID and do beacon-sync only when
-	 * the HW opmode is STATION.
-	 *
-	 * But the primary bit is set above in any case.
-	 */
-	if (sc->sc_ah->opmode != NL80211_IFTYPE_STATION)
-		return;
 
 	ether_addr_copy(common->curbssid, bss_conf->bssid);
 	common->curaid = bss_conf->aid;
@@ -1007,6 +985,43 @@ static void ath9k_set_assoc_state(struct ath_softc *sc,
 		vif->addr, common->curbssid);
 }
 
+#ifdef CONFIG_ATH9K_CHANNEL_CONTEXT
+static void ath9k_set_offchannel_state(struct ath_softc *sc)
+{
+	struct ath_hw *ah = sc->sc_ah;
+	struct ath_common *common = ath9k_hw_common(ah);
+	struct ieee80211_vif *vif = NULL;
+
+	ath9k_ps_wakeup(sc);
+
+	if (sc->offchannel.state < ATH_OFFCHANNEL_ROC_START)
+		vif = sc->offchannel.scan_vif;
+	else
+		vif = sc->offchannel.roc_vif;
+
+	if (WARN_ON(!vif))
+		goto exit;
+
+	eth_zero_addr(common->curbssid);
+	eth_broadcast_addr(common->bssidmask);
+	ether_addr_copy(common->macaddr, vif->addr);
+	common->curaid = 0;
+	ah->opmode = vif->type;
+	ah->imask &= ~ATH9K_INT_SWBA;
+	ah->imask &= ~ATH9K_INT_TSFOOR;
+	ah->slottime = ATH9K_SLOT_TIME_9;
+
+	ath_hw_setbssidmask(common);
+	ath9k_hw_setopmode(ah);
+	ath9k_hw_write_associd(sc->sc_ah);
+	ath9k_hw_set_interrupts(ah);
+	ath9k_hw_init_global_settings(ah);
+
+exit:
+	ath9k_ps_restore(sc);
+}
+#endif
+
 /* Called with sc->mutex held. */
 void ath9k_calculate_summary_state(struct ath_softc *sc,
 				   struct ath_chanctx *ctx)
@@ -1020,6 +1035,11 @@ void ath9k_calculate_summary_state(struct ath_softc *sc,
 
 	if (ctx != sc->cur_chan)
 		return;
+
+#ifdef CONFIG_ATH9K_CHANNEL_CONTEXT
+	if (ctx == &sc->offchannel.chan)
+		return ath9k_set_offchannel_state(sc);
+#endif
 
 	ath9k_ps_wakeup(sc);
 	ath9k_calculate_iter_data(sc, ctx, &iter_data);
@@ -1068,9 +1088,7 @@ void ath9k_calculate_summary_state(struct ath_softc *sc,
 			iter_data.beacons = true;
 			ath9k_set_assoc_state(sc, iter_data.primary_sta,
 					      changed);
-			if (!ctx->primary_sta ||
-			    !ctx->primary_sta->bss_conf.assoc)
-				ctx->primary_sta = iter_data.primary_sta;
+			ctx->primary_sta = iter_data.primary_sta;
 		} else {
 			ctx->primary_sta = NULL;
 			memset(common->curbssid, 0, ETH_ALEN);
@@ -1098,8 +1116,6 @@ void ath9k_calculate_summary_state(struct ath_softc *sc,
 		set_bit(ATH_OP_PRIM_STA_VIF, &common->op_flags);
 	else
 		clear_bit(ATH_OP_PRIM_STA_VIF, &common->op_flags);
-
-	ctx->primary_sta = iter_data.primary_sta;
 
 	ath9k_ps_restore(sc);
 }
@@ -1860,7 +1876,8 @@ static int ath9k_get_survey(struct ieee80211_hw *hw, int idx,
 	return 0;
 }
 
-static void ath9k_set_coverage_class(struct ieee80211_hw *hw, u8 coverage_class)
+static void ath9k_set_coverage_class(struct ieee80211_hw *hw,
+				     s16 coverage_class)
 {
 	struct ath_softc *sc = hw->priv;
 	struct ath_hw *ah = sc->sc_ah;

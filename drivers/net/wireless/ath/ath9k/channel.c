@@ -83,8 +83,6 @@ static int ath_set_channel(struct ath_softc *sc)
 	if (hw->conf.radar_enabled) {
 		u32 rxfilter;
 
-		/* set HW specific DFS configuration */
-		ath9k_hw_set_radar_params(ah);
 		rxfilter = ath9k_hw_getrxfilter(ah);
 		rxfilter |= ATH9K_RX_FILTER_PHYRADAR |
 				ATH9K_RX_FILTER_PHYERR;
@@ -262,6 +260,9 @@ static void ath_chanctx_adjust_tbtt_delta(struct ath_softc *sc)
 	cur = sc->cur_chan;
 	prev = ath_chanctx_get_next(sc, cur);
 
+	if (!prev->switch_after_beacon)
+		return;
+
 	getrawmonotonic(&ts);
 	cur_tsf = (u32) cur->tsf_val +
 		  ath9k_hw_get_tsf_offset(&cur->tsf_ts, &ts);
@@ -398,7 +399,6 @@ void ath_chanctx_event(struct ath_softc *sc, struct ieee80211_vif *vif,
 			break;
 		}
 
-
 		/*
 		 * Clear the extend_absence flag if it had been
 		 * set during the previous beacon transmission,
@@ -418,6 +418,7 @@ void ath_chanctx_event(struct ath_softc *sc, struct ieee80211_vif *vif,
 			avp->noa_duration = 0;
 			sc->sched.extend_absence = true;
 		}
+
 		/* Prevent wrap-around issues */
 		if (avp->noa_duration && tsf_time - avp->noa_start > BIT(30))
 			avp->noa_duration = 0;
@@ -608,10 +609,9 @@ void ath_chanctx_beacon_sent_ev(struct ath_softc *sc,
 		ath_chanctx_event(sc, NULL, ev);
 }
 
-void ath_chanctx_beacon_recv_ev(struct ath_softc *sc, u32 ts,
+void ath_chanctx_beacon_recv_ev(struct ath_softc *sc,
 				enum ath_chanctx_event ev)
 {
-	sc->sched.next_tbtt = ts;
 	ath_chanctx_event(sc, NULL, ev);
 }
 
