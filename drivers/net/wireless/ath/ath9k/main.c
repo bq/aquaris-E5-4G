@@ -345,12 +345,16 @@ static void ath_node_attach(struct ath_softc *sc, struct ieee80211_sta *sta,
 	memset(&an->key_idx, 0, sizeof(an->key_idx));
 
 	ath_tx_node_init(sc, an);
+
+	ath_dynack_node_init(sc->sc_ah, an);
 }
 
 static void ath_node_detach(struct ath_softc *sc, struct ieee80211_sta *sta)
 {
 	struct ath_node *an = (struct ath_node *)sta->drv_priv;
 	ath_tx_node_cleanup(sc, an);
+
+	ath_dynack_node_deinit(sc->sc_ah, an);
 }
 
 void ath9k_tasklet(unsigned long data)
@@ -1876,6 +1880,20 @@ static int ath9k_get_survey(struct ieee80211_hw *hw, int idx,
 	return 0;
 }
 
+static void ath9k_enable_dynack(struct ath_softc *sc)
+{
+#ifdef CONFIG_ATH9K_DYNACK
+	u32 rfilt;
+	struct ath_hw *ah = sc->sc_ah;
+
+	ath_dynack_reset(ah);
+
+	ah->dynack.enabled = true;
+	rfilt = ath_calcrxfilter(sc);
+	ath9k_hw_setrxfilter(ah, rfilt);
+#endif
+}
+
 static void ath9k_set_coverage_class(struct ieee80211_hw *hw,
 				     s16 coverage_class)
 {
@@ -1886,11 +1904,22 @@ static void ath9k_set_coverage_class(struct ieee80211_hw *hw,
 		return;
 
 	mutex_lock(&sc->mutex);
-	ah->coverage_class = coverage_class;
 
-	ath9k_ps_wakeup(sc);
-	ath9k_hw_init_global_settings(ah);
-	ath9k_ps_restore(sc);
+	if (coverage_class >= 0) {
+		ah->coverage_class = coverage_class;
+		if (ah->dynack.enabled) {
+			u32 rfilt;
+
+			ah->dynack.enabled = false;
+			rfilt = ath_calcrxfilter(sc);
+			ath9k_hw_setrxfilter(ah, rfilt);
+		}
+		ath9k_ps_wakeup(sc);
+		ath9k_hw_init_global_settings(ah);
+		ath9k_ps_restore(sc);
+	} else if (!ah->dynack.enabled) {
+		ath9k_enable_dynack(sc);
+	}
 
 	mutex_unlock(&sc->mutex);
 }

@@ -400,7 +400,8 @@ u32 ath_calcrxfilter(struct ath_softc *sc)
 	if (sc->sc_ah->is_monitoring)
 		rfilt |= ATH9K_RX_FILTER_PROM;
 
-	if (sc->cur_chan->rxfilter & FIF_CONTROL)
+	if ((sc->cur_chan->rxfilter & FIF_CONTROL) ||
+	    sc->sc_ah->dynack.enabled)
 		rfilt |= ATH9K_RX_FILTER_CONTROL;
 
 	if ((sc->sc_ah->opmode == NL80211_IFTYPE_STATION) &&
@@ -549,10 +550,12 @@ static void ath_rx_ps_beacon(struct ath_softc *sc, struct sk_buff *skb)
 		ath_dbg(common, PS,
 			"Reconfigure beacon timers based on synchronized timestamp\n");
 
+#ifdef CONFIG_ATH9K_CHANNEL_CONTEXT
 		if (ath9k_is_chanctx_enabled()) {
 			if (sc->cur_chan == &sc->offchannel.chan)
 				skip_beacon = true;
 		}
+#endif
 
 		if (!skip_beacon &&
 		    !(WARN_ON_ONCE(sc->cur_chan->beacon.beacon_interval == 0)))
@@ -1007,6 +1010,7 @@ int ath_rx_tasklet(struct ath_softc *sc, int flush, bool hp)
 	unsigned long flags;
 	dma_addr_t new_buf_addr;
 	unsigned int budget = 512;
+	struct ieee80211_hdr *hdr;
 
 	if (edma)
 		dma_type = DMA_BIDIRECTIONAL;
@@ -1135,6 +1139,10 @@ int ath_rx_tasklet(struct ath_softc *sc, int flush, bool hp)
 		ath9k_antenna_check(sc, &rs);
 		ath9k_apply_ampdu_details(sc, &rs, rxs);
 		ath_debug_rate_stats(sc, &rs, skb);
+
+		hdr = (struct ieee80211_hdr *)skb->data;
+		if (ieee80211_is_ack(hdr->frame_control))
+			ath_dynack_sample_ack_ts(sc->sc_ah, skb, rs.rs_tstamp);
 
 		ieee80211_rx(hw, skb);
 
