@@ -1143,7 +1143,8 @@ static int msm_dsi_on(struct mdss_panel_data *pdata)
 	msm_dsi_sw_reset();
 	msm_dsi_host_init(mipi);
 
-	if (mipi->force_clk_lane_hs) {
+	//if (mipi->force_clk_lane_hs) 
+		{
 		u32 tmp;
 
 		tmp = MIPI_INP(ctrl_base + DSI_LANE_CTRL);

@@ -1,0 +1,78 @@
+/* Copyright (c) 2014, The Linux Foundation. All rights reserved.
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License version 2 and
+* only version 2 as published by the Free Software Foundation.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*/
+
+/dts-v1/;
+
+#include "msm8916-qrd-skut1.dtsi"
+#include "msm8916-memory.dtsi"
+
+/ {
+	model = "Qualcomm Technologies, Inc. MSM8916 QRD SKUT1";
+/* Compatible name can be used to match the board in kernel code, 
+* see file arch/arm/mach-msm/include/mach/socinfo.h as an example
+*/
+        compatible = "qcom,msm8916-qrd-skut1", "qcom,msm8916-qrd", "qcom,msm8916", "qcom,qrd";
+/* Description: <0xABBCC D>. A = hw version (EVT), B = unused
+*  C = platform ID (QRD), D = subtype (Tablet)
+*/
+        qcom,board-id = <0x1000b 0x40>;
+};
+&soc {
+	i2c@78b8000 {
+	smb1358_otg_vreg: smb1358-charger@57 {
+		compatible = "qcom,smb1358-charger";
+		reg = <0x57>;
+		interrupt-parent = <&msm_gpio>;
+		interrupts = <62 8>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&smb_int_default>;
+		
+		qcom,bmd-algo-disabled;
+		qcom,float-voltage-mv = <4200>;
+		qcom,charging-timeout = <1536>;
+		qcom,recharge-thresh-mv = <100>;
+		regulator-name = "smb1358_otg_vreg";
+		qcom,soft-vfloat-comp-disabled;
+		qcom,dc-psy-type = "Wireless";
+		qcom,dc-psy-ma = <1000>;
+		qcom,thermal-mitigation = <1500 700 600 0>;
+		
+		qcom,bms-psy-name = "bms";
+		qcom,iterm-disabled;
+		qcom,integrated-bms;
+		qcom,inhibit-disabled;
+		qcom,bms-controlled-charging;
+		};
+	};
+};
+
+&usb_otg {
+	qcom,hsusb-otg-mode = <3>;
+	qcom,usbid-gpio = <&msm_gpio 110 0>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&usbid_default>;
+	vbus_otg-supply = <&smb1358_otg_vreg>;
+};
+
+&pm8916_chg {
+	status = "ok";
+	qcom,use-external-charger;
+};
+
+&pm8916_bms {
+	status = "ok";
+	qcom,battery-data = <&mtp_batterydata>;
+	qcom,resume-soc = <95>;
+	qcom,charger-detect-cv;
+};
+
+

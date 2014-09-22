@@ -758,7 +758,8 @@ int mdss_dsi_on(struct mdss_panel_data *pdata)
 	if (mipi->init_delay)
 		usleep(mipi->init_delay);
 
-	if (mipi->force_clk_lane_hs) {
+	//if (mipi->force_clk_lane_hs)
+		 {
 		u32 tmp;
 
 		tmp = MIPI_INP((ctrl_pdata->ctrl_base) + 0xac);
@@ -1674,8 +1675,8 @@ int dsi_panel_device_register(struct device_node *pan_node,
 
 	ctrl_pdata->pclk_rate = mipi->dsi_pclk_rate;
 	ctrl_pdata->byte_clk_rate = pinfo->clk_rate / 8;
-	pr_debug("%s: pclk=%d, bclk=%d\n", __func__,
-			ctrl_pdata->pclk_rate, ctrl_pdata->byte_clk_rate);
+	printk("beta %s: pclk=%d, bclk=%d\n", __func__,
+			ctrl_pdata->pclk_rate*3, ctrl_pdata->byte_clk_rate);
 
 	ctrl_pdata->ctrl_state = CTRL_STATE_UNKNOWN;
 

@@ -998,6 +998,19 @@ config SECURE_TOUCH
 	  driver.
 
 	  If unsure, say N.
+	  
+config TOUCHSCREEN_FT5402
+       tristate "FocalTech touchscreens ft5402"
+       depends on I2C
+       help
+         Say Y here if you have a ft5402 touchscreen.
+	 Ft5402 controllers are multi touch controllers which can
+	 report 5 touches at a time.
+
+         If unsure, say N.
+
+         To compile this driver as a module, choose M here: the
+         module will be called ft5402_ts.
 
 config TOUCHSCREEN_GT9XX
 	bool "Goodix touchpanel GT9xx series"
