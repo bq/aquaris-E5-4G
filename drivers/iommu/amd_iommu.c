@@ -282,17 +282,13 @@ static bool check_device(struct device *dev)
 	return true;
 }
 
-static int init_iommu_group(struct device *dev)
+static void init_iommu_group(struct device *dev)
 {
 	struct iommu_group *group;
 
 	group = iommu_group_get_for_dev(dev);
-
-	if (IS_ERR(group))
-		return PTR_ERR(group);
-
-	iommu_group_put(group);
-	return 0;
+	if (!IS_ERR(group))
+		iommu_group_put(group);
 }
 
 static int __last_alias(struct pci_dev *pdev, u16 alias, void *data)
@@ -362,7 +358,6 @@ static int iommu_init_device(struct device *dev)
 	struct pci_dev *pdev = to_pci_dev(dev);
 	struct iommu_dev_data *dev_data;
 	u16 alias;
-	int ret;
 
 	if (dev->archdata.iommu)
 		return 0;
@@ -387,12 +382,6 @@ static int iommu_init_device(struct device *dev)
 
 		/* Add device to the alias_list */
 		list_add(&dev_data->alias_list, &alias_data->alias_list);
-	}
-
-	ret = init_iommu_group(dev);
-	if (ret) {
-		free_dev_data(dev_data);
-		return ret;
 	}
 
 	if (pci_iommuv2_capable(pdev)) {
@@ -478,6 +467,15 @@ int __init amd_iommu_init_devices(void)
 			iommu_ignore_device(&pdev->dev);
 		else if (ret)
 			goto out_free;
+	}
+
+	/*
+	 * Initialize IOMMU groups only after iommu_init_device() has
+	 * had a chance to populate any IVRS defined aliases.
+	 */
+	for_each_pci_dev(pdev) {
+		if (check_device(&pdev->dev))
+			init_iommu_group(&pdev->dev);
 	}
 
 	return 0;
@@ -1392,6 +1390,9 @@ static int iommu_map_page(struct protection_domain *dom,
 	phys_addr = PAGE_ALIGN(phys_addr);
 	count     = PAGE_SIZE_PTE_COUNT(page_size);
 	pte       = alloc_pte(dom, bus_addr, page_size, NULL, GFP_KERNEL);
+
+	if (!pte)
+		return -ENOMEM;
 
 	for (i = 0; i < count; ++i)
 		if (IOMMU_PTE_PRESENT(pte[i]))
@@ -2434,6 +2435,7 @@ static int device_change_notifier(struct notifier_block *nb,
 	case BUS_NOTIFY_ADD_DEVICE:
 
 		iommu_init_device(dev);
+		init_iommu_group(dev);
 
 		/*
 		 * dev_data is still NULL and
@@ -3402,20 +3404,20 @@ static phys_addr_t amd_iommu_iova_to_phys(struct iommu_domain *dom,
 	return paddr;
 }
 
-static int amd_iommu_domain_has_cap(struct iommu_domain *domain,
-				    unsigned long cap)
+static bool amd_iommu_capable(enum iommu_cap cap)
 {
 	switch (cap) {
 	case IOMMU_CAP_CACHE_COHERENCY:
-		return 1;
+		return true;
 	case IOMMU_CAP_INTR_REMAP:
-		return irq_remapping_enabled;
+		return (irq_remapping_enabled == 1);
 	}
 
-	return 0;
+	return false;
 }
 
 static const struct iommu_ops amd_iommu_ops = {
+	.capable = amd_iommu_capable,
 	.domain_init = amd_iommu_domain_init,
 	.domain_destroy = amd_iommu_domain_destroy,
 	.attach_dev = amd_iommu_attach_device,
@@ -3423,7 +3425,6 @@ static const struct iommu_ops amd_iommu_ops = {
 	.map = amd_iommu_map,
 	.unmap = amd_iommu_unmap,
 	.iova_to_phys = amd_iommu_iova_to_phys,
-	.domain_has_cap = amd_iommu_domain_has_cap,
 	.pgsize_bitmap	= AMD_IOMMU_PGSIZES,
 };
 
@@ -4253,7 +4254,7 @@ static int msi_setup_irq(struct pci_dev *pdev, unsigned int irq,
 	return 0;
 }
 
-static int setup_hpet_msi(unsigned int irq, unsigned int id)
+static int alloc_hpet_msi(unsigned int irq, unsigned int id)
 {
 	struct irq_2_irte *irte_info;
 	struct irq_cfg *cfg;
@@ -4292,6 +4293,6 @@ struct irq_remap_ops amd_iommu_irq_ops = {
 	.compose_msi_msg	= compose_msi_msg,
 	.msi_alloc_irq		= msi_alloc_irq,
 	.msi_setup_irq		= msi_setup_irq,
-	.setup_hpet_msi		= setup_hpet_msi,
+	.alloc_hpet_msi		= alloc_hpet_msi,
 };
 #endif

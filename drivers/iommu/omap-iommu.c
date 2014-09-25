@@ -893,19 +893,11 @@ static struct omap_iommu *omap_iommu_attach(const char *name, u32 *iopgd)
 		goto err_enable;
 	flush_iotlb_all(obj);
 
-	if (!try_module_get(obj->owner)) {
-		err = -ENODEV;
-		goto err_module;
-	}
-
 	spin_unlock(&obj->iommu_lock);
 
 	dev_dbg(obj->dev, "%s: %s\n", __func__, obj->name);
 	return obj;
 
-err_module:
-	if (obj->refcount == 1)
-		iommu_disable(obj);
 err_enable:
 	obj->refcount--;
 	spin_unlock(&obj->iommu_lock);
@@ -925,8 +917,6 @@ static void omap_iommu_detach(struct omap_iommu *obj)
 
 	if (--obj->refcount == 0)
 		iommu_disable(obj);
-
-	module_put(obj->owner);
 
 	obj->iopgd = NULL;
 
@@ -1007,7 +997,7 @@ static int omap_iommu_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static struct of_device_id omap_iommu_of_match[] = {
+static const struct of_device_id omap_iommu_of_match[] = {
 	{ .compatible = "ti,omap2-iommu" },
 	{ .compatible = "ti,omap4-iommu" },
 	{ .compatible = "ti,dra7-iommu"	},
