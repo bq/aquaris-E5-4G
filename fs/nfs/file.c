@@ -36,6 +36,7 @@
 #include "internal.h"
 #include "iostat.h"
 #include "fscache.h"
+#include "pnfs.h"
 
 #include "nfstrace.h"
 
@@ -327,6 +328,12 @@ static int nfs_want_read_modify_write(struct file *file, struct page *page,
 	unsigned int offset = pos & (PAGE_CACHE_SIZE - 1);
 	unsigned int end = offset + len;
 
+	if (pnfs_ld_read_whole_page(file->f_mapping->host)) {
+		if (!PageUptodate(page))
+			return 1;
+		return 0;
+	}
+
 	if ((file->f_mode & FMODE_READ) &&	/* open for read? */
 	    !PageUptodate(page) &&		/* Uptodate? */
 	    !PagePrivate(page) &&		/* i/o request already? */
@@ -539,13 +546,25 @@ static int nfs_launder_page(struct page *page)
 static int nfs_swap_activate(struct swap_info_struct *sis, struct file *file,
 						sector_t *span)
 {
+	int ret;
+	struct rpc_clnt *clnt = NFS_CLIENT(file->f_mapping->host);
+
 	*span = sis->pages;
-	return xs_swapper(NFS_CLIENT(file->f_mapping->host)->cl_xprt, 1);
+
+	rcu_read_lock();
+	ret = xs_swapper(rcu_dereference(clnt->cl_xprt), 1);
+	rcu_read_unlock();
+
+	return ret;
 }
 
 static void nfs_swap_deactivate(struct file *file)
 {
-	xs_swapper(NFS_CLIENT(file->f_mapping->host)->cl_xprt, 0);
+	struct rpc_clnt *clnt = NFS_CLIENT(file->f_mapping->host);
+
+	rcu_read_lock();
+	xs_swapper(rcu_dereference(clnt->cl_xprt), 0);
+	rcu_read_unlock();
 }
 #endif
 
@@ -891,17 +910,6 @@ int nfs_flock(struct file *filp, int cmd, struct file_lock *fl)
 }
 EXPORT_SYMBOL_GPL(nfs_flock);
 
-/*
- * There is no protocol support for leases, so we have no way to implement
- * them correctly in the face of opens by other clients.
- */
-int nfs_setlease(struct file *file, long arg, struct file_lock **fl)
-{
-	dprintk("NFS: setlease(%pD2, arg=%ld)\n", file, arg);
-	return -EINVAL;
-}
-EXPORT_SYMBOL_GPL(nfs_setlease);
-
 const struct file_operations nfs_file_operations = {
 	.llseek		= nfs_file_llseek,
 	.read		= new_sync_read,
@@ -918,6 +926,6 @@ const struct file_operations nfs_file_operations = {
 	.splice_read	= nfs_file_splice_read,
 	.splice_write	= iter_file_splice_write,
 	.check_flags	= nfs_check_flags,
-	.setlease	= nfs_setlease,
+	.setlease	= simple_nosetlease,
 };
 EXPORT_SYMBOL_GPL(nfs_file_operations);

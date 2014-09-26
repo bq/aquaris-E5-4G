@@ -1261,7 +1261,7 @@ static int nmk_gpio_probe(struct platform_device *dev)
 				   IRQ_TYPE_EDGE_FALLING);
 	if (ret) {
 		dev_err(&dev->dev, "could not add irqchip\n");
-		ret = gpiochip_remove(&nmk_chip->chip);
+		gpiochip_remove(&nmk_chip->chip);
 		return -ENODEV;
 	}
 	/* Then register the chain on the parent IRQ */
@@ -1647,8 +1647,8 @@ static int nmk_pmx_get_func_groups(struct pinctrl_dev *pctldev,
 	return 0;
 }
 
-static int nmk_pmx_enable(struct pinctrl_dev *pctldev, unsigned function,
-			  unsigned group)
+static int nmk_pmx_set(struct pinctrl_dev *pctldev, unsigned function,
+		       unsigned group)
 {
 	struct nmk_pinctrl *npct = pinctrl_dev_get_drvdata(pctldev);
 	const struct nmk_pingroup *g;
@@ -1810,7 +1810,7 @@ static const struct pinmux_ops nmk_pinmux_ops = {
 	.get_functions_count = nmk_pmx_get_funcs_cnt,
 	.get_function_name = nmk_pmx_get_func_name,
 	.get_function_groups = nmk_pmx_get_func_groups,
-	.enable = nmk_pmx_enable,
+	.set_mux = nmk_pmx_set,
 	.gpio_request_enable = nmk_gpio_request_enable,
 	.gpio_disable_free = nmk_gpio_disable_free,
 };

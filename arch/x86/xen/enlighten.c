@@ -821,7 +821,7 @@ static void xen_convert_trap_info(const struct desc_ptr *desc,
 
 void xen_copy_trap_info(struct trap_info *traps)
 {
-	const struct desc_ptr *desc = &__get_cpu_var(idt_desc);
+	const struct desc_ptr *desc = this_cpu_ptr(&idt_desc);
 
 	xen_convert_trap_info(desc, traps);
 }
@@ -838,7 +838,7 @@ static void xen_load_idt(const struct desc_ptr *desc)
 
 	spin_lock(&lock);
 
-	__get_cpu_var(idt_desc) = *desc;
+	memcpy(this_cpu_ptr(&idt_desc), desc, sizeof(idt_desc));
 
 	xen_convert_trap_info(desc, traps);
 
@@ -1558,8 +1558,6 @@ asmlinkage __visible void __init xen_start_kernel(void)
 	if (!xen_initial_domain())
 #endif
 		__supported_pte_mask &= ~(_PAGE_PWT | _PAGE_PCD);
-
-	__supported_pte_mask |= _PAGE_IOMAP;
 
 	/*
 	 * Prevent page tables from being allocated in highmem, even

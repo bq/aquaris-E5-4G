@@ -16,12 +16,12 @@
 #include <linux/dmaengine.h>
 
 struct uart_8250_dma {
+	/* Filter function */
 	dma_filter_fn		fn;
+
+	/* Parameter to the filter function */
 	void			*rx_param;
 	void			*tx_param;
-
-	int			rx_chan_id;
-	int			tx_chan_id;
 
 	struct dma_slave_config	rxconf;
 	struct dma_slave_config	txconf;
@@ -111,6 +111,8 @@ static inline void serial_dl_write(struct uart_8250_port *up, int value)
 {
 	up->dl_write(up, value);
 }
+
+struct uart_8250_port *serial8250_get_port(int line);
 
 #if defined(__alpha__) && !defined(CONFIG_PCI)
 /*

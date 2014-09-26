@@ -1678,8 +1678,6 @@ xfs_alloc_buftarg(
 	btp->bt_dev =  bdev->bd_dev;
 	btp->bt_bdev = bdev;
 	btp->bt_bdi = blk_get_backing_dev_info(bdev);
-	if (!btp->bt_bdi)
-		goto error;
 
 	if (xfs_setsize_buftarg_early(btp, bdev))
 		goto error;
@@ -1884,7 +1882,7 @@ xfs_buf_init(void)
 		goto out;
 
 	xfslogd_workqueue = alloc_workqueue("xfslogd",
-					WQ_MEM_RECLAIM | WQ_HIGHPRI, 1);
+				WQ_MEM_RECLAIM | WQ_HIGHPRI | WQ_FREEZABLE, 1);
 	if (!xfslogd_workqueue)
 		goto out_free_buf_zone;
 

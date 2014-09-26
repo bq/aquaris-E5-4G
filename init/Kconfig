@@ -507,6 +507,16 @@ config PREEMPT_RCU
 	  This option enables preemptible-RCU code that is common between
 	  TREE_PREEMPT_RCU and, in the old days, TINY_PREEMPT_RCU.
 
+config TASKS_RCU
+	bool "Task_based RCU implementation using voluntary context switch"
+	default n
+	help
+	  This option enables a task-based RCU implementation that uses
+	  only voluntary context switch (not preemption!), idle, and
+	  user-mode execution as quiescent states.
+
+	  If unsure, say N.
+
 config RCU_STALL_COMMON
 	def_bool ( TREE_RCU || TREE_PREEMPT_RCU || RCU_TRACE )
 	help
@@ -737,7 +747,7 @@ choice
 
 config RCU_NOCB_CPU_NONE
 	bool "No build_forced no-CBs CPUs"
-	depends on RCU_NOCB_CPU && !NO_HZ_FULL_ALL
+	depends on RCU_NOCB_CPU
 	help
 	  This option does not force any of the CPUs to be no-CBs CPUs.
 	  Only CPUs designated by the rcu_nocbs= boot parameter will be
@@ -751,7 +761,7 @@ config RCU_NOCB_CPU_NONE
 
 config RCU_NOCB_CPU_ZERO
 	bool "CPU 0 is a build_forced no-CBs CPU"
-	depends on RCU_NOCB_CPU && !NO_HZ_FULL_ALL
+	depends on RCU_NOCB_CPU
 	help
 	  This option forces CPU 0 to be a no-CBs CPU, so that its RCU
 	  callbacks are invoked by a per-CPU kthread whose name begins
@@ -1297,6 +1307,77 @@ config CC_OPTIMIZE_FOR_SIZE
 
 	  If unsure, say N.
 
+config LTO_MENU
+	bool "Enable gcc link time optimization (LTO)"
+	# Only tested on X86 for now. For other architectures you likely
+	# have to fix some things first, like adding asmlinkages etc.
+	depends on X86
+	# lto does not support excluding flags for specific files
+	# right now. Can be removed if that is fixed.
+	depends on !FUNCTION_TRACER
+	help
+	  With this option gcc will do whole program optimizations for
+	  the whole kernel and module. This increases compile time, but can
+	  lead to better code. It allows gcc to inline functions between
+	  different files and do other optimization.  It might also trigger
+	  bugs due to more aggressive optimization. It allows gcc to drop unused
+	  code. On smaller monolithic kernel configurations
+	  it usually leads to smaller kernels, especially when modules
+	  are disabled.
+
+	  With this option gcc will also do some global checking over
+	  different source files. It also disables a number of kernel
+	  features.
+
+	  This option is recommended for release builds. With LTO
+	  the kernel always has to be re-optimized (but not re-parsed)
+	  on each build.
+
+	  This requires a gcc 4.8 or later compiler and
+	  Linux binutils 2.21.51.0.3 or later.  gcc 4.9 builds significantly
+	  faster than 4.8 It does not currently work with a FSF release of
+	  binutils or with the gold linker.
+
+	  On larger configurations this may need more than 4GB of RAM.
+	  It will likely not work on those with a 32bit compiler.
+
+	  When the toolchain support is not available this will (hopefully)
+	  be automatically disabled.
+
+	  For more information see Documentation/lto-build
+
+config LTO_DISABLE
+         bool "Disable LTO again"
+         depends on LTO_MENU
+         default n
+         help
+           This option is merely here so that allyesconfig or allmodconfig do
+           not enable LTO. If you want to actually use LTO do not enable.
+
+config LTO
+	bool
+	default y
+	depends on LTO_MENU && !LTO_DISABLE
+
+config LTO_DEBUG
+	bool "Enable LTO compile time debugging"
+	depends on LTO
+	help
+	  Enable LTO debugging in the compiler. The compiler dumps
+	  some log files that make it easier to figure out LTO
+	  behavior. The log files also allow to reconstruct
+	  the global inlining and a global callgraph.
+	  They however add some (single threaded) cost to the
+	  compilation.  When in doubt do not enable.
+
+config LTO_CP_CLONE
+	bool "Allow aggressive cloning for function specialization"
+	depends on LTO
+	help
+	  Allow the compiler to clone and specialize functions for specific
+	  arguments when it determines these arguments are very commonly
+	  called.  Experimential. Will increase text size.
+
 config SYSCTL
 	bool
 
@@ -1526,6 +1607,16 @@ config AIO
 	  This option enables POSIX asynchronous I/O which may by used
 	  by some high performance threaded applications. Disabling
 	  this option saves about 7k.
+
+config ADVISE_SYSCALLS
+	bool "Enable madvise/fadvise syscalls" if EXPERT
+	default y
+	help
+	  This option enables the madvise and fadvise syscalls, used by
+	  applications to advise the kernel about their future memory or file
+	  usage, improving performance. If building an embedded system where no
+	  applications use these syscalls, you can disable this option to save
+	  space.
 
 config PCI_QUIRKS
 	default y
@@ -1796,6 +1887,8 @@ config MODULE_FORCE_UNLOAD
 
 config MODVERSIONS
 	bool "Module versioning support"
+	# LTO should work with gcc 4.9
+	depends on !LTO
 	help
 	  Usually, you have to use modules compiled with your kernel.
 	  Saying Y here makes it sometimes possible to use modules
@@ -1895,6 +1988,49 @@ config MODULE_SIG_HASH
 	default "sha256" if MODULE_SIG_SHA256
 	default "sha384" if MODULE_SIG_SHA384
 	default "sha512" if MODULE_SIG_SHA512
+
+config MODULE_COMPRESS
+	bool "Compress modules on installation"
+	depends on MODULES
+	help
+	  This option compresses the kernel modules when 'make
+	  modules_install' is run.
+
+	  The modules will be compressed either using gzip or xz depend on the
+	  choice made in "Compression algorithm".
+
+	  module-init-tools has support for gzip format while kmod handle gzip
+	  and xz compressed modules.
+
+	  When a kernel module is installed from outside of the main kernel
+	  source and uses the Kbuild system for installing modules then that
+	  kernel module will also be compressed when it is installed.
+
+	  This option provides little benefit when the modules are to be used inside
+	  an initrd or initramfs, it generally is more efficient to compress the whole
+	  initrd or initramfs instead.
+
+	  This is fully compatible with signed modules while the signed module is
+	  compressed. module-init-tools or kmod handles decompression and provide to
+	  other layer the uncompressed but signed payload.
+
+choice
+	prompt "Compression algorithm"
+	depends on MODULE_COMPRESS
+	default MODULE_COMPRESS_GZIP
+	help
+	  This determines which sort of compression will be used during
+	  'make modules_install'.
+
+	  GZIP (default) and XZ are supported.
+
+config MODULE_COMPRESS_GZIP
+	bool "GZIP"
+
+config MODULE_COMPRESS_XZ
+	bool "XZ"
+
+endchoice
 
 endif # MODULES
 

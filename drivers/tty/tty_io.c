@@ -1544,13 +1544,14 @@ static void release_one_tty(struct work_struct *work)
 	struct tty_struct *tty =
 		container_of(work, struct tty_struct, hangup_work);
 	struct tty_driver *driver = tty->driver;
+	struct module *owner = driver->owner;
 
 	if (tty->ops->cleanup)
 		tty->ops->cleanup(tty);
 
 	tty->magic = 0;
 	tty_driver_kref_put(driver);
-	module_put(driver->owner);
+	module_put(owner);
 
 	spin_lock(&tty_files_lock);
 	list_del_init(&tty->tty_files);
@@ -2163,8 +2164,9 @@ static int __tty_fasync(int fd, struct file *filp, int on)
 		}
 		get_pid(pid);
 		spin_unlock_irqrestore(&tty->ctrl_lock, flags);
-		retval = __f_setown(filp, pid, type, 0);
+		__f_setown(filp, pid, type, 0);
 		put_pid(pid);
+		retval = 0;
 	}
 out:
 	return retval;

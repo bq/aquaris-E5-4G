@@ -1121,7 +1121,7 @@ int ocfs2_setattr(struct dentry *dentry, struct iattr *attr)
 	struct ocfs2_super *osb = OCFS2_SB(sb);
 	struct buffer_head *bh = NULL;
 	handle_t *handle = NULL;
-	struct dquot *transfer_to[MAXQUOTAS] = { };
+	struct dquot *transfer_to[OCFS2_MAXQUOTAS] = { };
 	int qtype;
 
 	trace_ocfs2_setattr(inode, dentry,
@@ -1249,7 +1249,7 @@ bail:
 	brelse(bh);
 
 	/* Release quota pointers in case we acquired them */
-	for (qtype = 0; qtype < MAXQUOTAS; qtype++)
+	for (qtype = 0; qtype < OCFS2_MAXQUOTAS; qtype++)
 		dqput(transfer_to[qtype]);
 
 	if (!status && attr->ia_valid & ATTR_MODE) {
