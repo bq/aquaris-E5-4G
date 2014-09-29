@@ -57,7 +57,7 @@
 #include <linux/earlysuspend.h>
 #endif
 
-#define MCUBE_FUNC_DEBUG
+//#define MCUBE_FUNC_DEBUG
 
 
 #ifdef MCUBE_FUNC_DEBUG
@@ -274,7 +274,6 @@ static int mc3xxx_smbus_write_byte(struct i2c_client *client,
 	
 	dummy = i2c_smbus_write_byte_data(client, reg_addr, data);
 	
-	printk(" beta %s ,reg_addr=%x,data=%x \n",__func__,reg_addr,data);
 	if (dummy < 0)
 		return -EINVAL;
 
@@ -1201,7 +1200,7 @@ static int mc3xxx_probe(struct i2c_client *client,
 	}
 
 /******************************************************************/
-	MC_PRINT("%s probe ok!\n", __func__);
+	printk("%s probe ok!\n", __func__);
 
 	return 0;
 error_sysfs_group:
