@@ -683,6 +683,8 @@ static void ath_tx_process_buffer(struct ath_softc *sc, struct ath_txq *txq,
 	if (bf_is_ampdu_not_probing(bf))
 		txq->axq_ampdu_depth--;
 
+	ts->duration = ath9k_hw_get_duration(sc->sc_ah, bf->bf_desc,
+					     ts->ts_rateindex);
 	if (!bf_isampdu(bf)) {
 		if (!flush) {
 			info = IEEE80211_SKB_CB(bf->bf_mpdu);
@@ -1839,15 +1841,17 @@ void ath_txq_schedule(struct ath_softc *sc, struct ath_txq *txq)
 	if (txq->mac80211_qnum < 0)
 		return;
 
-	spin_lock_bh(&sc->chan_lock);
-	ac_list = &sc->cur_chan->acq[txq->mac80211_qnum];
-	spin_unlock_bh(&sc->chan_lock);
-
-	if (test_bit(ATH_OP_HW_RESET, &common->op_flags) ||
-	    list_empty(ac_list))
+	if (test_bit(ATH_OP_HW_RESET, &common->op_flags))
 		return;
 
 	spin_lock_bh(&sc->chan_lock);
+	ac_list = &sc->cur_chan->acq[txq->mac80211_qnum];
+
+	if (list_empty(ac_list)) {
+		spin_unlock_bh(&sc->chan_lock);
+		return;
+	}
+
 	rcu_read_lock();
 
 	last_ac = list_entry(ac_list->prev, struct ath_atx_ac, list);
