@@ -693,8 +693,8 @@ int msm_dts_eagle_handle_asm(struct dts_eagle_param_desc *depd, char *buf,
 		isALSA = 1;
 	}
 
-	if (depd->size & 3) {
-		pr_err("DTS_EAGLE_DRIVER_ASM: parameter size %i is not a multiple of 4\n",
+	if (depd->size & 1) {
+		pr_err("DTS_EAGLE_DRIVER_ASM: parameter size %i is not a multiple of 2\n",
 			depd->size);
 		return -EINVAL;
 	}
@@ -728,9 +728,13 @@ int msm_dts_eagle_handle_asm(struct dts_eagle_param_desc *depd, char *buf,
 			buf_ = (__u32 *)&_depc[offset];
 		}
 		if (isALSA) {
-			__u32 *pbuf = (__u32 *)buf_;
-			for (i = 0; i < (depd->size >> 2); i++)
-				*(long *)buf++ = (long)*pbuf++;
+			if (depd->size == 2) {
+				*(long *)buf++ = (long)*(__u16 *)buf_;
+			} else {
+				__u32 *pbuf = (__u32 *)buf_;
+				for (i = 0; i < (depd->size >> 2); i++)
+					*(long *)buf++ = (long)*pbuf++;
+			}
 		} else {
 			memcpy(buf, buf_, depd->size);
 		}
@@ -746,9 +750,13 @@ DTS_EAGLE_IOCTL_GET_PARAM_PRE_EXIT:
 			return -EINVAL;
 		}
 		if (isALSA) {
-			__u32 *pbuf = (__u32 *)(&_depc[offset]);
-			for (i = 0; i < (depd->size >> 2); i++)
-				*pbuf++ = (__u32)*(long *)buf++;
+			if (depd->size == 2) {
+				*(__u16 *)&_depc[offset] = (__u16)*(long *)buf;
+			} else {
+				__u32 *pbuf = (__u32 *)&_depc[offset];
+				for (i = 0; i < (depd->size >> 2); i++)
+					*pbuf++ = (__u32)*(long *)buf++;
+			}
 		} else {
 			memcpy(&_depc[offset], buf, depd->size);
 		}
