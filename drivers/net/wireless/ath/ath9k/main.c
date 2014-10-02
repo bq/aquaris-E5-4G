@@ -60,8 +60,10 @@ static bool ath9k_has_pending_frames(struct ath_softc *sc, struct ath_txq *txq)
 
 	spin_lock_bh(&txq->axq_lock);
 
-	if (txq->axq_depth)
+	if (txq->axq_depth) {
 		pending = true;
+		goto out;
+	}
 
 	if (txq->mac80211_qnum >= 0) {
 		struct list_head *list;
@@ -70,6 +72,7 @@ static bool ath9k_has_pending_frames(struct ath_softc *sc, struct ath_txq *txq)
 		if (!list_empty(list))
 			pending = true;
 	}
+out:
 	spin_unlock_bh(&txq->axq_lock);
 	return pending;
 }
@@ -261,12 +264,7 @@ static bool ath_complete_reset(struct ath_softc *sc, bool start)
 
 	ath9k_hw_set_interrupts(ah);
 	ath9k_hw_enable_interrupts(ah);
-
-	if (!ath9k_is_chanctx_enabled())
-		ieee80211_wake_queues(sc->hw);
-	else
-		ath9k_chanctx_wake_queues(sc);
-
+	ieee80211_wake_queues(sc->hw);
 	ath9k_p2p_ps_timer(sc);
 
 	return true;
@@ -1971,9 +1969,6 @@ static bool ath9k_has_tx_pending(struct ath_softc *sc)
 		if (!ATH_TXQ_SETUP(sc, i))
 			continue;
 
-		if (!sc->tx.txq[i].axq_depth)
-			continue;
-
 		npend = ath9k_has_pending_frames(sc, &sc->tx.txq[i]);
 		if (npend)
 			break;
@@ -1999,7 +1994,6 @@ void __ath9k_flush(struct ieee80211_hw *hw, u32 queues, bool drop)
 	struct ath_common *common = ath9k_hw_common(ah);
 	int timeout = HZ / 5; /* 200 ms */
 	bool drain_txq;
-	int i;
 
 	cancel_delayed_work_sync(&sc->tx_complete_work);
 
@@ -2027,10 +2021,6 @@ void __ath9k_flush(struct ieee80211_hw *hw, u32 queues, bool drop)
 			ath_reset(sc);
 
 		ath9k_ps_restore(sc);
-		for (i = 0; i < IEEE80211_NUM_ACS; i++) {
-			ieee80211_wake_queue(sc->hw,
-					     sc->cur_chan->hw_queue_base + i);
-		}
 	}
 
 	ieee80211_queue_delayed_work(hw, &sc->tx_complete_work, 0);
@@ -2039,16 +2029,8 @@ void __ath9k_flush(struct ieee80211_hw *hw, u32 queues, bool drop)
 static bool ath9k_tx_frames_pending(struct ieee80211_hw *hw)
 {
 	struct ath_softc *sc = hw->priv;
-	int i;
 
-	for (i = 0; i < ATH9K_NUM_TX_QUEUES; i++) {
-		if (!ATH_TXQ_SETUP(sc, i))
-			continue;
-
-		if (ath9k_has_pending_frames(sc, &sc->tx.txq[i]))
-			return true;
-	}
-	return false;
+	return ath9k_has_tx_pending(sc);
 }
 
 static int ath9k_tx_last_beacon(struct ieee80211_hw *hw)
