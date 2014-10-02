@@ -549,7 +549,7 @@ static int _enable_post_put_control(struct snd_kcontrol *kcontrol,
 			topology = adm_get_topology_for_port_from_copp_id(
 								port_id, idx);
 			if (topology ==
-				ADM_CMD_COPP_OPEN_TOPOLOGY_ID_DTS_HPX_0) {
+				ADM_CMD_COPP_OPEN_TOPOLOGY_ID_DTS_HPX) {
 				msm_dts_eagle_enable_adm(port_id, idx,
 							 _is_hpx_enabled);
 			}
