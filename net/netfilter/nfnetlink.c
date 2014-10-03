@@ -381,11 +381,7 @@ replay:
 			 */
 			if (err == -EAGAIN) {
 				nfnl_err_reset(&err_list);
-<<<<<<< HEAD
-				ss->abort(skb);
-=======
 				ss->abort(oskb);
->>>>>>> linux-next/akpm-base
 				nfnl_unlock(subsys_id);
 				kfree_skb(nskb);
 				goto replay;

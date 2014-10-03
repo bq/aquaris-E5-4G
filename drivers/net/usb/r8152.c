@@ -3203,14 +3203,9 @@ static int rtl8152_resume(struct usb_interface *intf)
 		} else {
 			tp->rtl_ops.up(tp);
 			rtl8152_set_speed(tp, AUTONEG_ENABLE,
-<<<<<<< HEAD
-				tp->mii.supports_gmii ? SPEED_1000 : SPEED_100,
-				DUPLEX_FULL);
-=======
 					  tp->mii.supports_gmii ?
 					  SPEED_1000 : SPEED_100,
 					  DUPLEX_FULL);
->>>>>>> linux-next/akpm-base
 			tp->speed = 0;
 			netif_carrier_off(tp->netdev);
 			set_bit(WORK_ENABLE, &tp->flags);
