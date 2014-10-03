@@ -381,7 +381,11 @@ replay:
 			 */
 			if (err == -EAGAIN) {
 				nfnl_err_reset(&err_list);
+<<<<<<< HEAD
 				ss->abort(skb);
+=======
+				ss->abort(oskb);
+>>>>>>> linux-next/akpm-base
 				nfnl_unlock(subsys_id);
 				kfree_skb(nskb);
 				goto replay;
@@ -418,9 +422,9 @@ ack:
 	}
 done:
 	if (success && done)
-		ss->commit(skb);
+		ss->commit(oskb);
 	else
-		ss->abort(skb);
+		ss->abort(oskb);
 
 	nfnl_err_deliver(&err_list, oskb);
 	nfnl_unlock(subsys_id);

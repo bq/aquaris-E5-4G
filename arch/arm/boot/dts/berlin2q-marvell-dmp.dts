@@ -45,3 +45,15 @@
 &uart0 {
 	status = "okay";
 };
+
+&sata0 {
+	status = "okay";
+};
+
+&sata_phy {
+	status = "okay";
+};
+
+&eth0 {
+	status = "okay";
+};

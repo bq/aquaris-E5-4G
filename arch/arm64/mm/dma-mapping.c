@@ -23,11 +23,8 @@
 #include <linux/genalloc.h>
 #include <linux/dma-mapping.h>
 #include <linux/dma-contiguous.h>
-#include <linux/of.h>
-#include <linux/platform_device.h>
 #include <linux/vmalloc.h>
 #include <linux/swiotlb.h>
-#include <linux/amba/bus.h>
 
 #include <asm/cacheflush.h>
 

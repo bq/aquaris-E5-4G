@@ -653,6 +653,7 @@ static int lbs_ret_scan(struct lbs_private *priv, unsigned long dummy,
 			if (channel &&
 			    !(channel->flags & IEEE80211_CHAN_DISABLED)) {
 				bss = cfg80211_inform_bss(wiphy, channel,
+					CFG80211_BSS_FTYPE_UNKNOWN,
 					bssid, get_unaligned_le64(tsfdesc),
 					capa, intvl, ie, ielen,
 					LBS_SCAN_RSSI_TO_MBM(rssi),
@@ -1353,7 +1354,7 @@ static int lbs_cfg_connect(struct wiphy *wiphy, struct net_device *dev,
 		wait_event_interruptible_timeout(priv->scan_q,
 						 (priv->scan_req == NULL),
 						 (15 * HZ));
-		lbs_deb_assoc("assoc: scanning competed\n");
+		lbs_deb_assoc("assoc: scanning completed\n");
 	}
 
 	/* Find the BSS we want using available scan results */
@@ -1754,6 +1755,7 @@ static void lbs_join_post(struct lbs_private *priv,
 
 	bss = cfg80211_inform_bss(priv->wdev->wiphy,
 				  params->chandef.chan,
+				  CFG80211_BSS_FTYPE_UNKNOWN,
 				  bssid,
 				  0,
 				  capability,
