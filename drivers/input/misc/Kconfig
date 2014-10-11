@@ -824,6 +824,7 @@ config SENSORS_MC32X0
 	  module will be called mma8x5x.
 
 
+
 config SENSORS_BMI058
 	tristate "BMI058 Sensor Support"
 	depends on (SENSORS_BMG || SENSORS_BMA2X2)
@@ -839,3 +840,9 @@ config SENSORS_MC3430
 	help
 	  Say Y here if you want to enable the MC3430 acceleration sensor
 	  driver.
+	  
+config INTERSIL_ISL29044A
+	tristate "INTERSIL P/L sensor"
+	depends on I2C
+	help
+	  This option enables support for the INTERSIL ISL29044A P/L sensor.

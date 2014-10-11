@@ -20,7 +20,18 @@
 		serial0 = &blsp1_uart2;
 	};
 };
-
+&tlmm_pinmux {
+	mc3xxx_int_pin {
+		qcom,pins = <&gp 115>;
+		qcom,pin-func = <0>;
+		qcom,num-grp-pins = <1>;
+		label = "mc3xxx_irq";
+		mc3xxx_default: mc3xxx_default {
+			  drive-strength = <6>;
+			  bias-pull-up;
+	  };
+ 	};
+};
 &soc {
 	i2c@78b9000 { /* BLSP1 QUP5 */
 		
@@ -79,6 +90,15 @@
 		mcube,position = <1>;
 	};
 
+        intersil@44 {
+			compatible = "intersil,isl29044a";
+			reg = <0x44>;
+			vdd-supply = <&pm8916_l17>;
+ 		  vio-supply = <&pm8916_l6>;           
+ 		  intersil,als_range = <1>;       
+        intersil,ps_lt = <30>;           
+        intersil,ps_ht = <50>;          
+		};
 	};
 	
 
