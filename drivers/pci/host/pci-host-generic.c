@@ -42,14 +42,24 @@ struct gen_pci {
 	struct pci_host_bridge			host;
 	struct gen_pci_cfg_windows		cfg;
 	struct list_head			resources;
+	struct device_node *msi_parent;
 };
+
+#ifdef CONFIG_ARM64
+#define bus_to_gen_pci(b) \
+	((struct gen_pci *)b->sysdata)
+#else
+#define bus_to_gen_pci(b) \
+	((struct gen_pci *) \
+	(((struct pci_sys_data *) \
+	(bus->sysdata))->private_data))
+#endif
 
 static void __iomem *gen_pci_map_cfg_bus_cam(struct pci_bus *bus,
 					     unsigned int devfn,
 					     int where)
 {
-	struct pci_sys_data *sys = bus->sysdata;
-	struct gen_pci *pci = sys->private_data;
+	struct gen_pci *pci = bus_to_gen_pci(bus);
 	resource_size_t idx = bus->number - pci->cfg.bus_range->start;
 
 	return pci->cfg.win[idx] + ((devfn << 8) | where);
@@ -64,8 +74,7 @@ static void __iomem *gen_pci_map_cfg_bus_ecam(struct pci_bus *bus,
 					      unsigned int devfn,
 					      int where)
 {
-	struct pci_sys_data *sys = bus->sysdata;
-	struct gen_pci *pci = sys->private_data;
+	struct gen_pci *pci = bus_to_gen_pci(bus);
 	resource_size_t idx = bus->number - pci->cfg.bus_range->start;
 
 	return pci->cfg.win[idx] + ((devfn << 12) | where);
@@ -80,8 +89,7 @@ static int gen_pci_config_read(struct pci_bus *bus, unsigned int devfn,
 				int where, int size, u32 *val)
 {
 	void __iomem *addr;
-	struct pci_sys_data *sys = bus->sysdata;
-	struct gen_pci *pci = sys->private_data;
+	struct gen_pci *pci = bus_to_gen_pci(bus);
 
 	addr = pci->cfg.ops->map_bus(bus, devfn, where);
 
@@ -103,8 +111,7 @@ static int gen_pci_config_write(struct pci_bus *bus, unsigned int devfn,
 				 int where, int size, u32 val)
 {
 	void __iomem *addr;
-	struct pci_sys_data *sys = bus->sysdata;
-	struct gen_pci *pci = sys->private_data;
+	struct gen_pci *pci = bus_to_gen_pci(bus);
 
 	addr = pci->cfg.ops->map_bus(bus, devfn, where);
 
@@ -244,12 +251,58 @@ static int gen_pci_parse_map_cfg_windows(struct gen_pci *pci)
 	return 0;
 }
 
+#ifndef CONFIG_ARM64
 static int gen_pci_setup(int nr, struct pci_sys_data *sys)
 {
 	struct gen_pci *pci = sys->private_data;
 	list_splice_init(&pci->resources, &sys->resources);
 	return 1;
 }
+#endif
+
+#ifdef CONFIG_ARM64
+struct pci_bus *gen_scan_root_bus(struct device *parent, int bus,
+				       struct pci_ops *ops, void *sysdata,
+				       struct list_head *resources)
+{
+	struct pci_host_bridge_window *window;
+	bool found = false;
+	struct pci_bus *b;
+	int max;
+	struct gen_pci *pci = sysdata;
+
+	list_for_each_entry(window, resources, list)
+		if (window->res->flags & IORESOURCE_BUS) {
+			found = true;
+			break;
+		}
+
+	b = pci_create_root_bus(parent, bus, ops, sysdata, resources);
+	if (!b)
+		return NULL;
+
+	/* TODO:
+	 * This is probably should be done in the core pci driver somewhere
+	 */
+	if (pci->msi_parent)
+		b->msi = of_pci_find_msi_chip_by_node(pci->msi_parent);
+
+	if (!found) {
+		dev_info(&b->dev,
+		 "No busn resource found for root bus, will use [bus %02x-ff]\n",
+			bus);
+		pci_bus_insert_busn_res(b, bus, 255);
+	}
+
+	max = pci_scan_child_bus(b);
+
+	if (!found)
+		pci_bus_update_busn_res_end(b, max);
+
+	pci_bus_add_devices(b);
+	return b;
+}
+#endif
 
 static int gen_pci_probe(struct platform_device *pdev)
 {
@@ -260,6 +313,7 @@ static int gen_pci_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct device_node *np = dev->of_node;
 	struct gen_pci *pci = devm_kzalloc(dev, sizeof(*pci), GFP_KERNEL);
+#ifndef CONFIG_ARM64
 	struct hw_pci hw = {
 		.nr_controllers	= 1,
 		.private_data	= (void **)&pci,
@@ -267,6 +321,7 @@ static int gen_pci_probe(struct platform_device *pdev)
 		.map_irq	= of_irq_parse_and_map_pci,
 		.ops		= &gen_pci_ops,
 	};
+#endif
 
 	if (!pci)
 		return -ENOMEM;
@@ -302,8 +357,24 @@ static int gen_pci_probe(struct platform_device *pdev)
 		gen_pci_release_of_pci_ranges(pci);
 		return err;
 	}
+#ifdef CONFIG_ARM64
 
+#ifdef CONFIG_PCI_MSI
+	pci->msi_parent = of_parse_phandle(np, "msi-parent", 0);
+	if (!pci->msi_parent) {
+		dev_err(&pdev->dev, "Failed to allocate msi-parent.\n");
+		return -EINVAL;
+	}
+#endif
+
+	if (!gen_scan_root_bus(&pdev->dev, pci->cfg.bus_range->start,
+			       &gen_pci_ops, pci, &pci->resources)) {
+		dev_err(&pdev->dev, "failed to enable PCIe ports\n");
+		return -ENODEV;
+	}
+#else
 	pci_common_init_dev(dev, &hw);
+#endif /* CONFIG_ARM64 */
 	return 0;
 }
 
