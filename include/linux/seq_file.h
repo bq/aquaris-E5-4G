@@ -31,6 +31,7 @@ struct seq_file {
 	struct user_namespace *user_ns;
 #endif
 	void *private;
+	unsigned int seq_ops_allocated:1;
 };
 
 struct seq_operations {
