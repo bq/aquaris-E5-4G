@@ -1069,7 +1069,7 @@ static void pagetypeinfo_showmixedcount_print(struct seq_file *m,
 			if (page->order < 0)
 				continue;
 
-			pagetype = allocflags_to_migratetype(page->gfp_mask);
+			pagetype = gfpflags_to_migratetype(page->gfp_mask);
 			if (pagetype != mtype) {
 				if (is_migrate_cma(pagetype))
 					count[MIGRATE_MOVABLE]++;
