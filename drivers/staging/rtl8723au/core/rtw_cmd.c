@@ -359,6 +359,7 @@ int rtw_sitesurvey_cmd23a(struct rtw_adapter *padapter,
 	/* prepare ssid list */
 	if (ssid) {
 		int i;
+
 		for (i = 0; i < ssid_num && i < RTW_SSID_SCAN_AMOUNT; i++) {
 			if (ssid[i].ssid_len) {
 				memcpy(&psurveyPara->ssid[i], &ssid[i],
@@ -371,6 +372,7 @@ int rtw_sitesurvey_cmd23a(struct rtw_adapter *padapter,
 	/* prepare channel list */
 	if (ch) {
 		int i;
+
 		for (i = 0; i < ch_num && i < RTW_CHANNEL_SCAN_AMOUNT; i++) {
 			if (ch[i].hw_value &&
 			    !(ch[i].flags & IEEE80211_CHAN_DISABLED)) {
@@ -719,6 +721,7 @@ int rtw_setstakey_cmd23a(struct rtw_adapter *padapter, u8 *psta, u8 unicast_key)
 		memcpy(&psetstakey_para->key, &sta->dot118021x_UncstKey, 16);
 	} else {
 		int idx = psecuritypriv->dot118021XGrpKeyid;
+
 		memcpy(&psetstakey_para->key,
 		       &psecuritypriv->dot118021XGrpKey[idx].skey, 16);
 	}
@@ -1017,46 +1020,45 @@ static void lps_ctrl_wk_hdl(struct rtw_adapter *padapter, u8 lps_ctrl_type)
 	    check_fwstate(pmlmepriv, WIFI_ADHOC_STATE))
 		return;
 
-	switch (lps_ctrl_type)
-	{
-		case LPS_CTRL_SCAN:
-			rtl8723a_BT_wifiscan_notify(padapter, true);
-			if (!rtl8723a_BT_using_antenna_1(padapter)) {
-				if (check_fwstate(pmlmepriv, _FW_LINKED))
-					LPS_Leave23a(padapter);
+	switch (lps_ctrl_type) {
+	case LPS_CTRL_SCAN:
+		rtl8723a_BT_wifiscan_notify(padapter, true);
+		if (!rtl8723a_BT_using_antenna_1(padapter)) {
+			if (check_fwstate(pmlmepriv, _FW_LINKED))
+				LPS_Leave23a(padapter);
 			}
-			break;
-		case LPS_CTRL_JOINBSS:
+		break;
+	case LPS_CTRL_JOINBSS:
+		LPS_Leave23a(padapter);
+		break;
+	case LPS_CTRL_CONNECT:
+		mstatus = 1;/* connect */
+		/*  Reset LPS Setting */
+		padapter->pwrctrlpriv.LpsIdleCount = 0;
+		rtl8723a_set_FwJoinBssReport_cmd(padapter, 1);
+		rtl8723a_BT_mediastatus_notify(padapter, mstatus);
+		break;
+	case LPS_CTRL_DISCONNECT:
+		mstatus = 0;/* disconnect */
+		rtl8723a_BT_mediastatus_notify(padapter, mstatus);
+		if (!rtl8723a_BT_using_antenna_1(padapter))
 			LPS_Leave23a(padapter);
-			break;
-		case LPS_CTRL_CONNECT:
-			mstatus = 1;/* connect */
-			/*  Reset LPS Setting */
-			padapter->pwrctrlpriv.LpsIdleCount = 0;
-			rtl8723a_set_FwJoinBssReport_cmd(padapter, 1);
-			rtl8723a_BT_mediastatus_notify(padapter, mstatus);
-			break;
-		case LPS_CTRL_DISCONNECT:
-			mstatus = 0;/* disconnect */
-			rtl8723a_BT_mediastatus_notify(padapter, mstatus);
-			if (!rtl8723a_BT_using_antenna_1(padapter))
-				LPS_Leave23a(padapter);
-			rtl8723a_set_FwJoinBssReport_cmd(padapter, 0);
-			break;
-		case LPS_CTRL_SPECIAL_PACKET:
-			pwrpriv->DelayLPSLastTimeStamp = jiffies;
-			rtl8723a_BT_specialpacket_notify(padapter);
-			if (!rtl8723a_BT_using_antenna_1(padapter))
-				LPS_Leave23a(padapter);
-			break;
-		case LPS_CTRL_LEAVE:
-			rtl8723a_BT_lps_leave(padapter);
-			if (!rtl8723a_BT_using_antenna_1(padapter))
-				LPS_Leave23a(padapter);
-			break;
+		rtl8723a_set_FwJoinBssReport_cmd(padapter, 0);
+		break;
+	case LPS_CTRL_SPECIAL_PACKET:
+		pwrpriv->DelayLPSLastTimeStamp = jiffies;
+		rtl8723a_BT_specialpacket_notify(padapter);
+		if (!rtl8723a_BT_using_antenna_1(padapter))
+			LPS_Leave23a(padapter);
+		break;
+	case LPS_CTRL_LEAVE:
+		rtl8723a_BT_lps_leave(padapter);
+		if (!rtl8723a_BT_using_antenna_1(padapter))
+			LPS_Leave23a(padapter);
+		break;
 
-		default:
-			break;
+	default:
+		break;
 	}
 }
 
@@ -1147,7 +1149,7 @@ static void rtw_chk_hi_queue_hdl(struct rtw_adapter *padapter)
 
 		val = rtl8723a_chk_hi_queue_empty(padapter);
 
-		while (val == false) {
+		while (!val) {
 			msleep(100);
 
 			cnt++;
@@ -1305,8 +1307,7 @@ int rtw_drvextra_cmd_hdl23a(struct rtw_adapter *padapter, const u8 *pbuf)
 
 	pdrvextra_cmd = (struct drvextra_cmd_parm *)pbuf;
 
-	switch (pdrvextra_cmd->ec_id)
-	{
+	switch (pdrvextra_cmd->ec_id) {
 	case DYNAMIC_CHK_WK_CID:
 		dynamic_chk_wk_hdl(padapter, pdrvextra_cmd->pbuf,
 				   pdrvextra_cmd->type_size);

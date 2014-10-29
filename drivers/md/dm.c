@@ -140,7 +140,7 @@ struct mapped_device {
 	 * Use dm_get_live_table{_fast} or take suspend_lock for
 	 * dereference.
 	 */
-	struct dm_table *map;
+	struct dm_table __rcu *map;
 
 	struct list_head table_devices;
 	struct mutex table_devices_lock;
@@ -1607,9 +1607,9 @@ static int dm_merge_bvec(struct request_queue *q,
 	 * Find maximum amount of I/O that won't need splitting
 	 */
 	max_sectors = min(max_io_len(bvm->bi_sector, ti),
-			  (sector_t) BIO_MAX_SECTORS);
+			  (sector_t) queue_max_sectors(q));
 	max_size = (max_sectors << SECTOR_SHIFT) - bvm->bi_size;
-	if (max_size < 0)
+	if (unlikely(max_size < 0)) /* this shouldn't _ever_ happen */
 		max_size = 0;
 
 	/*
@@ -1621,10 +1621,10 @@ static int dm_merge_bvec(struct request_queue *q,
 		max_size = ti->type->merge(ti, bvm, biovec, max_size);
 	/*
 	 * If the target doesn't support merge method and some of the devices
-	 * provided their merge_bvec method (we know this by looking at
-	 * queue_max_hw_sectors), then we can't allow bios with multiple vector
-	 * entries.  So always set max_size to 0, and the code below allows
-	 * just one page.
+	 * provided their merge_bvec method (we know this by looking for the
+	 * max_hw_sectors that dm_set_device_limits may set), then we can't
+	 * allow bios with multiple vector entries.  So always set max_size
+	 * to 0, and the code below allows just one page.
 	 */
 	else if (queue_max_hw_sectors(q) <= PAGE_SIZE >> 9)
 		max_size = 0;
@@ -2332,7 +2332,7 @@ static struct dm_table *__bind(struct mapped_device *md, struct dm_table *t,
 
 	merge_is_optional = dm_table_merge_is_optional(t);
 
-	old_map = md->map;
+	old_map = rcu_dereference(md->map);
 	rcu_assign_pointer(md->map, t);
 	md->immutable_target_type = dm_table_get_immutable_target_type(t);
 
@@ -2351,7 +2351,7 @@ static struct dm_table *__bind(struct mapped_device *md, struct dm_table *t,
  */
 static struct dm_table *__unbind(struct mapped_device *md)
 {
-	struct dm_table *map = md->map;
+	struct dm_table *map = rcu_dereference(md->map);
 
 	if (!map)
 		return NULL;
@@ -2745,7 +2745,7 @@ int dm_suspend(struct mapped_device *md, unsigned suspend_flags)
 		goto out_unlock;
 	}
 
-	map = md->map;
+	map = rcu_dereference(md->map);
 
 	/*
 	 * DMF_NOFLUSH_SUSPENDING must be set before presuspend.
@@ -2839,7 +2839,7 @@ int dm_resume(struct mapped_device *md)
 	if (!dm_suspended_md(md))
 		goto out;
 
-	map = md->map;
+	map = rcu_dereference(md->map);
 	if (!map || !dm_table_get_size(map))
 		goto out;
 

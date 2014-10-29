@@ -1543,6 +1543,7 @@ F:	arch/arm/mach-pxa/include/mach/z2.h
 
 ARM/ZYNQ ARCHITECTURE
 M:	Michal Simek <michal.simek@xilinx.com>
+R:	Sören Brinkmann <soren.brinkmann@xilinx.com>
 L:	linux-arm-kernel@lists.infradead.org (moderated for non-subscribers)
 W:	http://wiki.xilinx.com
 T:	git git://git.xilinx.com/linux-xlnx.git
@@ -1785,10 +1786,11 @@ S:	Supported
 F:	drivers/scsi/esas2r
 
 AUDIT SUBSYSTEM
+M:	Paul Moore <paul@paul-moore.com>
 M:	Eric Paris <eparis@redhat.com>
-L:	linux-audit@redhat.com (subscribers-only)
+L:	linux-audit@redhat.com (moderated for non-subscribers)
 W:	http://people.redhat.com/sgrubb/audit/
-T:	git git://git.infradead.org/users/eparis/audit.git
+T:	git git://git.infradead.org/users/pcmoore/audit
 S:	Maintained
 F:	include/linux/audit.h
 F:	include/uapi/linux/audit.h
@@ -1889,13 +1891,6 @@ L:	linux-bcache@vger.kernel.org
 W:	http://bcache.evilpiepirate.org
 S:	Maintained:
 F:	drivers/md/bcache/
-
-BECEEM BCS200/BCS220-3/BCSM250 WIMAX SUPPORT
-M: Kevin McKinney <klmckinney1@gmail.com>
-M: Matthias Beyer <mail@beyermatthias.de>
-L: devel@driverdev.osuosl.org
-S: Maintained
-F: drivers/staging/bcm*
 
 BEFS FILE SYSTEM
 S:	Orphan
@@ -4608,7 +4603,7 @@ S:	Supported
 F:	drivers/crypto/nx/
 
 IBM Power 842 compression accelerator
-M:	Nathan Fontenot <nfont@linux.vnet.ibm.com>
+M:	Dan Streetman <ddstreet@us.ibm.com>
 S:	Supported
 F:	drivers/crypto/nx/nx-842.c
 F:	include/linux/nx842.h
@@ -4693,6 +4688,13 @@ S:	Maintained
 F:	net/ieee802154/
 F:	net/mac802154/
 F:	drivers/net/ieee802154/
+F:	include/linux/nl802154.h
+F:	include/linux/ieee802154.h
+F:	include/net/nl802154.h
+F:	include/net/mac802154.h
+F:	include/net/af_ieee802154.h
+F:	include/net/cfg802154.h
+F:	include/net/ieee802154_netdev.h
 F:	Documentation/networking/ieee802154.txt
 
 IGUANAWORKS USB IR TRANSCEIVER
@@ -7175,6 +7177,7 @@ F:	drivers/crypto/picoxcell*
 
 PIN CONTROL SUBSYSTEM
 M:	Linus Walleij <linus.walleij@linaro.org>
+L:	linux-gpio@vger.kernel.org
 S:	Maintained
 F:	drivers/pinctrl/
 F:	include/linux/pinctrl/
@@ -7183,7 +7186,7 @@ PIN CONTROLLER - ATMEL AT91
 M:	Jean-Christophe Plagniol-Villard <plagnioj@jcrosoft.com>
 L:	linux-arm-kernel@lists.infradead.org (moderated for non-subscribers)
 S:	Maintained
-F:	drivers/pinctrl/pinctrl-at91.c
+F:	drivers/pinctrl/pinctrl-at91.*
 
 PIN CONTROLLER - RENESAS
 M:	Laurent Pinchart <laurent.pinchart@ideasonboard.com>

@@ -629,8 +629,8 @@ int snd_soc_suspend(struct device *dev)
 					  SND_SOC_DAPM_STREAM_SUSPEND);
 	}
 
-	/* Recheck all analogue paths too */
-	dapm_mark_io_dirty(&card->dapm);
+	/* Recheck all endpoints too, their state is affected by suspend */
+	dapm_mark_endpoints_dirty(card);
 	snd_soc_dapm_sync(&card->dapm);
 
 	/* suspend all CODECs */
@@ -796,8 +796,8 @@ static void soc_resume_deferred(struct work_struct *work)
 	/* userspace can access us now we are back as we were before */
 	snd_power_change_state(card->snd_card, SNDRV_CTL_POWER_D0);
 
-	/* Recheck all analogue paths too */
-	dapm_mark_io_dirty(&card->dapm);
+	/* Recheck all endpoints too, their state is affected by suspend */
+	dapm_mark_endpoints_dirty(card);
 	snd_soc_dapm_sync(&card->dapm);
 }
 
@@ -2348,16 +2348,8 @@ int snd_soc_info_enum_double(struct snd_kcontrol *kcontrol,
 {
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
 
-	uinfo->type = SNDRV_CTL_ELEM_TYPE_ENUMERATED;
-	uinfo->count = e->shift_l == e->shift_r ? 1 : 2;
-	uinfo->value.enumerated.items = e->items;
-
-	if (uinfo->value.enumerated.item >= e->items)
-		uinfo->value.enumerated.item = e->items - 1;
-	strlcpy(uinfo->value.enumerated.name,
-		e->texts[uinfo->value.enumerated.item],
-		sizeof(uinfo->value.enumerated.name));
-	return 0;
+	return snd_ctl_enum_info(uinfo, e->shift_l == e->shift_r ? 1 : 2,
+				 e->items, e->texts);
 }
 EXPORT_SYMBOL_GPL(snd_soc_info_enum_double);
 
@@ -2727,93 +2719,6 @@ int snd_soc_put_volsw_sx(struct snd_kcontrol *kcontrol,
 	return err;
 }
 EXPORT_SYMBOL_GPL(snd_soc_put_volsw_sx);
-
-/**
- * snd_soc_info_volsw_s8 - signed mixer info callback
- * @kcontrol: mixer control
- * @uinfo: control element information
- *
- * Callback to provide information about a signed mixer control.
- *
- * Returns 0 for success.
- */
-int snd_soc_info_volsw_s8(struct snd_kcontrol *kcontrol,
-	struct snd_ctl_elem_info *uinfo)
-{
-	struct soc_mixer_control *mc =
-		(struct soc_mixer_control *)kcontrol->private_value;
-	int platform_max;
-	int min = mc->min;
-
-	if (!mc->platform_max)
-		mc->platform_max = mc->max;
-	platform_max = mc->platform_max;
-
-	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
-	uinfo->count = 2;
-	uinfo->value.integer.min = 0;
-	uinfo->value.integer.max = platform_max - min;
-	return 0;
-}
-EXPORT_SYMBOL_GPL(snd_soc_info_volsw_s8);
-
-/**
- * snd_soc_get_volsw_s8 - signed mixer get callback
- * @kcontrol: mixer control
- * @ucontrol: control element information
- *
- * Callback to get the value of a signed mixer control.
- *
- * Returns 0 for success.
- */
-int snd_soc_get_volsw_s8(struct snd_kcontrol *kcontrol,
-	struct snd_ctl_elem_value *ucontrol)
-{
-	struct soc_mixer_control *mc =
-		(struct soc_mixer_control *)kcontrol->private_value;
-	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
-	unsigned int reg = mc->reg;
-	unsigned int val;
-	int min = mc->min;
-	int ret;
-
-	ret = snd_soc_component_read(component, reg, &val);
-	if (ret)
-		return ret;
-
-	ucontrol->value.integer.value[0] =
-		((signed char)(val & 0xff))-min;
-	ucontrol->value.integer.value[1] =
-		((signed char)((val >> 8) & 0xff))-min;
-	return 0;
-}
-EXPORT_SYMBOL_GPL(snd_soc_get_volsw_s8);
-
-/**
- * snd_soc_put_volsw_sgn - signed mixer put callback
- * @kcontrol: mixer control
- * @ucontrol: control element information
- *
- * Callback to set the value of a signed mixer control.
- *
- * Returns 0 for success.
- */
-int snd_soc_put_volsw_s8(struct snd_kcontrol *kcontrol,
-	struct snd_ctl_elem_value *ucontrol)
-{
-	struct soc_mixer_control *mc =
-		(struct soc_mixer_control *)kcontrol->private_value;
-	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
-	unsigned int reg = mc->reg;
-	int min = mc->min;
-	unsigned int val;
-
-	val = (ucontrol->value.integer.value[0]+min) & 0xff;
-	val |= ((ucontrol->value.integer.value[1]+min) & 0xff) << 8;
-
-	return snd_soc_component_update_bits(component, reg, 0xffff, val);
-}
-EXPORT_SYMBOL_GPL(snd_soc_put_volsw_s8);
 
 /**
  * snd_soc_info_volsw_range - single mixer info callback with range.

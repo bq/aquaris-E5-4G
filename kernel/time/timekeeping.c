@@ -648,6 +648,31 @@ void ktime_get_ts64(struct timespec64 *ts)
 }
 EXPORT_SYMBOL_GPL(ktime_get_ts64);
 
+time64_t ktime_get_seconds(void)
+{
+	time64_t ts;
+	struct timekeeper *tk = &tk_core.timekeeper;
+	struct timespec64 tomono;
+	s32 nsec;
+	unsigned int seq;
+
+	WARN_ON(timekeeping_suspended);
+
+	do {
+		seq = read_seqcount_begin(&tk_core.seq);
+		ts = tk->xtime_sec;
+		nsec = (long)(tk->tkr.xtime_nsec >> tk->tkr.shift);
+		tomono = tk->wall_to_monotonic;
+
+	} while (read_seqcount_retry(&tk_core.seq, seq));
+
+	ts += tomono.tv_sec;
+	if (nsec + tomono.tv_nsec >= NSEC_PER_SEC)
+		ts += 1;
+	return ts;
+}
+EXPORT_SYMBOL_GPL(ktime_get_seconds);
+
 #ifdef CONFIG_NTP_PPS
 
 /**

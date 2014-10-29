@@ -358,7 +358,7 @@ device_receive_frame(
 		if ((*pbyRsr & RSR_CRCOK) != 0)
 			pDevice->byBasicMap |= 0x01;
 
-		dwDuration = (FrameSize << 4);
+		dwDuration = FrameSize << 4;
 		dwDuration /= acbyRxRate[*pbyRxRate%MAX_RATE];
 		if (*pbyRxRate <= RATE_11M) {
 			if (*pbyRxSts & 0x01) {
@@ -742,7 +742,8 @@ device_receive_frame(
 					}
 
 					ev.src_addr.sa_family = ARPHRD_ETHER;
-					memcpy(ev.src_addr.sa_data, pMACHeader->abyAddr2, ETH_ALEN);
+					ether_addr_copy(ev.src_addr.sa_data,
+							pMACHeader->abyAddr2);
 					memset(&wrqu, 0, sizeof(wrqu));
 					wrqu.data.length = sizeof(ev);
 					wireless_send_event(pDevice->dev, IWEVMICHAELMICFAILURE, &wrqu, (char *)&ev);

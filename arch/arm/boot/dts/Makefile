@@ -81,6 +81,7 @@ dtb-$(CONFIG_ARCH_EXYNOS) += exynos4210-origen.dtb \
 	exynos5250-arndale.dtb \
 	exynos5250-smdk5250.dtb \
 	exynos5250-snow.dtb \
+	exynos5250-spring.dtb \
 	exynos5260-xyref5260.dtb \
 	exynos5410-smdk5410.dtb \
 	exynos5420-arndale-octa.dtb \
@@ -376,25 +377,25 @@ dtb-$(CONFIG_ARCH_S5PV210) += s5pv210-aquila.dtb \
 	s5pv210-smdkc110.dtb \
 	s5pv210-smdkv210.dtb \
 	s5pv210-torbreck.dtb
-dtb-$(CONFIG_ARCH_SHMOBILE_LEGACY) += r7s72100-genmai.dtb \
+dtb-$(CONFIG_ARCH_SHMOBILE_LEGACY) += \
+	r8a73a4-ape6evm.dtb \
+	r8a73a4-ape6evm-reference.dtb \
 	r8a7740-armadillo800eva.dtb \
 	r8a7778-bockw.dtb \
 	r8a7778-bockw-reference.dtb \
 	r8a7779-marzen.dtb \
-	r8a7791-koelsch.dtb \
 	r8a7790-lager.dtb \
+	r8a7791-koelsch.dtb \
+	sh7372-mackerel.dtb \
 	sh73a0-kzm9g.dtb \
-	sh73a0-kzm9g-reference.dtb \
-	r8a73a4-ape6evm.dtb \
-	r8a73a4-ape6evm-reference.dtb \
-	sh7372-mackerel.dtb
+	sh73a0-kzm9g-reference.dtb
 dtb-$(CONFIG_ARCH_SHMOBILE_MULTI) += emev2-kzm9d.dtb \
 	r7s72100-genmai.dtb \
 	r8a7740-armadillo800eva.dtb \
+	r8a7779-marzen.dtb \
+	r8a7790-lager.dtb \
 	r8a7791-henninger.dtb \
 	r8a7791-koelsch.dtb \
-	r8a7790-lager.dtb \
-	r8a7779-marzen.dtb \
 	r8a7794-alt.dtb
 dtb-$(CONFIG_ARCH_SOCFPGA) += socfpga_arria5_socdk.dtb \
 	socfpga_cyclone5_socdk.dtb \
@@ -435,15 +436,20 @@ dtb-$(CONFIG_MACH_SUN6I) += \
 	sun6i-a31-hummingbird.dtb \
 	sun6i-a31-m9.dtb
 dtb-$(CONFIG_MACH_SUN7I) += \
+	sun7i-a20-bananapi.dtb \
 	sun7i-a20-cubieboard2.dtb \
 	sun7i-a20-cubietruck.dtb \
 	sun7i-a20-hummingbird.dtb \
 	sun7i-a20-i12-tvbox.dtb \
+	sun7i-a20-m3.dtb \
 	sun7i-a20-olinuxino-lime.dtb \
+	sun7i-a20-olinuxino-lime2.dtb \
 	sun7i-a20-olinuxino-micro.dtb \
 	sun7i-a20-pcduino3.dtb
 dtb-$(CONFIG_MACH_SUN8I) += \
 	sun8i-a23-ippo-q8h-v5.dtb
+dtb-$(CONFIG_MACH_SUN9I) += \
+	sun9i-a80-optimus.dtb
 dtb-$(CONFIG_ARCH_TEGRA) += tegra20-harmony.dtb \
 	tegra20-iris-512.dtb \
 	tegra20-medcom-wide.dtb \

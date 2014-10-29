@@ -80,6 +80,7 @@ struct reg_dmn_pair_mapping {
 
 struct ath_regulatory {
 	char alpha2[2];
+	enum nl80211_dfs_regions region;
 	u16 country_code;
 	u16 max_power_level;
 	u16 current_rd;
@@ -147,7 +148,7 @@ struct ath_common {
 	u16 cachelsz;
 	u16 curaid;
 	u8 macaddr[ETH_ALEN];
-	u8 curbssid[ETH_ALEN];
+	u8 curbssid[ETH_ALEN] __aligned(2);
 	u8 bssidmask[ETH_ALEN];
 
 	u32 rx_bufsize;

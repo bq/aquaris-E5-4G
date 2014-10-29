@@ -12,10 +12,6 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
- *
  * Written by:
  * Sergey Lapin <slapin@ossfans.org>
  * Dmitry Eremin-Solenikov <dbaryshkov@gmail.com>
@@ -26,6 +22,7 @@
 #include <linux/kernel.h>
 #include <linux/if_arp.h>
 #include <linux/netdevice.h>
+#include <linux/ieee802154.h>
 #include <net/netlink.h>
 #include <net/genetlink.h>
 #include <net/sock.h>
@@ -33,9 +30,8 @@
 #include <linux/export.h>
 #include <net/af_ieee802154.h>
 #include <net/nl802154.h>
-#include <net/ieee802154.h>
 #include <net/ieee802154_netdev.h>
-#include <net/wpan-phy.h>
+#include <net/cfg802154.h>
 
 #include "ieee802154.h"
 
