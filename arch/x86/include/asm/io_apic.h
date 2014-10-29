@@ -197,6 +197,7 @@ extern int mp_set_gsi_attr(u32 gsi, int trigger, int polarity, int node);
 extern void __init pre_init_apic_IRQ0(void);
 
 extern void mp_save_irq(struct mpc_intsrc *m);
+extern bool mp_should_keep_irq(struct device *dev);
 
 extern void disable_ioapic_support(void);
 
@@ -227,7 +228,7 @@ static inline void io_apic_modify(unsigned int apic, unsigned int reg, unsigned 
 
 extern void io_apic_eoi(unsigned int apic, unsigned int vector);
 
-#else  /* !CONFIG_X86_IO_APIC */
+#else	/* CONFIG_X86_IO_APIC */
 
 #define io_apic_assign_pci_irqs 0
 #define setup_ioapic_ids_from_mpc x86_init_noop
@@ -262,6 +263,6 @@ static inline void disable_ioapic_support(void) { }
 #define native_setup_ioapic_entry	NULL
 #define native_compose_msi_msg		NULL
 #define native_eoi_ioapic_pin		NULL
-#endif
+#endif	/* CONFIG_X86_IO_APIC */
 
 #endif /* _ASM_X86_IO_APIC_H */
