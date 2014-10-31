@@ -48,7 +48,10 @@
 #define AKM8963_VDD_MAX_UV	3300000
 #define AKM8963_VIO_MIN_UV	1750000
 #define AKM8963_VIO_MAX_UV	1950000
-#define STATUS_ERROR(st)	(((st)&0x08) != 0x0)
+#define STATUS_ERROR(st)	(((st) & (AKM8963_ST1_DRDY | \
+				AKM8963_ST1_DOR  | \
+				AKM8963_ST2_HOLF)) \
+				!= AKM8963_ST1_DRDY)
 #define REG_CNTL1_MODE(reg_cntl1)	(reg_cntl1 & 0x0F)
 
 /* Save last device state for power down */
@@ -117,7 +120,7 @@ static struct sensors_classdev sensors_cdev = {
 	.fifo_reserved_event_count = 0,
 	.fifo_max_event_count = 0,
 	.enabled = 0,
-	.delay_msec = 10,
+	.delay_msec = 10000,
 	.sensors_enable = NULL,
 	.sensors_poll_delay = NULL,
 };
@@ -1242,23 +1245,8 @@ static struct device_attribute akm_compass_attributes[] = {
 	__ATTR_NULL,
 };
 
-#define __BIN_ATTR(name_, mode_, size_, private_, read_, write_) \
-	{ \
-		.attr    = { .name = __stringify(name_), .mode = mode_ }, \
-		.size    = size_, \
-		.private = private_, \
-		.read    = read_, \
-		.write   = write_, \
-	}
-
-#define __BIN_ATTR_NULL \
-	{ \
-		.attr   = { .name = NULL }, \
-	}
-
 static struct bin_attribute akm_compass_bin_attributes[] = {
-	__BIN_ATTR(accel, 0220, 6, NULL,
-				NULL, akm_bin_accel_write),
+	__BIN_ATTR(accel, 0220, NULL, akm_bin_accel_write, 6),
 	__BIN_ATTR_NULL
 };
 
@@ -1750,7 +1738,7 @@ static void akm_dev_poll(struct work_struct *work)
 		goto exit;
 	}
 
-	tmp = 0xF & (dat_buf[7] + dat_buf[0]);
+	tmp = 0xFF & (dat_buf[7] + dat_buf[0]);
 	if (STATUS_ERROR(tmp)) {
 		dev_warn(&akm->i2c->dev, "Status error(0x%x). Reset...\n",
 				tmp);

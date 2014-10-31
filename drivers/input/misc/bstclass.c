@@ -80,7 +80,7 @@ static struct device_type bst_dev_type = {
 
 
 
-static char *bst_devnode(struct device *dev, umode_t *mode)
+static char *bst_devnode(struct device *dev, mode_t *mode)
 {
 	return kasprintf(GFP_KERNEL, "%s", dev_name(dev));
 }
@@ -171,7 +171,7 @@ int bst_register_device(struct bst_dev *dev)
 		return error;
 
 	path = kobject_get_path(&dev->dev.kobj, GFP_KERNEL);
-	dev_dbg(&dev->dev, "%s as %s\n",
+	printk(KERN_INFO "%s as %s\n",
 			dev->name ? dev->name : "Unspecified device",
 			path ? path : "N/A");
 	kfree(path);
@@ -197,12 +197,9 @@ EXPORT_SYMBOL(bst_register_device);
  */
 void bst_unregister_device(struct bst_dev *dev)
 {
-	int error;
-
-	error = mutex_lock_interruptible(&bst_mutex);
+	mutex_lock_interruptible(&bst_mutex);
 	list_del_init(&dev->node);
-	if (!error)
-		mutex_unlock(&bst_mutex);
+	mutex_unlock(&bst_mutex);
 	device_unregister(&dev->dev);
 }
 EXPORT_SYMBOL(bst_unregister_device);

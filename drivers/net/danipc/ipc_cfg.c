@@ -30,18 +30,22 @@
 #include "ipc_cfg.h"
 #include "danipc_lowlevel.h"
 
+/* -----------------------------------------------------------
+ * MACRO (define) section
+ * -----------------------------------------------------------
+ */
 
 /* -----------------------------------------------------------
  * Type definition section
  * -----------------------------------------------------------
  */
 /* Entry of Route-How table providing information how
- * information passes when Source and Destination Nodes are known.
+ * information is to pass when Source and destination Node location are known
  */
-struct ipc_route {
-	uint8_t src_node;
-	uint8_t dst_node;
-	struct ipc_trns_func const *trns_funs;
+struct IPC_route_how {
+	uint8_t srcNodeLoc;
+	uint8_t destNodeLoc;
+	struct IPC_transport_func const *utilVectorPtr;
 };
 
 
@@ -50,41 +54,41 @@ struct ipc_route {
  * -----------------------------------------------------------
  */
 
-const struct ipc_trns_func ipc_fifo_utils = {
-	ipc_trns_fifo_buf_alloc,
-	ipc_trns_fifo_buf_free,
-	ipc_trns_fifo_buf_send
+const struct IPC_transport_func IPC_fifo_utils = {
+	IPC_trns_fifo_buffer_alloc,
+	IPC_trns_fifo_buffer_free,
+	IPC_trns_fifo_buf_send
 };
 
-static const struct ipc_trns_func ipc_fifo2eth_utils = {
-	ipc_trns_fifo2eth_buf_alloc,
-	ipc_trns_fifo2eth_buf_free,
-	ipc_trns_fifo2eth_buf_send
+static const struct IPC_transport_func IPC_fifo2eth_utils = {
+	IPC_trns_fifo2eth_buffer_alloc,
+	IPC_trns_fifo2eth_buffer_free,
+	IPC_trns_fifo2eth_buffer_send
 };
 
-static const struct ipc_trns_func ipc_proxy2eth_utils = {
+static const struct IPC_transport_func IPC_proxy2eth_utils = {
 	NULL,
 	NULL,
 	NULL,
 };
 
-static const struct ipc_route ipc_routes[] = {
-	{dan3400_e,		dan3400_e,	&ipc_fifo_utils},
-	{dan3400_e,		ext_eth_e,	&ipc_fifo2eth_utils},
-	{dan3400_eth_e,		ext_eth_e,	&ipc_proxy2eth_utils}
+static const struct IPC_route_how routeHow[] = {
+	{dan3400_e,		dan3400_e,	&IPC_fifo_utils},
+	{dan3400_e,		extEth_e,	&IPC_fifo2eth_utils},
+	{dan3400_eth_e,	extEth_e,	&IPC_proxy2eth_utils}
 };
 
 /* The static constant table contains information about the location
  * of each node.
  */
-static const enum ipc_node_type node_type[PLATFORM_MAX_NUM_OF_NODES] = {
+static const enum IPC_node_type nodeAllocation[PLATFORM_MAX_NUM_OF_NODES] = {
 		dan3400_e,		/* Node #0 */
 		dan3400_e,		/* Node #1 */
 		dan3400_e,		/* Node #2 */
 		dan3400_e,		/* Node #3 */
-		ext_eth_e,		/* Node #4 */
-		ext_fser_e,		/* Node #5 */
-		ext_uart_e,		/* Node #6 */
+		extEth_e,		/* Node #4 */
+		extFser_e,		/* Node #5 */
+		extUart_e,		/* Node #6 */
 		undef_e,		/* Node #7 */
 		dan3400_e,		/* Node #8 */
 		dan3400_e,		/* Node #9 */
@@ -97,10 +101,15 @@ static const enum ipc_node_type node_type[PLATFORM_MAX_NUM_OF_NODES] = {
 };
 
 
-/* Routing table is maintained globaly per 'board' */
-static struct ipc_trns_func const *ipc_routing[PLATFORM_MAX_NUM_OF_NODES];
 
-struct agent_entry __iomem	*agent_table;
+
+static const uint8_t numOfRouteHows = sizeof(routeHow) /
+						sizeof(struct IPC_route_how);
+
+/* Routing table is maintained globaly per 'board' */
+static struct IPC_transport_func const *IPC_routing[PLATFORM_MAX_NUM_OF_NODES];
+
+struct agentNameEntry __iomem	*agentTable;
 
 
 /* -----------------------------------------------------------
@@ -109,7 +118,7 @@ struct agent_entry __iomem	*agent_table;
  */
 
 /* ===========================================================================
- * ipc_get_own_node
+ * IPC_getOwnNode
  * ===========================================================================
  * Description:  Get Node ID for current node
  *
@@ -118,14 +127,14 @@ struct agent_entry __iomem	*agent_table;
  * Returns: IPC node ID (0:31)
  *
  */
-uint8_t ipc_get_own_node(void)
+uint8_t IPC_getOwnNode(void)
 {
-	return LOCAL_IPC_ID;
+	return PLATFORM_my_ipc_id;
 }
 
 
 /* ===========================================================================
- * ipc_cfg_get_util_vec
+ * IPC_cfg_get_util_vec
  * ===========================================================================
  * Description:	Fetch the node util function vector
  *
@@ -135,27 +144,60 @@ uint8_t ipc_get_own_node(void)
  * Returns: Location Type
  *
  */
-static struct ipc_trns_func const *ipc_cfg_get_util_vec(uint8_t srcNode,
+static struct IPC_transport_func const *IPC_cfg_get_util_vec(uint8_t srcNode,
 							 uint8_t destNode)
 {
-	unsigned i;
+	int i;
 
-	for (i = 0; i < ARRAY_SIZE(ipc_routes); i++) {
-		if ((ipc_routes[i].src_node == node_type[srcNode]) &&
-			(ipc_routes[i].dst_node == node_type[destNode]))
-			return ipc_routes[i].trns_funs;
+	for (i = 0; i < numOfRouteHows; i++) {
+		if ((routeHow[i].srcNodeLoc == nodeAllocation[srcNode]) &&
+			(routeHow[i].destNodeLoc == nodeAllocation[destNode]))
+			return routeHow[i].utilVectorPtr;
 	}
 
 	return NULL;
 }
 
-
-void ipc_agent_table_clean(void)
+/* ===========================================================================
+ * IPC_setAgentName
+ * ===========================================================================
+ * Description:	Set agent name in Agent Table
+ *
+ * Parameters:		name		- Agent Name
+ *			inx		- Index in table
+ *
+ * Returns: n/a
+ *
+ */
+void IPC_setAgentName(const char *name, uint8_t inx)
 {
-	int		len = (sizeof(struct agent_entry) * MAX_LOCAL_AGENT)
+	if (name) {
+		const uint32_t	len = strlen(name);
+		if (len < MAX_AGENT_NAME_LEN)
+			strlcpy(agentTable[inx].agentName, name,
+					sizeof(agentTable[0].agentName));
+		else
+			pr_err("%s: agent name is too long: %u bytes\n",
+				__func__, len);
+	}
+}
+
+/* ===========================================================================
+ * IPC_agent_table_clean
+ * ===========================================================================
+ * Description:  Clear agent table, no registered agents on this stage
+ *
+ * Parameters:   inx  - Index in table
+ *
+ * Returns: name
+ *
+ */
+void IPC_agent_table_clean(void)
+{
+	int		len = (sizeof(struct agentNameEntry) * MAX_LOCAL_AGENT)
 					/ sizeof(uint32_t);
-	const unsigned	aid = __IPC_AGENT_ID(LOCAL_IPC_ID, 0);
-	uint32_t	*p = (uint32_t *)&agent_table[aid];
+	const unsigned	aid = __IPC_AGENT_ID(PLATFORM_my_ipc_id, 0);
+	uint32_t	*p = (uint32_t *)&agentTable[aid];
 
 	/* Clean only my part of the global table. This is necessary so I may
 	 * register agents but do not hurt other cores.
@@ -169,7 +211,7 @@ void ipc_agent_table_clean(void)
 }
 
 /* ===========================================================================
- * ipc_trns_func
+ * getUtilFuncVector
  * ===========================================================================
  * Description:	Fetch the utility function's vector from the IPC
  *		routing table.
@@ -179,14 +221,14 @@ void ipc_agent_table_clean(void)
  * Returns: Pointer to function's pointers structure
  *
  */
-struct ipc_trns_func const *get_trns_funcs(uint8_t cpuid)
+struct IPC_transport_func const *IPC_getUtilFuncVector(uint8_t nodeId)
 {
-	return (cpuid < PLATFORM_MAX_NUM_OF_NODES) ?
-						ipc_routing[cpuid] : NULL;
+	return (nodeId < PLATFORM_MAX_NUM_OF_NODES) ?
+						IPC_routing[nodeId] : NULL;
 }
 
 /* ===========================================================================
- * ipc_route_table_init
+ * IPC_routeTableInit
  * ===========================================================================
  * Description:  Initialize routing table .
  *
@@ -201,17 +243,17 @@ struct ipc_trns_func const *get_trns_funcs(uint8_t cpuid)
  *   This is just a preliminary implementation. Need to decide how each CPU
  *   maintains the correct routing table
  */
-void ipc_route_table_init(struct ipc_trns_func const *def_trns_funcs)
+void IPC_routeTableInit(struct IPC_transport_func const *defTranVecPtr)
 {
-	unsigned i;
+	int i;
 
 	/* For every potential destination fill the associated function
 	 * vector or set to the node default transport functions
 	 */
 	for (i = 0; i < PLATFORM_MAX_NUM_OF_NODES; i++) {
-		ipc_routing[i] = (struct ipc_trns_func *)
-				ipc_cfg_get_util_vec(ipc_own_node, i);
-		if (ipc_routing[i] == NULL)
-			ipc_routing[i] = def_trns_funcs;
+		IPC_routing[i] = (struct IPC_transport_func *)
+				IPC_cfg_get_util_vec(IPC_OwnNode, i);
+		if (IPC_routing[i] == NULL)
+			IPC_routing[i] = defTranVecPtr;
 	}
 }

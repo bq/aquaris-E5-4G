@@ -30,9 +30,9 @@
 #include <linux/platform_device.h>
 #include <linux/interrupt.h>
 #include <linux/ioctl.h>
-#include <net/arp.h>
 
 #include "danipc_k.h"
+#include <linux/danipc_ioctl.h>
 #include "ipc_api.h"
 #include "danipc_lowlevel.h"
 
@@ -80,6 +80,7 @@ static int danipc_open(struct net_device *dev)
 	return rc;
 }
 
+
 static int danipc_close(struct net_device *dev)
 {
 	struct danipc_priv	*priv = netdev_priv(dev);
@@ -92,38 +93,30 @@ static int danipc_close(struct net_device *dev)
 	return 0;
 }
 
-static int danipc_set_mac_addr(struct net_device *dev, void *p)
-{
-	struct sockaddr *addr = p;
-
-	if (!(dev->priv_flags & IFF_LIVE_ADDR_CHANGE) && netif_running(dev))
-		return -EBUSY;
-
-	memcpy(dev->dev_addr, addr->sa_data, dev->addr_len);
-	return 0;
-}
 
 static const struct net_device_ops danipc_netdev_ops = {
 	.ndo_open		= danipc_open,
 	.ndo_stop		= danipc_close,
 	.ndo_start_xmit		= danipc_hard_start_xmit,
 	.ndo_do_ioctl		= danipc_ioctl,
-	.ndo_change_mtu		= danipc_change_mtu,
-	.ndo_set_mac_address	= danipc_set_mac_addr,
+	.ndo_change_mtu		= eth_change_mtu,
+	.ndo_validate_addr	= eth_validate_addr,
+	.ndo_set_mac_address	= eth_mac_addr,
 };
 
-static void danipc_setup(struct net_device *dev)
+
+static void __init
+danipc_set_dev_addr(uint8_t *dev_addr)
 {
-	dev->netdev_ops         = &danipc_netdev_ops;
-
-	dev->type		= ARPHRD_VOID;
-	dev->hard_header_len    = sizeof(struct ipc_msg_hdr);
-	dev->addr_len           = sizeof(danipc_addr_t);
-	dev->tx_queue_len       = 1000;
-
-	/* New-style flags. */
-	dev->flags              = IFF_NOARP;
+	/* DAN's OUI: 0x002486 */
+	dev_addr[0] = 0x00;
+	dev_addr[1] = 0x24;
+	dev_addr[2] = 0x86;
+	dev_addr[3] = 0x00;
+	dev_addr[4] = 0x00;
+	dev_addr[5] = 0x00;
 }
+
 
 static void __init
 danipc_dev_priv_init(struct net_device *dev)
@@ -200,22 +193,12 @@ static int parse_resources(struct platform_device *pdev,
 	const char		*resource[RESOURCE_NUM] = {
 		"ipc_bufs", "agent_table", "krait_ipc_intr_en"
 	};
-	const char		*shm_sizes[PLATFORM_MAX_NUM_OF_NODES] = {
-		"qcom,cpu0-shm-size", "qcom,cpu1-shm-size",
-		"qcom,cpu2-shm-size", "qcom,cpu3-shm-size",
-		"qcom,dsp0-shm-size", "qcom,dsp1-shm-size",
-		"qcom,dsp2-shm-size", NULL, "qcom,krait-shm-size",
-		"qcom,qdsp6-0-shm-size", "qcom,qdsp6-1-shm-size",
-		"qcom,qdsp6-2-shm-size", "qcom,qdsp6-3-shm-size",
-		NULL, NULL, NULL
-	};
 	struct device_node	*node = pdev->dev.of_node;
 	bool			parse_err = false;
 	int			rc = -ENODEV;
 
 	if (node) {
 		struct resource	*res;
-		int		shm_size;
 		int		r;
 		priv->irq = irq_of_parse_and_map(node, 0);
 		if (!priv->irq || priv->irq == NO_IRQ) {
@@ -243,19 +226,12 @@ static int parse_resources(struct platform_device *pdev,
 								IORESOURCE_MEM,
 								regs[r]);
 			if (res) {
-				ipc_regs_phys[r] = res->start;
-				ipc_regs_len[r] = resource_size(res);
+				IPC_array_hw_access_phys[r] = res->start;
+				IPC_hw_access_phys_len[r] = resource_size(res);
 			} else {
 				pr_err("cannot get resource %s\n", regs[r]);
 				parse_err = true;
 			}
-
-			if (of_property_read_u32((&pdev->dev)->of_node,
-					shm_sizes[r],
-					&shm_size))
-				ipc_shared_mem_sizes[r] = 0;
-			else
-				ipc_shared_mem_sizes[r] = shm_size;
 		}
 
 		rc = (!parse_err) ? 0 : -ENOMEM;
@@ -266,14 +242,15 @@ static int parse_resources(struct platform_device *pdev,
 
 static int danipc_probe(struct platform_device *pdev)
 {
-	struct net_device	*dev = alloc_netdev(sizeof(struct danipc_priv),
-					 "danipc", danipc_setup);
+	struct net_device	*dev = alloc_etherdev(
+						sizeof(struct danipc_priv));
 	int			rc;
 
 	if (dev) {
 		struct danipc_priv *priv = netdev_priv(dev);
 		danipc_dev = dev;
 		strlcpy(dev->name, "danipc", sizeof(dev->name));
+		dev->netdev_ops		= &danipc_netdev_ops;
 		dev->header_ops		= &danipc_header_ops;
 
 		rc = parse_resources(pdev, priv);
@@ -281,7 +258,7 @@ static int danipc_probe(struct platform_device *pdev)
 			rc = danipc_ll_init(priv);
 			if (rc == 0) {
 				dev->irq = priv->irq;
-				dev->dev_addr[0] = LOCAL_IPC_ID;
+				danipc_set_dev_addr(dev->dev_addr);
 
 				rc = register_netdev(dev);
 				if (rc == 0) {

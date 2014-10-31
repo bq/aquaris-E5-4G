@@ -78,7 +78,8 @@ ENTRY(efi_stub_entry)
 
 	/* Turn off Dcache and MMU */
 	mrs	x0, CurrentEL
-	cmp	x0, #CurrentEL_EL2
+	cmp	x0, #PSR_MODE_EL2t
+	ccmp	x0, #PSR_MODE_EL2h, #0x4, ne
 	b.ne	1f
 	mrs	x0, sctlr_el2
 	bic	x0, x0, #1 << 0	// clear SCTLR.M

@@ -73,19 +73,19 @@ struct rmidev_data {
 };
 
 static struct device_attribute attrs[] = {
-	__ATTR(open, S_IWUSR | S_IWGRP,
-			NULL,
+	__ATTR(open, S_IWUGO,
+			synaptics_rmi4_show_error,
 			rmidev_sysfs_open_store),
-	__ATTR(release, S_IWUSR | S_IWGRP,
-			NULL,
+	__ATTR(release, S_IWUGO,
+			synaptics_rmi4_show_error,
 			rmidev_sysfs_release_store),
-	__ATTR(address, S_IWUSR | S_IWGRP,
-			NULL,
+	__ATTR(address, S_IWUGO,
+			synaptics_rmi4_show_error,
 			rmidev_sysfs_address_store),
-	__ATTR(length, S_IWUSR | S_IWGRP,
-			NULL,
+	__ATTR(length, S_IWUGO,
+			synaptics_rmi4_show_error,
 			rmidev_sysfs_length_store),
-	__ATTR(data, (S_IWUSR | S_IWGRP),
+	__ATTR(data, (S_IRUGO | S_IWUGO),
 			rmidev_sysfs_data_show,
 			rmidev_sysfs_data_store),
 };
@@ -461,7 +461,7 @@ static void rmidev_device_cleanup(struct rmidev_data *dev_data)
 	return;
 }
 
-static char *rmi_char_devnode(struct device *dev, umode_t *mode)
+static char *rmi_char_devnode(struct device *dev, mode_t *mode)
 {
 	if (!mode)
 		return NULL;
@@ -504,7 +504,7 @@ static int rmidev_init_device(struct synaptics_rmi4_data *rmi4_data)
 	}
 
 	rmidev->fn_ptr =  kzalloc(sizeof(*(rmidev->fn_ptr)), GFP_KERNEL);
-	if (!rmidev->fn_ptr) {
+	if (!rmidev) {
 		dev_err(&rmi4_data->i2c_client->dev,
 				"%s: Failed to alloc mem for fn_ptr\n",
 				__func__);
@@ -619,8 +619,6 @@ static int rmidev_init_device(struct synaptics_rmi4_data *rmi4_data)
 		}
 	}
 
-	init_completion(&remove_complete);
-
 	return 0;
 
 err_sysfs_attrs:
@@ -708,4 +706,5 @@ module_exit(rmidev_module_exit);
 
 MODULE_AUTHOR("Synaptics, Inc.");
 MODULE_DESCRIPTION("RMI4 RMI_Dev Module");
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");
+MODULE_VERSION(SYNAPTICS_RMI4_DRIVER_VERSION);

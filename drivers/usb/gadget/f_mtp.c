@@ -50,7 +50,7 @@
 #define STATE_ERROR                 4   /* error from completion routine */
 
 /* number of tx and rx requests to allocate */
-#define MTP_TX_REQ_MAX 8
+#define TX_REQ_MAX 4
 #define RX_REQ_MAX 2
 #define INTR_REQ_MAX 5
 
@@ -66,15 +66,6 @@
 /* constants for device status */
 #define MTP_RESPONSE_OK             0x2001
 #define MTP_RESPONSE_DEVICE_BUSY    0x2019
-
-unsigned int mtp_rx_req_len = MTP_BULK_BUFFER_SIZE;
-module_param(mtp_rx_req_len, uint, S_IRUGO | S_IWUSR);
-
-unsigned int mtp_tx_req_len = MTP_BULK_BUFFER_SIZE;
-module_param(mtp_tx_req_len, uint, S_IRUGO | S_IWUSR);
-
-unsigned int mtp_tx_reqs = MTP_TX_REQ_MAX;
-module_param(mtp_tx_reqs, uint, S_IRUGO | S_IWUSR);
 
 static const char mtp_shortname[] = "mtp_usb";
 
@@ -138,40 +129,6 @@ static struct usb_interface_descriptor ptp_interface_desc = {
 	.bInterfaceProtocol     = 1,
 };
 
-static struct usb_endpoint_descriptor mtp_superspeed_in_desc = {
-	.bLength                = USB_DT_ENDPOINT_SIZE,
-	.bDescriptorType        = USB_DT_ENDPOINT,
-	.bEndpointAddress       = USB_DIR_IN,
-	.bmAttributes           = USB_ENDPOINT_XFER_BULK,
-	.wMaxPacketSize         = __constant_cpu_to_le16(1024),
-};
-
-static struct usb_ss_ep_comp_descriptor mtp_superspeed_in_comp_desc = {
-	.bLength =		sizeof mtp_superspeed_in_comp_desc,
-	.bDescriptorType =	USB_DT_SS_ENDPOINT_COMP,
-
-	/* the following 2 values can be tweaked if necessary */
-	.bMaxBurst =		2,
-	/* .bmAttributes =	0, */
-};
-
-static struct usb_endpoint_descriptor mtp_superspeed_out_desc = {
-	.bLength                = USB_DT_ENDPOINT_SIZE,
-	.bDescriptorType        = USB_DT_ENDPOINT,
-	.bEndpointAddress       = USB_DIR_OUT,
-	.bmAttributes           = USB_ENDPOINT_XFER_BULK,
-	.wMaxPacketSize         = __constant_cpu_to_le16(1024),
-};
-
-static struct usb_ss_ep_comp_descriptor mtp_superspeed_out_comp_desc = {
-	.bLength =		sizeof mtp_superspeed_out_comp_desc,
-	.bDescriptorType =	USB_DT_SS_ENDPOINT_COMP,
-
-	/* the following 2 values can be tweaked if necessary */
-	 .bMaxBurst =		2,
-	/* .bmAttributes =	0, */
-};
-
 static struct usb_endpoint_descriptor mtp_highspeed_in_desc = {
 	.bLength                = USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType        = USB_DT_ENDPOINT,
@@ -211,16 +168,6 @@ static struct usb_endpoint_descriptor mtp_intr_desc = {
 	.bInterval              = 6,
 };
 
-static struct usb_ss_ep_comp_descriptor mtp_superspeed_intr_comp_desc = {
-	.bLength =		sizeof mtp_superspeed_intr_comp_desc,
-	.bDescriptorType =	USB_DT_SS_ENDPOINT_COMP,
-
-	/* the following 3 values can be tweaked if necessary */
-	/* .bMaxBurst =		0, */
-	/* .bmAttributes =	0, */
-	.wBytesPerInterval =	cpu_to_le16(INTR_BUFFER_SIZE),
-};
-
 static struct usb_descriptor_header *fs_mtp_descs[] = {
 	(struct usb_descriptor_header *) &mtp_interface_desc,
 	(struct usb_descriptor_header *) &mtp_fullspeed_in_desc,
@@ -237,17 +184,6 @@ static struct usb_descriptor_header *hs_mtp_descs[] = {
 	NULL,
 };
 
-static struct usb_descriptor_header *ss_mtp_descs[] = {
-	(struct usb_descriptor_header *) &mtp_interface_desc,
-	(struct usb_descriptor_header *) &mtp_superspeed_in_desc,
-	(struct usb_descriptor_header *) &mtp_superspeed_in_comp_desc,
-	(struct usb_descriptor_header *) &mtp_superspeed_out_desc,
-	(struct usb_descriptor_header *) &mtp_superspeed_out_comp_desc,
-	(struct usb_descriptor_header *) &mtp_intr_desc,
-	(struct usb_descriptor_header *) &mtp_superspeed_intr_comp_desc,
-	NULL,
-};
-
 static struct usb_descriptor_header *fs_ptp_descs[] = {
 	(struct usb_descriptor_header *) &ptp_interface_desc,
 	(struct usb_descriptor_header *) &mtp_fullspeed_in_desc,
@@ -261,17 +197,6 @@ static struct usb_descriptor_header *hs_ptp_descs[] = {
 	(struct usb_descriptor_header *) &mtp_highspeed_in_desc,
 	(struct usb_descriptor_header *) &mtp_highspeed_out_desc,
 	(struct usb_descriptor_header *) &mtp_intr_desc,
-	NULL,
-};
-
-static struct usb_descriptor_header *ss_ptp_descs[] = {
-	(struct usb_descriptor_header *) &ptp_interface_desc,
-	(struct usb_descriptor_header *) &mtp_superspeed_in_desc,
-	(struct usb_descriptor_header *) &mtp_superspeed_in_comp_desc,
-	(struct usb_descriptor_header *) &mtp_superspeed_out_desc,
-	(struct usb_descriptor_header *) &mtp_superspeed_out_comp_desc,
-	(struct usb_descriptor_header *) &mtp_intr_desc,
-	(struct usb_descriptor_header *) &mtp_superspeed_intr_comp_desc,
 	NULL,
 };
 
@@ -342,17 +267,6 @@ struct {
 struct mtp_device_status {
 	__le16	wLength;
 	__le16	wCode;
-};
-
-struct mtp_data_header {
-	/* length of packet, including this header */
-	__le32	length;
-	/* container type (2 for data packet) */
-	__le16	type;
-	/* MTP command code */
-	__le16	command;
-	/* MTP transaction ID */
-	__le32	transaction_id;
 };
 
 /* temporary variable used between mtp_open() and mtp_gadget_bind() */
@@ -496,6 +410,15 @@ static int mtp_create_bulk_endpoints(struct mtp_dev *dev,
 	ep->driver_data = dev;		/* claim the endpoint */
 	dev->ep_out = ep;
 
+	ep = usb_ep_autoconfig(cdev->gadget, out_desc);
+	if (!ep) {
+		DBG(cdev, "usb_ep_autoconfig for ep_out failed\n");
+		return -ENODEV;
+	}
+	DBG(cdev, "usb_ep_autoconfig for mtp ep_out got %s\n", ep->name);
+	ep->driver_data = dev;		/* claim the endpoint */
+	dev->ep_out = ep;
+
 	ep = usb_ep_autoconfig(cdev->gadget, intr_desc);
 	if (!ep) {
 		DBG(cdev, "usb_ep_autoconfig for ep_intr failed\n");
@@ -505,46 +428,18 @@ static int mtp_create_bulk_endpoints(struct mtp_dev *dev,
 	ep->driver_data = dev;		/* claim the endpoint */
 	dev->ep_intr = ep;
 
-retry_tx_alloc:
-	if (mtp_tx_req_len > MTP_BULK_BUFFER_SIZE)
-		mtp_tx_reqs = 4;
-
 	/* now allocate requests for our endpoints */
-	for (i = 0; i < mtp_tx_reqs; i++) {
-		req = mtp_request_new(dev->ep_in, mtp_tx_req_len);
-		if (!req) {
-			if (mtp_tx_req_len <= MTP_BULK_BUFFER_SIZE)
-				goto fail;
-			while ((req = mtp_req_get(dev, &dev->tx_idle)))
-				mtp_request_free(req, dev->ep_in);
-			mtp_tx_req_len = MTP_BULK_BUFFER_SIZE;
-			mtp_tx_reqs = MTP_TX_REQ_MAX;
-			goto retry_tx_alloc;
-		}
+	for (i = 0; i < TX_REQ_MAX; i++) {
+		req = mtp_request_new(dev->ep_in, MTP_BULK_BUFFER_SIZE);
+		if (!req)
+			goto fail;
 		req->complete = mtp_complete_in;
 		mtp_req_put(dev, &dev->tx_idle, req);
 	}
-
-	/*
-	 * The RX buffer should be aligned to EP max packet for
-	 * some controllers.  At bind time, we don't know the
-	 * operational speed.  Hence assuming super speed max
-	 * packet size.
-	 */
-	if (mtp_rx_req_len % 1024)
-		mtp_rx_req_len = MTP_BULK_BUFFER_SIZE;
-
-retry_rx_alloc:
 	for (i = 0; i < RX_REQ_MAX; i++) {
-		req = mtp_request_new(dev->ep_out, mtp_rx_req_len);
-		if (!req) {
-			if (mtp_rx_req_len <= MTP_BULK_BUFFER_SIZE)
-				goto fail;
-			for (--i; i >= 0; i--)
-				mtp_request_free(dev->rx_req[i], dev->ep_out);
-			mtp_rx_req_len = MTP_BULK_BUFFER_SIZE;
-			goto retry_rx_alloc;
-		}
+		req = mtp_request_new(dev->ep_out, MTP_BULK_BUFFER_SIZE);
+		if (!req)
+			goto fail;
 		req->complete = mtp_complete_out;
 		dev->rx_req[i] = req;
 	}
@@ -569,16 +464,12 @@ static ssize_t mtp_read(struct file *fp, char __user *buf,
 	struct mtp_dev *dev = fp->private_data;
 	struct usb_composite_dev *cdev = dev->cdev;
 	struct usb_request *req;
-	ssize_t r = count;
-	unsigned xfer;
-	int len;
+	int r = count, xfer;
 	int ret = 0;
 
-	DBG(cdev, "mtp_read(%zu)\n", count);
+	DBG(cdev, "mtp_read(%d)\n", count);
 
-	len = ALIGN(count, dev->ep_out->maxpacket);
-
-	if (len > mtp_rx_req_len)
+	if (count > MTP_BULK_BUFFER_SIZE)
 		return -EINVAL;
 
 	/* we will block until we're online */
@@ -602,7 +493,7 @@ static ssize_t mtp_read(struct file *fp, char __user *buf,
 requeue_req:
 	/* queue a request */
 	req = dev->rx_req[0];
-	req->length = len;
+	req->length = count;
 	dev->rx_done = 0;
 	ret = usb_ep_queue(dev->ep_out, req, GFP_KERNEL);
 	if (ret < 0) {
@@ -613,17 +504,7 @@ requeue_req:
 	}
 
 	/* wait for a request to complete */
-	ret = wait_event_interruptible(dev->read_wq,
-				dev->rx_done || dev->state != STATE_BUSY);
-	if (dev->state == STATE_CANCELED) {
-		r = -ECANCELED;
-		if (!dev->rx_done)
-			usb_ep_dequeue(dev->ep_out, req);
-		spin_lock_irq(&dev->lock);
-		dev->state = STATE_CANCELED;
-		spin_unlock_irq(&dev->lock);
-		goto done;
-	}
+	ret = wait_event_interruptible(dev->read_wq, dev->rx_done);
 	if (ret < 0) {
 		r = ret;
 		usb_ep_dequeue(dev->ep_out, req);
@@ -650,7 +531,7 @@ done:
 		dev->state = STATE_READY;
 	spin_unlock_irq(&dev->lock);
 
-	DBG(cdev, "mtp_read returning %zd\n", r);
+	DBG(cdev, "mtp_read returning %d\n", r);
 	return r;
 }
 
@@ -660,12 +541,11 @@ static ssize_t mtp_write(struct file *fp, const char __user *buf,
 	struct mtp_dev *dev = fp->private_data;
 	struct usb_composite_dev *cdev = dev->cdev;
 	struct usb_request *req = 0;
-	ssize_t r = count;
-	unsigned xfer;
+	int r = count, xfer;
 	int sendZLP = 0;
 	int ret;
 
-	DBG(cdev, "mtp_write(%zu)\n", count);
+	DBG(cdev, "mtp_write(%d)\n", count);
 
 	spin_lock_irq(&dev->lock);
 	if (dev->state == STATE_CANCELED) {
@@ -708,8 +588,8 @@ static ssize_t mtp_write(struct file *fp, const char __user *buf,
 			break;
 		}
 
-		if (count > mtp_tx_req_len)
-			xfer = mtp_tx_req_len;
+		if (count > MTP_BULK_BUFFER_SIZE)
+			xfer = MTP_BULK_BUFFER_SIZE;
 		else
 			xfer = count;
 		if (xfer && copy_from_user(req->buf, buf, xfer)) {
@@ -742,7 +622,7 @@ static ssize_t mtp_write(struct file *fp, const char __user *buf,
 		dev->state = STATE_READY;
 	spin_unlock_irq(&dev->lock);
 
-	DBG(cdev, "mtp_write returning %zd\n", r);
+	DBG(cdev, "mtp_write returning %d\n", r);
 	return r;
 }
 
@@ -801,8 +681,8 @@ static void send_file_work(struct work_struct *data)
 			break;
 		}
 
-		if (count > mtp_tx_req_len)
-			xfer = mtp_tx_req_len;
+		if (count > MTP_BULK_BUFFER_SIZE)
+			xfer = MTP_BULK_BUFFER_SIZE;
 		else
 			xfer = count;
 
@@ -829,8 +709,7 @@ static void send_file_work(struct work_struct *data)
 		ret = usb_ep_queue(dev->ep_in, req, GFP_KERNEL);
 		if (ret < 0) {
 			DBG(cdev, "send_file_work: xfer error %d\n", ret);
-			if (dev->state != STATE_OFFLINE)
-				dev->state = STATE_ERROR;
+			dev->state = STATE_ERROR;
 			r = -EIO;
 			break;
 		}
@@ -870,9 +749,6 @@ static void receive_file_work(struct work_struct *data)
 	count = dev->xfer_file_length;
 
 	DBG(cdev, "receive_file_work(%lld)\n", count);
-	if (!IS_ALIGNED(count, dev->ep_out->maxpacket))
-		DBG(cdev, "%s- count(%lld) not multiple of mtu(%d)\n", __func__,
-						count, dev->ep_out->maxpacket);
 
 	while (count > 0 || write_req) {
 		if (count > 0) {
@@ -880,15 +756,13 @@ static void receive_file_work(struct work_struct *data)
 			read_req = dev->rx_req[cur_buf];
 			cur_buf = (cur_buf + 1) % RX_REQ_MAX;
 
-			/* some h/w expects size to be aligned to ep's MTU */
-			read_req->length = mtp_rx_req_len;
-
+			read_req->length = (count > MTP_BULK_BUFFER_SIZE
+					? MTP_BULK_BUFFER_SIZE : count);
 			dev->rx_done = 0;
 			ret = usb_ep_queue(dev->ep_out, read_req, GFP_KERNEL);
 			if (ret < 0) {
 				r = -EIO;
-				if (dev->state != STATE_OFFLINE)
-					dev->state = STATE_ERROR;
+				dev->state = STATE_ERROR;
 				break;
 			}
 		}
@@ -900,8 +774,7 @@ static void receive_file_work(struct work_struct *data)
 			DBG(cdev, "vfs_write %d\n", ret);
 			if (ret != write_req->actual) {
 				r = -EIO;
-				if (dev->state != STATE_OFFLINE)
-					dev->state = STATE_ERROR;
+				dev->state = STATE_ERROR;
 				break;
 			}
 			write_req = NULL;
@@ -911,20 +784,12 @@ static void receive_file_work(struct work_struct *data)
 			/* wait for our last read to complete */
 			ret = wait_event_interruptible(dev->read_wq,
 				dev->rx_done || dev->state != STATE_BUSY);
-			if (dev->state == STATE_CANCELED
-					|| dev->state == STATE_OFFLINE) {
-				if (dev->state == STATE_OFFLINE)
-					r = -EIO;
-				else
-					r = -ECANCELED;
+			if (dev->state == STATE_CANCELED) {
+				r = -ECANCELED;
 				if (!dev->rx_done)
 					usb_ep_dequeue(dev->ep_out, read_req);
 				break;
 			}
-			/* Check if we aligned the size due to MTU constraint */
-			if (count < read_req->length)
-				read_req->actual = (read_req->actual > count ?
-						count : read_req->actual);
 			/* if xfer_file_length is 0xFFFFFFFF, then we read until
 			 * we get a zero length packet
 			 */
@@ -956,7 +821,7 @@ static int mtp_send_event(struct mtp_dev *dev, struct mtp_event *event)
 	int ret;
 	int length = event->length;
 
-	DBG(dev->cdev, "mtp_send_event(%zu)\n", event->length);
+	DBG(dev->cdev, "mtp_send_event(%d)\n", event->length);
 
 	if (length < 0 || length > INTR_BUFFER_SIZE)
 		return -EINVAL;
@@ -981,70 +846,95 @@ static int mtp_send_event(struct mtp_dev *dev, struct mtp_event *event)
 	return ret;
 }
 
-static long mtp_send_receive_ioctl(struct file *fp, unsigned code,
-	struct mtp_file_range *mfr)
+static long mtp_ioctl(struct file *fp, unsigned code, unsigned long value)
 {
 	struct mtp_dev *dev = fp->private_data;
 	struct file *filp = NULL;
-	struct work_struct *work;
 	int ret = -EINVAL;
 
 	if (mtp_lock(&dev->ioctl_excl))
 		return -EBUSY;
 
-	spin_lock_irq(&dev->lock);
-	if (dev->state == STATE_CANCELED) {
-		/* report cancelation to userspace */
-		dev->state = STATE_READY;
+	switch (code) {
+	case MTP_SEND_FILE:
+	case MTP_RECEIVE_FILE:
+	case MTP_SEND_FILE_WITH_HEADER:
+	{
+		struct mtp_file_range	mfr;
+		struct work_struct *work;
+
+		spin_lock_irq(&dev->lock);
+		if (dev->state == STATE_CANCELED) {
+			/* report cancelation to userspace */
+			dev->state = STATE_READY;
+			spin_unlock_irq(&dev->lock);
+			ret = -ECANCELED;
+			goto out;
+		}
+		if (dev->state == STATE_OFFLINE) {
+			spin_unlock_irq(&dev->lock);
+			ret = -ENODEV;
+			goto out;
+		}
+		dev->state = STATE_BUSY;
 		spin_unlock_irq(&dev->lock);
-		ret = -ECANCELED;
+
+		if (copy_from_user(&mfr, (void __user *)value, sizeof(mfr))) {
+			ret = -EFAULT;
+			goto fail;
+		}
+		/* hold a reference to the file while we are working with it */
+		filp = fget(mfr.fd);
+		if (!filp) {
+			ret = -EBADF;
+			goto fail;
+		}
+
+		/* write the parameters */
+		dev->xfer_file = filp;
+		dev->xfer_file_offset = mfr.offset;
+		dev->xfer_file_length = mfr.length;
+		smp_wmb();
+
+		if (code == MTP_SEND_FILE_WITH_HEADER) {
+			work = &dev->send_file_work;
+			dev->xfer_send_header = 1;
+			dev->xfer_command = mfr.command;
+			dev->xfer_transaction_id = mfr.transaction_id;
+		} else if (code == MTP_SEND_FILE) {
+			work = &dev->send_file_work;
+			dev->xfer_send_header = 0;
+		} else {
+			work = &dev->receive_file_work;
+		}
+
+		/* We do the file transfer on a work queue so it will run
+		 * in kernel context, which is necessary for vfs_read and
+		 * vfs_write to use our buffers in the kernel address space.
+		 */
+		queue_work(dev->wq, work);
+		/* wait for operation to complete */
+		flush_workqueue(dev->wq);
+		fput(filp);
+
+		/* read the result */
+		smp_rmb();
+		ret = dev->xfer_result;
+		break;
+	}
+	case MTP_SEND_EVENT:
+	{
+		struct mtp_event	event;
+		/* return here so we don't change dev->state below,
+		 * which would interfere with bulk transfer state.
+		 */
+		if (copy_from_user(&event, (void __user *)value, sizeof(event)))
+			ret = -EFAULT;
+		else
+			ret = mtp_send_event(dev, &event);
 		goto out;
 	}
-	if (dev->state == STATE_OFFLINE) {
-		spin_unlock_irq(&dev->lock);
-		ret = -ENODEV;
-		goto out;
 	}
-	dev->state = STATE_BUSY;
-	spin_unlock_irq(&dev->lock);
-
-	/* hold a reference to the file while we are working with it */
-	filp = fget(mfr->fd);
-	if (!filp) {
-		ret = -EBADF;
-		goto fail;
-	}
-
-	/* write the parameters */
-	dev->xfer_file = filp;
-	dev->xfer_file_offset = mfr->offset;
-	dev->xfer_file_length = mfr->length;
-	smp_wmb();
-
-	if (code == MTP_SEND_FILE_WITH_HEADER) {
-		work = &dev->send_file_work;
-		dev->xfer_send_header = 1;
-		dev->xfer_command = mfr->command;
-		dev->xfer_transaction_id = mfr->transaction_id;
-	} else if (code == MTP_SEND_FILE) {
-		work = &dev->send_file_work;
-		dev->xfer_send_header = 0;
-	} else {
-		work = &dev->receive_file_work;
-	}
-
-	/* We do the file transfer on a work queue so it will run
-	 * in kernel context, which is necessary for vfs_read and
-	 * vfs_write to use our buffers in the kernel address space.
-	 */
-	queue_work(dev->wq, work);
-	/* wait for operation to complete */
-	flush_workqueue(dev->wq);
-	fput(filp);
-
-	/* read the result */
-	smp_rmb();
-	ret = dev->xfer_result;
 
 fail:
 	spin_lock_irq(&dev->lock);
@@ -1058,112 +948,6 @@ out:
 	DBG(dev->cdev, "ioctl returning %d\n", ret);
 	return ret;
 }
-
-static long mtp_ioctl(struct file *fp, unsigned code, unsigned long value)
-{
-	struct mtp_dev *dev = fp->private_data;
-	struct mtp_file_range	mfr;
-	struct mtp_event	event;
-	int ret = -EINVAL;
-
-	switch (code) {
-	case MTP_SEND_FILE:
-	case MTP_RECEIVE_FILE:
-	case MTP_SEND_FILE_WITH_HEADER:
-		if (copy_from_user(&mfr, (void __user *)value, sizeof(mfr))) {
-			ret = -EFAULT;
-			goto fail;
-		}
-		ret = mtp_send_receive_ioctl(fp, code, &mfr);
-	break;
-	case MTP_SEND_EVENT:
-		if (mtp_lock(&dev->ioctl_excl))
-			return -EBUSY;
-		/* return here so we don't change dev->state below,
-		 * which would interfere with bulk transfer state.
-		 */
-		if (copy_from_user(&event, (void __user *)value, sizeof(event)))
-			ret = -EFAULT;
-		else
-			ret = mtp_send_event(dev, &event);
-		mtp_unlock(&dev->ioctl_excl);
-	break;
-	default:
-		DBG(dev->cdev, "unknown ioctl code: %d\n", code);
-	}
-fail:
-	return ret;
-}
-
-/*
- * 32 bit userspace calling into 64 bit kernl. handle ioctl code
- * and userspace pointer
-*/
-#ifdef CONFIG_COMPAT
-static long compat_mtp_ioctl(struct file *fp, unsigned code,
-	unsigned long value)
-{
-	struct mtp_dev *dev = fp->private_data;
-	struct mtp_file_range	mfr;
-	struct __compat_mtp_file_range	cmfr;
-	struct mtp_event	event;
-	struct __compat_mtp_event cevent;
-	unsigned cmd;
-	bool send_file = false;
-	int ret = -EINVAL;
-
-	switch (code) {
-	case COMPAT_MTP_SEND_FILE:
-		cmd = MTP_SEND_FILE;
-		send_file = true;
-		break;
-	case COMPAT_MTP_RECEIVE_FILE:
-		cmd = MTP_RECEIVE_FILE;
-		send_file = true;
-		break;
-	case COMPAT_MTP_SEND_FILE_WITH_HEADER:
-		cmd = MTP_SEND_FILE_WITH_HEADER;
-		send_file = true;
-		break;
-	case COMPAT_MTP_SEND_EVENT:
-		cmd = MTP_SEND_EVENT;
-		break;
-	default:
-		DBG(dev->cdev, "unknown compat_ioctl code: %d\n", code);
-		goto fail;
-	}
-
-	if (send_file) {
-		if (copy_from_user(&cmfr, (void __user *)value, sizeof(cmfr))) {
-			ret = -EFAULT;
-			goto fail;
-		}
-		mfr.fd = cmfr.fd;
-		mfr.offset = cmfr.offset;
-		mfr.length = cmfr.length;
-		mfr.command = cmfr.command;
-		mfr.transaction_id = cmfr.transaction_id;
-		ret = mtp_send_receive_ioctl(fp, cmd, &mfr);
-	} else {
-		if (mtp_lock(&dev->ioctl_excl))
-			return -EBUSY;
-		/* return here so we don't change dev->state below,
-		 * which would interfere with bulk transfer state.
-		 */
-		if (copy_from_user(&cevent, (void __user *)value,
-			sizeof(cevent))) {
-			ret = -EFAULT;
-			goto fail;
-		}
-		event.length = cevent.length;
-		event.data = compat_ptr(cevent.data);
-		ret = mtp_send_event(dev, &event);
-		mtp_unlock(&dev->ioctl_excl);
-	}
-fail:
-	return ret;
-}
-#endif
 
 static int mtp_open(struct inode *ip, struct file *fp)
 {
@@ -1193,9 +977,6 @@ static const struct file_operations mtp_fops = {
 	.read = mtp_read,
 	.write = mtp_write,
 	.unlocked_ioctl = mtp_ioctl,
-#ifdef CONFIG_COMPAT
-	.compat_ioctl = compat_mtp_ioctl,
-#endif
 	.open = mtp_open,
 	.release = mtp_release,
 };
@@ -1328,14 +1109,6 @@ mtp_function_bind(struct usb_configuration *c, struct usb_function *f)
 			mtp_fullspeed_out_desc.bEndpointAddress;
 	}
 
-	/* support super speed hardware */
-	if (gadget_is_superspeed(c->cdev->gadget)) {
-		mtp_superspeed_in_desc.bEndpointAddress =
-			mtp_fullspeed_in_desc.bEndpointAddress;
-		mtp_superspeed_out_desc.bEndpointAddress =
-			mtp_fullspeed_out_desc.bEndpointAddress;
-	}
-
 	DBG(cdev, "%s speed %s: IN/%s, OUT/%s\n",
 			gadget_is_dualspeed(c->cdev->gadget) ? "dual" : "full",
 			f->name, dev->ep_in->name, dev->ep_out->name);
@@ -1368,35 +1141,27 @@ static int mtp_function_set_alt(struct usb_function *f,
 	DBG(cdev, "mtp_function_set_alt intf: %d alt: %d\n", intf, alt);
 
 	ret = config_ep_by_speed(cdev->gadget, f, dev->ep_in);
-	if (ret) {
-		dev->ep_in->desc = NULL;
-		ERROR(cdev, "config_ep_by_speed failes for ep %s, result %d\n",
-			dev->ep_in->name, ret);
+	if (ret)
 		return ret;
-	}
+
 	ret = usb_ep_enable(dev->ep_in);
+	if (ret)
+		return ret;
+
+	ret = config_ep_by_speed(cdev->gadget, f, dev->ep_out);
+	if (ret)
+		return ret;
+
+	ret = usb_ep_enable(dev->ep_out);
 	if (ret) {
-		ERROR(cdev, "failed to enable ep %s, result %d\n",
-			dev->ep_in->name, ret);
+		usb_ep_disable(dev->ep_in);
 		return ret;
 	}
 
-	ret = config_ep_by_speed(cdev->gadget, f, dev->ep_out);
-	if (ret) {
-		dev->ep_out->desc = NULL;
-		ERROR(cdev, "config_ep_by_speed failes for ep %s, result %d\n",
-			dev->ep_out->name, ret);
-		usb_ep_disable(dev->ep_in);
+	ret = config_ep_by_speed(cdev->gadget, f, dev->ep_intr);
+	if (ret)
 		return ret;
-	}
-	ret = usb_ep_enable(dev->ep_out);
-	if (ret) {
-		ERROR(cdev, "failed to enable ep %s, result %d\n",
-			dev->ep_out->name, ret);
-		usb_ep_disable(dev->ep_in);
-		return ret;
-	}
-	dev->ep_intr->desc = &mtp_intr_desc;
+
 	ret = usb_ep_enable(dev->ep_intr);
 	if (ret) {
 		usb_ep_disable(dev->ep_out);
@@ -1447,15 +1212,11 @@ static int mtp_bind_config(struct usb_configuration *c, bool ptp_config)
 	dev->function.name = "mtp";
 	dev->function.strings = mtp_strings;
 	if (ptp_config) {
-		dev->function.fs_descriptors = fs_ptp_descs;
+		dev->function.descriptors = fs_ptp_descs;
 		dev->function.hs_descriptors = hs_ptp_descs;
-		if (gadget_is_superspeed(c->cdev->gadget))
-			dev->function.ss_descriptors = ss_ptp_descs;
 	} else {
-		dev->function.fs_descriptors = fs_mtp_descs;
+		dev->function.descriptors = fs_mtp_descs;
 		dev->function.hs_descriptors = hs_mtp_descs;
-		if (gadget_is_superspeed(c->cdev->gadget))
-			dev->function.ss_descriptors = ss_mtp_descs;
 	}
 	dev->function.bind = mtp_function_bind;
 	dev->function.unbind = mtp_function_unbind;

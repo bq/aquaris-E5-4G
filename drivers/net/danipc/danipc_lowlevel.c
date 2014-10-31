@@ -55,7 +55,7 @@
  * Vladik, 21.08.2011
  */
 
-#define FIFO_MAP_SIZE		SZ_256K
+#define FIFO_MAP_SIZE		SZ_16K
 #define FIFO_MAP_MASK		(FIFO_MAP_SIZE - 1)
 
 uint8_t	__iomem			*ipc_buffers;
@@ -67,9 +67,9 @@ static void __iomem		*krait_ipc_mux;
 static void init_own_ipc_to_virt_map(struct danipc_priv *priv)
 {
 	struct ipc_to_virt_map *high_map =
-		&ipc_to_virt_map[LOCAL_IPC_ID][ipc_trns_prio_1];
+		&ipc_to_virt_map[PLATFORM_my_ipc_id][IPC_trns_prio_1];
 	struct ipc_to_virt_map *low_map =
-		&ipc_to_virt_map[LOCAL_IPC_ID][ipc_trns_prio_0];
+		&ipc_to_virt_map[PLATFORM_my_ipc_id][IPC_trns_prio_0];
 
 	/* This prevents remapping by remap_fifo_mem() */
 	high_map->vaddr		= &ipc_buffers[0];
@@ -87,45 +87,28 @@ static void unmap_ipc_to_virt_map(void)
 	int		cpuid;
 
 	for (cpuid = 0; cpuid < PLATFORM_MAX_NUM_OF_NODES; cpuid++) {
-		if (cpuid == LOCAL_IPC_ID)
+		if (cpuid == PLATFORM_my_ipc_id)
 			continue;
-		if (ipc_to_virt_map[cpuid][ipc_trns_prio_1].vaddr)
-			iounmap(ipc_to_virt_map[cpuid][ipc_trns_prio_1].vaddr);
-		if (ipc_to_virt_map[cpuid][ipc_trns_prio_0].vaddr)
-			iounmap(ipc_to_virt_map[cpuid][ipc_trns_prio_0].vaddr);
+		if (ipc_to_virt_map[cpuid][IPC_trns_prio_1].vaddr)
+			iounmap(ipc_to_virt_map[cpuid][IPC_trns_prio_1].vaddr);
+		if (ipc_to_virt_map[cpuid][IPC_trns_prio_0].vaddr)
+			iounmap(ipc_to_virt_map[cpuid][IPC_trns_prio_0].vaddr);
 	}
 }
 
 static void remap_fifo_mem(const int cpuid, const unsigned prio,
 				const uint32_t paddr)
 {
-	struct ipc_to_virt_map *const map = ipc_to_virt_map[cpuid];
-	unsigned other_prio = (prio == ipc_trns_prio_0) ?
-				ipc_trns_prio_1 : ipc_trns_prio_0;
-	uint32_t start_addr;
-	uint32_t map_size;
-	uint32_t map_mask;
+	struct ipc_to_virt_map *const map = &ipc_to_virt_map[cpuid][prio];
 
-	/* Use shared memory size if defined for given CPU.
-	 * Since shared memory is used for both FIFO priorities, remap
-	 * only once for this CPU.
-	 */
-	if (ipc_shared_mem_sizes[cpuid]) {
-		map_size = ipc_shared_mem_sizes[cpuid];
-		map_mask = map_size - 1;
-		start_addr = ((paddr + map_mask) & ~map_mask) - map_size;
-		map[prio].paddr = map[other_prio].paddr = start_addr;
-		map[prio].vaddr = map[other_prio].vaddr =
-			ioremap_nocache(start_addr, 2 * map_size);
-	} else {
-		map_size = FIFO_MAP_SIZE;
-		map_mask = FIFO_MAP_MASK;
-		start_addr = ((paddr + map_mask) & ~map_mask) - 2 * map_size;
-		map[prio].paddr = start_addr;
-		map[prio].vaddr = ioremap_nocache(start_addr, 2 * map_size);
-	}
+	/* Round down to nearest 16kB address */
+	const uint32_t		start_addr =
+		((paddr + FIFO_MAP_MASK) & ~FIFO_MAP_MASK) - 2 * FIFO_MAP_SIZE;
+	map->paddr		= start_addr;
+	map->vaddr		= ioremap_nocache(start_addr,
+							2 * FIFO_MAP_SIZE);
 
-	if (!map[prio].vaddr) {
+	if (!map->vaddr) {
 		pr_err(
 			"%s:%d cpuid = %d priority = %u cannot remap FIFO memory at addr. 0x%x\n",
 			__func__, __LINE__, cpuid, prio, start_addr);
@@ -135,7 +118,7 @@ static void remap_fifo_mem(const int cpuid, const unsigned prio,
 
 uint32_t virt_to_ipc(const int cpuid, const unsigned prio, void *vaddr)
 {
-	if (likely(prio <= ipc_trns_prio_1)) {
+	if (likely(prio <= IPC_trns_prio_1)) {
 		struct ipc_to_virt_map	*map = &ipc_to_virt_map[cpuid][prio];
 		int		offset;
 
@@ -157,7 +140,7 @@ uint32_t virt_to_ipc(const int cpuid, const unsigned prio, void *vaddr)
 
 void *ipc_to_virt(const int cpuid, const unsigned prio, const uint32_t ipc_addr)
 {
-	if (likely(prio <= ipc_trns_prio_1 ||
+	if (likely(prio <= IPC_trns_prio_1 ||
 			cpuid < PLATFORM_MAX_NUM_OF_NODES)) {
 		struct ipc_to_virt_map	*map = &ipc_to_virt_map[cpuid][prio];
 		const uint32_t	paddr = ipc_addr;
@@ -179,14 +162,15 @@ void *ipc_to_virt(const int cpuid, const unsigned prio, const uint32_t ipc_addr)
 void high_prio_rx(unsigned long data)
 {
 	struct net_device	*dev = (struct net_device *)data;
-	const unsigned	base_addr = ipc_regs[LOCAL_IPC_ID];
+	const unsigned	base_addr =
+			(unsigned)IPC_array_hw_access[PLATFORM_my_ipc_id];
 
 	/* Clear interrupt source. */
 	__raw_writel_no_log(IPC_INTR(IPC_INTR_FIFO_AF),
 				(void *)(base_addr + CDU_INT0_CLEAR_F0));
 
 	/* Process all messages. */
-	ipc_recv(IPC_FIFO_BUF_NUM_HIGH, ipc_trns_prio_1);
+	IPC_receive(IPC_FIFO_BUF_NUM_HIGH, IPC_trns_prio_1);
 
 	/* Unmask IPC AF interrupt again. */
 	__raw_writel_no_log(~IPC_INTR(IPC_INTR_FIFO_AF),
@@ -199,7 +183,8 @@ irqreturn_t danipc_interrupt(int irq, void *data)
 {
 	struct net_device	*dev = (struct net_device *)data;
 	struct danipc_priv	*priv = netdev_priv(dev);
-	const unsigned	base_addr = ipc_regs[LOCAL_IPC_ID];
+	const unsigned	base_addr =
+			(unsigned)IPC_array_hw_access[PLATFORM_my_ipc_id];
 
 	/* Mask all IPC interrupts. */
 	__raw_writel_no_log(~0, (void *)(base_addr + CDU_INT0_MASK_F0));
@@ -213,7 +198,8 @@ irqreturn_t danipc_interrupt(int irq, void *data)
 
 void danipc_init_irq(struct net_device *dev, struct danipc_priv *priv)
 {
-	const unsigned	base_addr = ipc_regs[LOCAL_IPC_ID];
+	const unsigned	base_addr =
+			(unsigned)IPC_array_hw_access[PLATFORM_my_ipc_id];
 
 	__raw_writel_no_log(AF_THRESHOLD,
 				(void *)(base_addr + FIFO_THR_AF_CFG_F0));
@@ -231,9 +217,9 @@ void danipc_init_irq(struct net_device *dev, struct danipc_priv *priv)
 
 static void remap_agent_table(struct danipc_priv *priv)
 {
-	agent_table = ioremap_nocache(priv->res_start[AGENT_TABLE_RES],
+	agentTable = ioremap_nocache(priv->res_start[AGENT_TABLE_RES],
 					priv->res_len[AGENT_TABLE_RES]);
-	if (!agent_table) {
+	if (!agentTable) {
 		pr_err("%s: cannot remap IPC global agent table\n", __func__);
 		BUG();
 	}
@@ -241,20 +227,21 @@ static void remap_agent_table(struct danipc_priv *priv)
 
 static void unmap_agent_table(void)
 {
-	if (agent_table)
-		iounmap(agent_table);
+	if (agentTable)
+		iounmap(agentTable);
 }
 
 static void prepare_node(const int cpuid)
 {
 	struct ipc_to_virt_map	*map;
 
-	ipc_regs[cpuid] = (uintptr_t)ioremap_nocache(ipc_regs_phys[cpuid],
-							ipc_regs_len[cpuid]);
-	map = &ipc_to_virt_map[cpuid][ipc_trns_prio_0];
+	IPC_array_hw_access[cpuid] =
+		ioremap_nocache(IPC_array_hw_access_phys[cpuid],
+						IPC_hw_access_phys_len[cpuid]);
+	map = &ipc_to_virt_map[cpuid][IPC_trns_prio_0];
 	atomic_set(&map->pending_skbs, 0);
 
-	map = &ipc_to_virt_map[cpuid][ipc_trns_prio_1];
+	map = &ipc_to_virt_map[cpuid][IPC_trns_prio_1];
 	atomic_set(&map->pending_skbs, 0);
 }
 
@@ -263,7 +250,7 @@ static void prepare_nodes(void)
 	int		n;
 
 	for (n = 0; n < PLATFORM_MAX_NUM_OF_NODES; n++)
-		if (ipc_regs_phys[n])
+		if (IPC_array_hw_access_phys[n])
 			prepare_node(n);
 }
 
@@ -272,8 +259,8 @@ static void unmap_nodes_memory(void)
 	int		n;
 
 	for (n = 0; n < PLATFORM_MAX_NUM_OF_NODES; n++)
-		if (ipc_regs[n])
-			iounmap((void __iomem *)ipc_regs[n]);
+		if (IPC_array_hw_access[n])
+			iounmap(IPC_array_hw_access[n]);
 }
 
 static void *alloc_ipc_buffers(struct danipc_priv *priv)
@@ -322,7 +309,7 @@ int danipc_ll_init(struct danipc_priv *priv)
 		remap_agent_table(priv);
 		init_own_ipc_to_virt_map(priv);
 		remap_krait_ipc_mux(priv);
-		rc = ipc_init();
+		rc = IPC_init();
 	}
 
 	return rc;
@@ -342,5 +329,5 @@ void danipc_ll_cleanup(void)
 void danipc_poll(struct net_device *dev)
 {
 	(void)dev;
-	ipc_recv(IPC_FIFO_BUF_NUM_LOW, ipc_trns_prio_0);
+	IPC_receive(IPC_FIFO_BUF_NUM_LOW, IPC_trns_prio_0);
 }

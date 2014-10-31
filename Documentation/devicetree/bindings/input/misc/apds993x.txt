@@ -1,8 +1,8 @@
-Avago apds993x and apds990x ambient light + proximity combo driver.
+Avago apds993x ambient light + proximity combo driver
 
 Required properties:
 
- - compatible					: Should be "avago,apds9930" or "avago,apds9900".
+ - compatible					: Should be "avago,apds9930".
  - reg							: i2c slave address of the device.
  - pinctrl-names				: The pinctrl configration names of this sensor driver. Should be
 					"default" and "sleep".
@@ -24,18 +24,8 @@ Required properties:
  - avago,als-D					: Tuning value of COE_D parameter.
  - avago,ga-value				: Tuning value of the gain for light sensor.
 
- Optional properties:
-
- - avago,cross-talk                             : Calibrate the threshold of proximity sensor.
-					the cross-talk value is raw data of proximity.
-
- - avago,default-cal				: Boolean to select calibration,if this property is defined
-						sensor will be use default calibration, otherwise the sensor
-						will be use factroy calibration.
-
  Example:
 
-&i2c_0 { /* BLSP1 QUP2 */
 	 avago@39 {
 		 compatible = "avago,apds9930";
 		 reg = <0x39>;
@@ -49,13 +39,10 @@ Required properties:
 		 avago,irq-gpio = <&msmgpio 80 0x2>;
 		 avago,ps_threshold = <600>;
 		 avago,ps_hysteresis_threshold = <500>;
-		 avago,cross-talk = <0>;
 		 avago,ps_pulse = <8>;
 		 avago,ps_pgain = <0>;
 		 avago,als_B = <223>;
 		 avago,als_C = <70>;
 		 avago,als_D = <142>;
 		 avago,ga_value = <48>;
-		 avago,default-cal;
 	 };
-};

@@ -5,7 +5,6 @@
  *
  * Copyright (C) 2012 Alexandra Chin <alexandra.chin@tw.synaptics.com>
  * Copyright (C) 2012 Scott Lin <scott.lin@tw.synaptics.com>
- * Copyright (c) 2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,18 +25,8 @@
 #define SYNAPTICS_DSX_DRIVER_VERSION 0x2001
 
 #include <linux/version.h>
-#include <linux/debugfs.h>
-
-#if defined(CONFIG_FB)
-#include <linux/notifier.h>
-#include <linux/fb.h>
-#elif defined(CONFIG_HAS_EARLYSUSPEND)
+#ifdef CONFIG_HAS_EARLYSUSPEND
 #include <linux/earlysuspend.h>
-#endif
-#if defined(CONFIG_SECURE_TOUCH)
-#include <linux/completion.h>
-#include <linux/atomic.h>
-#include <linux/clk.h>
 #endif
 
 #if (LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 38))
@@ -72,9 +61,6 @@
 #define SYNAPTICS_RMI4_PRODUCT_ID_SIZE 10
 #define SYNAPTICS_RMI4_BUILD_ID_SIZE 3
 
-#define F01_PACKAGE_ID_OFFSET 17
-#define PACKAGE_ID_SIZE 4
-
 #define F12_FINGERS_TO_SUPPORT 10
 #define F12_NO_OBJECT_STATUS 0x00
 #define F12_FINGER_STATUS 0x01
@@ -96,12 +82,6 @@
 #define MASK_2BIT 0x03
 #define MASK_1BIT 0x01
 
-#define PINCTRL_STATE_ACTIVE    "pmx_ts_active"
-#define PINCTRL_STATE_SUSPEND   "pmx_ts_suspend"
-#define PINCTRL_STATE_RELEASE   "pmx_ts_release"
-
-#define SYNA_FW_NAME_MAX_LEN	50
-
 enum exp_fn {
 	RMI_DEV = 0,
 	RMI_F54,
@@ -112,7 +92,7 @@ enum exp_fn {
 };
 
 struct synaptics_dsx_hw_interface {
-	struct synaptics_dsx_board_data *board_data;
+	const struct synaptics_dsx_board_data *board_data;
 	const struct synaptics_dsx_bus_access *bus_access;
 };
 
@@ -207,8 +187,6 @@ struct synaptics_rmi4_device_info {
 	unsigned char product_id_string[SYNAPTICS_RMI4_PRODUCT_ID_SIZE + 1];
 	unsigned char build_id[SYNAPTICS_RMI4_BUILD_ID_SIZE];
 	struct list_head support_fn_list;
-	unsigned int package_id;
-	unsigned int package_id_rev;
 };
 
 /*
@@ -217,8 +195,7 @@ struct synaptics_rmi4_device_info {
  * @input_dev: pointer to associated input device
  * @hw_if: pointer to hardware interface data
  * @rmi4_mod_info: device information
- * @regulator_vdd: pointer to associated vdd regulator
- * @regulator_add: pointer to associated avdd regulator
+ * @regulator: pointer to associated regulator
  * @rmi4_io_ctrl_mutex: mutex for i2c i/o control
  * @early_suspend: instance to support early suspend power management
  * @current_page: current page in sensor to acess
@@ -243,16 +220,12 @@ struct synaptics_rmi4_data {
 	struct input_dev *input_dev;
 	const struct synaptics_dsx_hw_interface *hw_if;
 	struct synaptics_rmi4_device_info rmi4_mod_info;
-	struct regulator *regulator_vdd;
-	struct regulator *regulator_avdd;
+	struct regulator *regulator;
 	struct mutex rmi4_reset_mutex;
 	struct mutex rmi4_io_ctrl_mutex;
-#if defined(CONFIG_FB)
-	struct notifier_block fb_notif;
-#elif defined(CONFIG_HAS_EARLYSUSPEND)
+#ifdef CONFIG_HAS_EARLYSUSPEND
 	struct early_suspend early_suspend;
 #endif
-	struct dentry *dir;
 	unsigned char current_page;
 	unsigned char button_0d_enabled;
 	unsigned char full_pm_cycle;
@@ -280,26 +253,8 @@ struct synaptics_rmi4_data {
 	bool sensor_sleep;
 	bool stay_awake;
 	bool staying_awake;
-	bool fw_updating;
-	bool support_vkeys;
 	int (*irq_enable)(struct synaptics_rmi4_data *rmi4_data, bool enable);
 	int (*reset_device)(struct synaptics_rmi4_data *rmi4_data);
-
-	struct pinctrl *ts_pinctrl;
-	struct pinctrl_state *pinctrl_state_active;
-	struct pinctrl_state *pinctrl_state_suspend;
-	struct pinctrl_state *pinctrl_state_release;
-	char fw_name[SYNA_FW_NAME_MAX_LEN];
-	bool suspended;
-#if defined(CONFIG_SECURE_TOUCH)
-	atomic_t st_enabled;
-	atomic_t st_pending_irqs;
-	bool st_initialized;
-	struct completion st_powerdown;
-	struct completion st_irq_processed;
-	struct clk *core_clk;
-	struct clk *iface_clk;
-#endif
 };
 
 struct synaptics_dsx_bus_access {
@@ -308,10 +263,6 @@ struct synaptics_dsx_bus_access {
 		unsigned char *data, unsigned short length);
 	int (*write)(struct synaptics_rmi4_data *rmi4_data, unsigned short addr,
 		unsigned char *data, unsigned short length);
-#if defined(CONFIG_SECURE_TOUCH)
-	int (*get)(struct synaptics_rmi4_data *rmi4_data);
-	void (*put)(struct synaptics_rmi4_data *rmi4_data);
-#endif
 };
 
 struct synaptics_rmi4_exp_fn {
@@ -332,14 +283,10 @@ int synaptics_rmi4_bus_init(void);
 
 void synaptics_rmi4_bus_exit(void);
 
-void synaptics_rmi4_dsx_new_function(struct synaptics_rmi4_exp_fn *exp_fn_mod,
+void synaptics_rmi4_new_function(struct synaptics_rmi4_exp_fn *exp_fn_module,
 		bool insert);
 
-int synaptics_dsx_fw_updater(unsigned char *fw_data);
-
-int synaptics_dsx_get_dt_coords(struct device *dev, char *name,
-				struct synaptics_dsx_board_data *pdata,
-				struct device_node *node);
+int synaptics_fw_updater(unsigned char *fw_data);
 
 static inline int synaptics_rmi4_reg_read(
 		struct synaptics_rmi4_data *rmi4_data,
@@ -359,16 +306,13 @@ static inline int synaptics_rmi4_reg_write(
 	return rmi4_data->hw_if->bus_access->write(rmi4_data, addr, data, len);
 }
 
-#if defined(CONFIG_SECURE_TOUCH)
-static inline int synaptics_rmi4_bus_get(struct synaptics_rmi4_data *rmi4_data)
+static inline ssize_t synaptics_rmi4_show_error(struct device *dev,
+		struct device_attribute *attr, char *buf)
 {
-	return rmi4_data->hw_if->bus_access->get(rmi4_data);
+	dev_warn(dev, "%s Attempted to read from write-only attribute %s\n",
+			__func__, attr->attr.name);
+	return -EPERM;
 }
-static inline void synaptics_rmi4_bus_put(struct synaptics_rmi4_data *rmi4_data)
-{
-	rmi4_data->hw_if->bus_access->put(rmi4_data);
-}
-#endif
 
 static inline ssize_t synaptics_rmi4_store_error(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
@@ -388,4 +332,5 @@ static inline void hstoba(unsigned char *dest, unsigned short src)
 	dest[0] = src % 0x100;
 	dest[1] = src / 0x100;
 }
+
 #endif

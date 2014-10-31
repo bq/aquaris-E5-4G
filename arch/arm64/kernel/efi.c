@@ -333,9 +333,6 @@ void __init efi_init(void)
 
 void __init efi_idmap_init(void)
 {
-	if (!efi_enabled(EFI_BOOT))
-		return;
-
 	/* boot time idmap_pg_dir is incomplete, so fill in missing parts */
 	efi_setup_idmap();
 }

@@ -23,17 +23,40 @@
 #define IPC_CONFIG_H_
 
 /*****************************************************************************
+*                     MACROS
+****************************************************************************
+*/
+/*****************************************************************************
 *                    TYPES
 ****************************************************************************
 */
 /* Node type Enumeration */
-enum ipc_node_type {
+enum IPC_node_type {
 	undef_e,
 	dan3400_e,	/* Node is located on the DAN3400 based board */
 	dan3400_eth_e,	/* eth. proxy */
-	ext_eth_e,	/* Node: on External board; Connected: Eth */
-	ext_fser_e,	/* Node: on External board; Connected: Fast Serial */
-	ext_uart_e,	/* Node: on External board; Connected: Uart */
+	extEth_e,	/* Node: on External board; Connected: Eth */
+	extFser_e,	/* Node: on External board; Connected: Fast Serial */
+	extUart_e,	/* Node: on External board; Connected: Uart */
 };
 
-#endif /* IPC_CONFIG_H_ */
+/*****************************************************************************
+ *                    PROTOTYPES
+ *****************************************************************************
+ */
+
+/* ===========================================================================
+ * IPC_setAgentName
+ * ===========================================================================
+ * Description:  Set agent name in Agent Table
+ *
+ * Parameters:		name		- Agent Name
+ *			inx		- Index in table
+ *
+ * Returns: n/a
+ *
+ */
+void IPC_setAgentName(const char *name, uint8_t inx);
+
+
+#endif /*IPC_CONFIG_H_*/
