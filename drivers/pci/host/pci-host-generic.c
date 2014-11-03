@@ -321,6 +321,8 @@ static int gen_pci_probe(struct platform_device *pdev)
 		.map_irq	= of_irq_parse_and_map_pci,
 		.ops		= &gen_pci_ops,
 	};
+#else
+	struct pci_bus *bus;
 #endif
 
 	if (!pci)
@@ -367,10 +369,16 @@ static int gen_pci_probe(struct platform_device *pdev)
 	}
 #endif
 
-	if (!gen_scan_root_bus(&pdev->dev, pci->cfg.bus_range->start,
-			       &gen_pci_ops, pci, &pci->resources)) {
+	bus = gen_scan_root_bus(&pdev->dev, pci->cfg.bus_range->start,
+				&gen_pci_ops, pci, &pci->resources);
+	if (!bus) {
 		dev_err(&pdev->dev, "failed to enable PCIe ports\n");
 		return -ENODEV;
+	}
+
+	if (!pci_has_flag(PCI_PROBE_ONLY)) {
+		pci_bus_size_bridges(bus);
+		pci_bus_assign_resources(bus);
 	}
 #else
 	pci_common_init_dev(dev, &hw);
