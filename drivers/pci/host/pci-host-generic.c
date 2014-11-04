@@ -363,10 +363,6 @@ static int gen_pci_probe(struct platform_device *pdev)
 
 #ifdef CONFIG_PCI_MSI
 	pci->msi_parent = of_parse_phandle(np, "msi-parent", 0);
-	if (!pci->msi_parent) {
-		dev_err(&pdev->dev, "Failed to allocate msi-parent.\n");
-		return -EINVAL;
-	}
 #endif
 
 	bus = gen_scan_root_bus(&pdev->dev, pci->cfg.bus_range->start,
