@@ -984,6 +984,46 @@ static void mac80211_hwsim_tx_iter(void *_data, u8 *addr,
 	data->receive = true;
 }
 
+static void mac80211_hwsim_add_vendor_rtap(struct sk_buff *skb)
+{
+#if 0
+	struct ieee80211_vendor_radiotap *rtap;
+
+	rtap = (void *)skb_push(skb, sizeof(*rtap) + 8 + 4);
+	/*
+	 * Don't enable this code by default as the OUI 00:00:00
+	 * is registered to Xerox so we shouldn't use it here, it
+	 * might find its way into pcap files.
+	 * Note that this code requires the headroom in the SKB
+	 * that was allocated earlier.
+	 */
+	rtap->oui[0] = 0x00;
+	rtap->oui[1] = 0x00;
+	rtap->oui[2] = 0x00;
+	rtap->subns = 127;
+
+	/*
+	 * Radiotap vendor namespaces can (and should) also be
+	 * split into fields by using the standard radiotap
+	 * presence bitmap mechanism. Use just BIT(0) here for
+	 * the presence bitmap.
+	 */
+	rtap->present = BIT(0);
+	/* We have 8 bytes of (dummy) data */
+	rtap->len = 8;
+	/* For testing, also require it to be aligned */
+	rtap->align = 8;
+	/* And also test that padding works, 4 bytes */
+	rtap->pad = 4;
+	/* push the data */
+	memcpy(rtap->data, "ABCDEFGH", 8);
+	/* make sure to clear padding, mac80211 doesn't */
+	memset(rtap->data + 8, 0, 4);
+
+	IEEE80211_SKB_RXCB(skb)->flag |= RX_FLAG_RADIOTAP_VENDOR_DATA;
+#endif
+}
+
 static bool mac80211_hwsim_tx_frame_no_nl(struct ieee80211_hw *hw,
 					  struct sk_buff *skb,
 					  struct ieee80211_channel *chan)
@@ -1098,6 +1138,9 @@ static bool mac80211_hwsim_tx_frame_no_nl(struct ieee80211_hw *hw,
 		rx_status.mactime = now + data2->tsf_offset;
 
 		memcpy(IEEE80211_SKB_RXCB(nskb), &rx_status, sizeof(rx_status));
+
+		mac80211_hwsim_add_vendor_rtap(nskb);
+
 		data2->rx_pkts++;
 		data2->rx_bytes += nskb->len;
 		ieee80211_rx_irqsafe(data2->hw, nskb);
