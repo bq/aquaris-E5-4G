@@ -495,7 +495,7 @@ static int gpiochip_irq_reqres(struct irq_data *d)
 {
 	struct gpio_chip *chip = irq_data_get_irq_chip_data(d);
 
-	if (gpio_lock_as_irq(chip, d->hwirq)) {
+	if (gpiochip_lock_as_irq(chip, d->hwirq)) {
 		chip_err(chip,
 			"unable to lock HW IRQ %lu for IRQ\n",
 			d->hwirq);
@@ -508,7 +508,7 @@ static void gpiochip_irq_relres(struct irq_data *d)
 {
 	struct gpio_chip *chip = irq_data_get_irq_chip_data(d);
 
-	gpio_unlock_as_irq(chip, d->hwirq);
+	gpiochip_unlock_as_irq(chip, d->hwirq);
 }
 
 static int gpiochip_to_irq(struct gpio_chip *chip, unsigned offset)
@@ -1332,14 +1332,14 @@ int gpiod_to_irq(const struct gpio_desc *desc)
 EXPORT_SYMBOL_GPL(gpiod_to_irq);
 
 /**
- * gpio_lock_as_irq() - lock a GPIO to be used as IRQ
+ * gpiochip_lock_as_irq() - lock a GPIO to be used as IRQ
  * @chip: the chip the GPIO to lock belongs to
  * @offset: the offset of the GPIO to lock as IRQ
  *
  * This is used directly by GPIO drivers that want to lock down
  * a certain GPIO line to be used for IRQs.
  */
-int gpio_lock_as_irq(struct gpio_chip *chip, unsigned int offset)
+int gpiochip_lock_as_irq(struct gpio_chip *chip, unsigned int offset)
 {
 	if (offset >= chip->ngpio)
 		return -EINVAL;
@@ -1354,24 +1354,24 @@ int gpio_lock_as_irq(struct gpio_chip *chip, unsigned int offset)
 	set_bit(FLAG_USED_AS_IRQ, &chip->desc[offset].flags);
 	return 0;
 }
-EXPORT_SYMBOL_GPL(gpio_lock_as_irq);
+EXPORT_SYMBOL_GPL(gpiochip_lock_as_irq);
 
 /**
- * gpio_unlock_as_irq() - unlock a GPIO used as IRQ
+ * gpiochip_unlock_as_irq() - unlock a GPIO used as IRQ
  * @chip: the chip the GPIO to lock belongs to
  * @offset: the offset of the GPIO to lock as IRQ
  *
  * This is used directly by GPIO drivers that want to indicate
  * that a certain GPIO is no longer used exclusively for IRQ.
  */
-void gpio_unlock_as_irq(struct gpio_chip *chip, unsigned int offset)
+void gpiochip_unlock_as_irq(struct gpio_chip *chip, unsigned int offset)
 {
 	if (offset >= chip->ngpio)
 		return;
 
 	clear_bit(FLAG_USED_AS_IRQ, &chip->desc[offset].flags);
 }
-EXPORT_SYMBOL_GPL(gpio_unlock_as_irq);
+EXPORT_SYMBOL_GPL(gpiochip_unlock_as_irq);
 
 /**
  * gpiod_get_raw_value_cansleep() - return a gpio's raw value
@@ -1505,14 +1505,36 @@ static struct gpio_desc *acpi_find_gpio(struct device *dev, const char *con_id,
 					unsigned int idx,
 					enum gpio_lookup_flags *flags)
 {
+	static const char * const suffixes[] = { "gpios", "gpio" };
+	struct acpi_device *adev = ACPI_COMPANION(dev);
 	struct acpi_gpio_info info;
 	struct gpio_desc *desc;
+	char propname[32];
+	int i;
 
-	desc = acpi_get_gpiod_by_index(dev, idx, &info);
-	if (IS_ERR(desc))
-		return desc;
+	/* Try first from _DSD */
+	for (i = 0; i < ARRAY_SIZE(suffixes); i++) {
+		if (con_id && strcmp(con_id, "gpios")) {
+			snprintf(propname, sizeof(propname), "%s-%s",
+				 con_id, suffixes[i]);
+		} else {
+			snprintf(propname, sizeof(propname), "%s",
+				 suffixes[i]);
+		}
 
-	if (info.gpioint && info.active_low)
+		desc = acpi_get_gpiod_by_index(adev, propname, idx, &info);
+		if (!IS_ERR(desc) || (PTR_ERR(desc) == -EPROBE_DEFER))
+			break;
+	}
+
+	/* Then from plain _CRS GPIOs */
+	if (IS_ERR(desc)) {
+		desc = acpi_get_gpiod_by_index(adev, NULL, idx, &info);
+		if (IS_ERR(desc))
+			return desc;
+	}
+
+	if (info.active_low)
 		*flags |= GPIO_ACTIVE_LOW;
 
 	return desc;
@@ -1711,6 +1733,61 @@ struct gpio_desc *__must_check __gpiod_get_index(struct device *dev,
 	return desc;
 }
 EXPORT_SYMBOL_GPL(__gpiod_get_index);
+
+/**
+ * fwnode_get_named_gpiod - obtain a GPIO from firmware node
+ * @fwnode:	handle of the firmware node
+ * @propname:	name of the firmware property representing the GPIO
+ *
+ * This function can be used for drivers that get their configuration
+ * from firmware.
+ *
+ * Function properly finds the corresponding GPIO using whatever is the
+ * underlying firmware interface and then makes sure that the GPIO
+ * descriptor is requested before it is returned to the caller.
+ *
+ * In case of error an ERR_PTR() is returned.
+ */
+struct gpio_desc *fwnode_get_named_gpiod(struct fwnode_handle *fwnode,
+					 const char *propname)
+{
+	struct gpio_desc *desc = ERR_PTR(-ENODEV);
+	bool active_low = false;
+	int ret;
+
+	if (!fwnode)
+		return ERR_PTR(-EINVAL);
+
+	if (is_of_node(fwnode)) {
+		enum of_gpio_flags flags;
+
+		desc = of_get_named_gpiod_flags(of_node(fwnode), propname, 0,
+						&flags);
+		if (!IS_ERR(desc))
+			active_low = flags & OF_GPIO_ACTIVE_LOW;
+	} else if (is_acpi_node(fwnode)) {
+		struct acpi_gpio_info info;
+
+		desc = acpi_get_gpiod_by_index(acpi_node(fwnode), propname, 0,
+					       &info);
+		if (!IS_ERR(desc))
+			active_low = info.active_low;
+	}
+
+	if (IS_ERR(desc))
+		return desc;
+
+	ret = gpiod_request(desc, NULL);
+	if (ret)
+		return ERR_PTR(ret);
+
+	/* Only value flag can be set from both DT and ACPI is active_low */
+	if (active_low)
+		set_bit(FLAG_ACTIVE_LOW, &desc->flags);
+
+	return desc;
+}
+EXPORT_SYMBOL_GPL(fwnode_get_named_gpiod);
 
 /**
  * gpiod_get_index_optional - obtain an optional GPIO from a multi-index GPIO
