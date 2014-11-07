@@ -103,13 +103,21 @@ static int modem_shutdown(const struct subsys_desc *subsys, bool force_stop)
 	if (subsys->is_not_loadable)
 		return 0;
 
-	if (!subsys_get_crash_status(drv->subsys) && force_stop) {
+	if (!subsys_get_crash_status(drv->subsys) && force_stop &&
+	    subsys->force_stop_gpio) {
 		gpio_set_value(subsys->force_stop_gpio, 1);
 		ret = wait_for_completion_timeout(&drv->stop_ack,
 				msecs_to_jiffies(STOP_ACK_TIMEOUT_MS));
 		if (!ret)
 			pr_warn("Timed out on stop ack from modem.\n");
 		gpio_set_value(subsys->force_stop_gpio, 0);
+	}
+
+	if (drv->subsys_desc.ramdump_disable_gpio) {
+		drv->subsys_desc.ramdump_disable = gpio_get_value(
+					drv->subsys_desc.ramdump_disable_gpio);
+		 pr_warn("Ramdump disable gpio value is %d\n",
+			drv->subsys_desc.ramdump_disable);
 	}
 
 	pil_shutdown(&drv->q6->desc);
@@ -129,6 +137,7 @@ static int modem_powerup(const struct subsys_desc *subsys)
 	 * to unset the flag below.
 	 */
 	INIT_COMPLETION(drv->stop_ack);
+	drv->subsys_desc.ramdump_disable = 0;
 	drv->ignore_errors = false;
 	return pil_boot(&drv->q6->desc);
 }
@@ -137,7 +146,8 @@ static void modem_crash_shutdown(const struct subsys_desc *subsys)
 {
 	struct modem_data *drv = subsys_to_drv(subsys);
 	drv->crash_shutdown = true;
-	if (!subsys_get_crash_status(drv->subsys)) {
+	if (!subsys_get_crash_status(drv->subsys) &&
+		subsys->force_stop_gpio) {
 		gpio_set_value(subsys->force_stop_gpio, 1);
 		mdelay(STOP_ACK_TIMEOUT_MS);
 	}
@@ -163,7 +173,10 @@ static int modem_ramdump(int enable, const struct subsys_desc *subsys)
 	if (ret < 0)
 		pr_err("Unable to dump modem fw memory (rc = %d).\n", ret);
 
-	pil_mss_shutdown(&drv->q6->desc);
+	ret = pil_mss_deinit_image(&drv->q6->desc);
+	if (ret < 0)
+		pr_err("Unable to free up resources (rc = %d).\n", ret);
+
 	pil_mss_remove_proxy_votes(&drv->q6->desc);
 	return ret;
 }
@@ -251,6 +264,12 @@ static int pil_mss_loadable_init(struct modem_data *drv,
 	}
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "restart_reg");
+	if (!res) {
+		res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
+							"restart_reg_sec");
+		q6->restart_reg_sec = true;
+	}
+
 	q6->restart_reg = devm_request_and_ioremap(&pdev->dev, res);
 	if (!q6->restart_reg)
 		return -ENOMEM;
@@ -301,6 +320,11 @@ static int pil_mss_loadable_init(struct modem_data *drv,
 	q6->rom_clk = devm_clk_get(&pdev->dev, "mem_clk");
 	if (IS_ERR(q6->rom_clk))
 		return PTR_ERR(q6->rom_clk);
+
+	/* Optional. */
+	if (of_property_match_string(pdev->dev.of_node,
+			"qcom,active-clock-names", "gpll0_mss_clk") >= 0)
+		q6->gpll0_mss_clk = devm_clk_get(&pdev->dev, "gpll0_mss_clk");
 
 	ret = pil_desc_init(q6_desc);
 

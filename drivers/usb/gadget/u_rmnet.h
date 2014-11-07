@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -27,6 +27,7 @@ struct rmnet_ctrl_pkt {
 struct grmnet {
 	struct usb_function		func;
 
+	struct usb_gadget		*gadget;
 	struct usb_ep			*in;
 	struct usb_ep			*out;
 
@@ -46,8 +47,9 @@ struct grmnet {
 	void (*connect)(struct grmnet *g);
 };
 
-#define NR_QTI_PORTS	4
+#define NR_QTI_PORTS	(NR_RMNET_PORTS + NR_DPL_PORTS)
 #define NR_RMNET_PORTS	4
+#define NR_DPL_PORTS	1
 
 enum ctrl_client {
 	FRMNET_CTRL_CLIENT,
@@ -69,9 +71,4 @@ int gsmd_ctrl_connect(struct grmnet *gr, int port_num);
 void gsmd_ctrl_disconnect(struct grmnet *gr, u8 port_num);
 int gsmd_ctrl_setup(enum ctrl_client client_num, unsigned int count,
 					u8 *first_port_idx);
-int gqti_ctrl_connect(struct grmnet *gr, u8 port_num, unsigned intf);
-void gqti_ctrl_disconnect(struct grmnet *gr, u8 port_num);
-void gqti_ctrl_update_ipa_pipes(struct grmnet *gr, u8 port_num,
-					u32 ipa_prod, u32 ipa_cons);
-
 #endif /* __U_RMNET_H*/

@@ -77,6 +77,8 @@ struct msm_sensor_ctrl_t {
 	uint8_t is_probe_succeed;
 	uint32_t id;
 	struct device_node *of_node;
+	enum msm_camera_stream_type_t camera_stream_type;
+	uint32_t set_mclk_23880000;
 };
 
 int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp);

@@ -26,10 +26,20 @@
 };
 
 &soc {
+
+	spk_ext_vreg: spk_ext_vreg {
+		compatible = "regulator-fixed";
+		regulator-name = "spk_ext_vreg";
+		gpio = <&pma8084_mpps 3 0>;
+		status = "ok";
+		enable-active-high;
+	};
+
 	sound {
 		qcom,model = "apq8084-taiko-mtp-snd-card";
 
 		qcom,audio-routing =
+			"AIF4 VI", "MCLK",
 			"RX_BIAS", "MCLK",
 			"LDO_H", "MCLK",
 			"AIF4 MAD", "MCLK",
@@ -59,6 +69,7 @@
 		qcom,model = "apq8084-tomtom-mtp-snd-card";
 
 		qcom,audio-routing =
+			"AIF4 VI", "MCLK",
 			"RX_BIAS", "MCLK",
 			"LDO_H", "MCLK",
 			"AIF4 MAD", "MCLK",
@@ -174,7 +185,17 @@
 	status = "ok";
 };
 
+&hsphy0 {
+	qcom,hsphy-init = <0x00D194E4>;
+};
+
 &xhci_hsic_host {
+	status = "ok";
+};
+
+&uart6 {
+	qcom,inject-rx-on-wakeup;
+	qcom,rx-char-to-inject = <0xfd>;
 	status = "ok";
 };
 
@@ -266,9 +287,9 @@
 		 * spkrdrv supply in MTP device is from VPH_PWR which is
 		 * always ON. Give a dummy supply to make codec driver happy.
 		 */
-		cdc-vdd-spkdrv-supply = <&vph_pwr_vreg>;
-		qcom,cdc-vdd-spkdrv-voltage = <0 0>;
-		qcom,cdc-vdd-spkdrv-current = <0>;
+		cdc-vdd-spkdrv-supply = <&spk_ext_vreg>;
+		qcom,cdc-vdd-spkdrv-voltage = <5000000 5000000>;
+		qcom,cdc-vdd-spkdrv-current = <1250000>;
 
 		qcom,cdc-on-demand-supplies = "cdc-vdd-spkdrv";
 	};
@@ -638,7 +659,7 @@
 		qcom,invert = <0>;		/* Output low initially */
 		qcom,vin-sel = <2>;		/* VIN 2 */
 		qcom,src-sel = <2>;		/* Function 1 */
-		qcom,out-strength = <2>;	/* Medium */
+		qcom,out-strength = <3>;	/* High */
 		qcom,master-en = <1>;		/* Enable GPIO */
 	};
 

@@ -18,20 +18,9 @@
 #include <linux/io.h>
 #include <linux/clk/msm-clk-provider.h>
 #include <linux/clk/msm-clock-generic.h>
+#include <soc/qcom/msm-clock-controller.h>
 
 /* ==================== Mux clock ==================== */
-
-int parent_to_src_sel(struct clk_src *parents, int num_parents, struct clk *p)
-{
-	int i;
-
-	for (i = 0; i < num_parents; i++) {
-		if (parents[i].src == p)
-			return parents[i].sel;
-	}
-
-	return -EINVAL;
-}
 
 static int mux_parent_to_src_sel(struct mux_clk *mux, struct clk *p)
 {
@@ -110,21 +99,53 @@ static int mux_set_rate(struct clk *c, unsigned long rate)
 	unsigned long new_par_curr_rate;
 	unsigned long flags;
 
-	for (i = 0; i < mux->num_parents; i++) {
-		if (clk_round_rate(mux->parents[i].src, rate) == rate) {
+	/*
+	 * Check if one of the possible parents is already at the requested
+	 * rate.
+	 */
+	for (i = 0; i < mux->num_parents && mux->try_get_rate; i++) {
+		struct clk *p = mux->parents[i].src;
+		if (p->rate == rate && clk_round_rate(p, rate) == rate) {
 			new_parent = mux->parents[i].src;
 			break;
 		}
 	}
+
+	for (i = 0; i < mux->num_parents && !(!i && new_parent); i++) {
+		if (clk_round_rate(mux->parents[i].src, rate) == rate) {
+			new_parent = mux->parents[i].src;
+			if (!mux->try_new_parent)
+				break;
+			if (mux->try_new_parent && new_parent != c->parent)
+				break;
+		}
+	}
+
 	if (new_parent == NULL)
 		return -EINVAL;
 
 	/*
 	 * Switch to safe parent since the old and new parent might be the
 	 * same and the parent might temporarily turn off while switching
-	 * rates.
+	 * rates. If the mux can switch between distinct sources safely
+	 * (indicated by try_new_parent), and the new source is not the current
+	 * parent, do not switch to the safe parent.
 	 */
-	if (mux->safe_sel >= 0) {
+	if (mux->safe_sel >= 0 &&
+		!(mux->try_new_parent && (new_parent != c->parent))) {
+		/*
+		 * The safe parent might be a clock with multiple sources;
+		 * to select the "safe" source, set a safe frequency.
+		 */
+		if (mux->safe_freq) {
+			rc = clk_set_rate(mux->safe_parent, mux->safe_freq);
+			if (rc) {
+				pr_err("Failed to set safe rate on %s\n",
+					clk_name(mux->safe_parent));
+				return rc;
+			}
+		}
+
 		/*
 		 * Some mux implementations might switch to/from a low power
 		 * parent as part of their disable/enable ops. Grab the
@@ -133,9 +154,10 @@ static int mux_set_rate(struct clk *c, unsigned long rate)
 		spin_lock_irqsave(&c->lock, flags);
 		rc = mux->ops->set_mux_sel(mux, mux->safe_sel);
 		spin_unlock_irqrestore(&c->lock, flags);
+		if (rc)
+			return rc;
+
 	}
-	if (rc)
-		return rc;
 
 	new_par_curr_rate = clk_get_rate(new_parent);
 	rc = clk_set_rate(new_parent, rate);
@@ -297,10 +319,29 @@ static long div_round_rate(struct clk *c, unsigned long rate)
 	return __div_round_rate(&d->data, rate, c->parent, NULL, NULL);
 }
 
+static int _find_safe_div(struct clk *c, unsigned long rate)
+{
+	struct div_clk *d = to_div_clk(c);
+	struct div_data *data = &d->data;
+	unsigned long fast = max(rate, c->rate);
+	unsigned int numer = data->is_half_divider ? 2 : 1;
+	int i, safe_div = 0;
+
+	if (!d->safe_freq)
+		return 0;
+
+	/* Find the max safe freq that is lesser than fast */
+	for (i = data->max_div; i >= data->min_div; i--)
+		if (mult_frac(d->safe_freq, numer, i) <= fast)
+			safe_div = i;
+
+	return safe_div ?: -EINVAL;
+}
+
 static int div_set_rate(struct clk *c, unsigned long rate)
 {
 	struct div_clk *d = to_div_clk(c);
-	int div, rc = 0;
+	int safe_div, div, rc = 0;
 	long rrate, old_prate, new_prate;
 	struct div_data *data = &d->data;
 
@@ -314,10 +355,24 @@ static int div_set_rate(struct clk *c, unsigned long rate)
 	 * !d->ops and return an error. __div_round_rate() ensures div ==
 	 * d->div if !d->ops.
 	 */
-	if (div > data->div)
-		rc = d->ops->set_div(d, div);
-	if (rc)
-		return rc;
+
+	safe_div = _find_safe_div(c, rate);
+	if (d->safe_freq && safe_div < 0) {
+		pr_err("No safe div on %s for transitioning from %lu to %lu\n",
+			c->dbg_name, c->rate, rate);
+		return -EINVAL;
+	}
+
+	safe_div = max(safe_div, div);
+
+	if (safe_div > data->div) {
+		rc = d->ops->set_div(d, safe_div);
+		if (rc) {
+			pr_err("Failed to set div %d on %s\n", safe_div,
+				c->dbg_name);
+			return rc;
+		}
+	}
 
 	old_prate = clk_get_rate(c->parent);
 	rc = clk_set_rate(c->parent, new_prate);
@@ -325,6 +380,8 @@ static int div_set_rate(struct clk *c, unsigned long rate)
 		goto set_rate_fail;
 
 	if (div < data->div)
+		rc = d->ops->set_div(d, div);
+	else if (div < safe_div)
 		rc = d->ops->set_div(d, div);
 	if (rc)
 		goto div_dec_fail;
@@ -337,7 +394,7 @@ div_dec_fail:
 	WARN(clk_set_rate(c->parent, old_prate),
 		"Set rate failed for %s. Also in bad state!\n", c->dbg_name);
 set_rate_fail:
-	if (div > data->div)
+	if (safe_div > data->div)
 		WARN(d->ops->set_div(d, data->div),
 			"Set rate failed for %s. Also in bad state!\n",
 			c->dbg_name);
@@ -500,7 +557,7 @@ long parent_round_rate(struct clk *c, unsigned long rate)
 	return clk_round_rate(c->parent, rate);
 }
 
-static int ext_set_rate(struct clk *c, unsigned long rate)
+int parent_set_rate(struct clk *c, unsigned long rate)
 {
 	return clk_set_rate(c->parent, rate);
 }
@@ -515,6 +572,15 @@ static int ext_set_parent(struct clk *c, struct clk *p)
 	return clk_set_parent(c->parent, p);
 }
 
+static struct clk *ext_get_parent(struct clk *c)
+{
+	struct ext_clk *ext = to_ext_clk(c);
+
+	if (!IS_ERR_OR_NULL(c->parent))
+		return c->parent;
+	return clk_get(ext->dev, ext->clk_id);
+}
+
 static enum handoff ext_handoff(struct clk *c)
 {
 	c->rate = clk_get_rate(c->parent);
@@ -525,11 +591,33 @@ static enum handoff ext_handoff(struct clk *c)
 struct clk_ops clk_ops_ext = {
 	.handoff = ext_handoff,
 	.round_rate = parent_round_rate,
-	.set_rate = ext_set_rate,
+	.set_rate = parent_set_rate,
 	.get_rate = parent_get_rate,
 	.set_parent = ext_set_parent,
+	.get_parent = ext_get_parent,
 };
 
+static void *ext_clk_dt_parser(struct device *dev, struct device_node *np)
+{
+	struct ext_clk *ext;
+	const char *str;
+	int rc;
+
+	ext = devm_kzalloc(dev, sizeof(*ext), GFP_KERNEL);
+	if (!ext) {
+		dev_err(dev, "memory allocation failure\n");
+		return ERR_PTR(-ENOMEM);
+	}
+
+	ext->dev = dev;
+	rc = of_property_read_string(np, "qcom,clock-names", &str);
+	if (!rc)
+		ext->clk_id = (void *)str;
+
+	ext->c.ops = &clk_ops_ext;
+	return msmclk_generic_clk_init(dev, np, &ext->c);
+}
+MSMCLK_PARSER(ext_clk_dt_parser, "qcom,ext-clk", 0);
 
 /* ==================== Mux_div clock ==================== */
 
@@ -691,7 +779,7 @@ static int mux_div_clk_set_rate(struct clk *c, unsigned long rate)
 	rc = clk_set_rate(new_parent, new_prate);
 	if (rc) {
 		pr_err("failed to set %s to %ld\n",
-			new_parent->dbg_name, new_prate);
+			clk_name(new_parent), new_prate);
 		goto err_set_rate;
 	}
 
@@ -715,11 +803,11 @@ err_set_src_div:
 err_pre_reparent:
 	rc = clk_set_rate(old_parent, old_prate);
 	WARN(rc, "%s: error changing parent (%s) rate to %ld\n",
-		c->dbg_name, old_parent->dbg_name, old_prate);
+		clk_name(c), clk_name(old_parent), old_prate);
 err_set_rate:
 	rc = set_src_div(md, old_parent, old_div);
 	WARN(rc, "%s: error changing back to original div (%d) and parent (%s)\n",
-		c->dbg_name, old_div, old_parent->dbg_name);
+		clk_name(c), old_div, clk_name(old_parent));
 
 	return rc;
 }

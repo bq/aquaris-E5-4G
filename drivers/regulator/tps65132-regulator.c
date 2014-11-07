@@ -59,6 +59,7 @@ struct tps65132_chip {
 	u8				apps_cfg_bit_pos;
 	u8				apps_dischg_val;
 	bool				apps_dischg_cfg_postpone;
+	bool				en_gpio_lpm;
 };
 
 #define TPS65132_REG_VPOS		0x00
@@ -99,9 +100,14 @@ static struct of_regulator_match tps65132_reg_matches[] = {
 static int tps65132_regulator_disable(struct regulator_dev *rdev)
 {
 	struct tps65132_regulator *vreg = rdev_get_drvdata(rdev);
+	struct tps65132_chip *chip = vreg->chip;
 
-	gpio_set_value_cansleep(vreg->en_gpio,
+	if (chip->en_gpio_lpm)
+		gpio_direction_input(vreg->en_gpio);
+	else
+		gpio_set_value_cansleep(vreg->en_gpio,
 			vreg->gpio_flags & OF_GPIO_ACTIVE_LOW ? 1 : 0);
+
 	vreg->is_enabled = false;
 
 	return 0;
@@ -113,7 +119,11 @@ static int tps65132_regulator_enable(struct regulator_dev *rdev)
 	struct tps65132_chip *chip = vreg->chip;
 	int rc;
 
-	gpio_set_value_cansleep(vreg->en_gpio,
+	if (chip->en_gpio_lpm)
+		gpio_direction_output(vreg->en_gpio,
+			vreg->gpio_flags & OF_GPIO_ACTIVE_LOW ? 0 : 1);
+	else
+		gpio_set_value_cansleep(vreg->en_gpio,
 			vreg->gpio_flags & OF_GPIO_ACTIVE_LOW ? 0 : 1);
 	vreg->is_enabled = true;
 
@@ -377,7 +387,7 @@ static int tps65132_parse_dt(struct tps65132_chip *chip,
 		pr_err("memory allocation failed for vreg\n");
 		return -ENOMEM;
 	}
-	if (of_property_read_bool(client->dev.of_node, "i2c-pwr-supply")) {
+	if (of_find_property(client->dev.of_node, "i2c-pwr-supply", NULL)) {
 		chip->i2c_pwr = devm_regulator_get(&client->dev, "i2c-pwr");
 		if (IS_ERR_OR_NULL(chip->i2c_pwr)) {
 			rc = PTR_RET(chip->i2c_pwr);
@@ -386,6 +396,8 @@ static int tps65132_parse_dt(struct tps65132_chip *chip,
 			return rc;
 		}
 	}
+	chip->en_gpio_lpm = of_property_read_bool(client->dev.of_node,
+						"ti,en-gpio-lpm");
 
 	for (i = 0; i < chip->num_regulators; i++) {
 		match = &tps65132_reg_matches[i];

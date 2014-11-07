@@ -177,8 +177,8 @@
 		interrupt-names = "jpeg";
 		vdd-supply = <&gdsc_jpeg>;
 		clock-names = "core_clk", "iface_clk", "bus_clk0",
-			"camss_top_ahb_clk";
-		qcom,clock-rates = <266670000 0 0 0>;
+			"camss_ahb_clk", "camss_top_ahb_clk";
+		qcom,clock-rates = <266670000 0 0 0 0>;
 	};
 
 	qcom,jpeg@fda20000 {
@@ -191,8 +191,8 @@
 		interrupt-names = "jpeg";
 		vdd-supply = <&gdsc_jpeg>;
 		clock-names = "core_clk", "iface_clk", "bus_clk0",
-			"camss_top_ahb_clk";
-		qcom,clock-rates = <266670000 0 0 0>;
+			"camss_ahb_clk", "camss_top_ahb_clk";
+		qcom,clock-rates = <266670000 0 0 0 0>;
 	};
 
 	qcom,jpeg@fda24000 {
@@ -205,8 +205,8 @@
 		interrupt-names = "jpeg";
 		vdd-supply = <&gdsc_jpeg>;
 		clock-names = "core_clk", "iface_clk", "bus_clk0",
-			"camss_top_ahb_clk";
-		qcom,clock-rates = <266670000 0 0 0>;
+			"camss_ahb_clk", "camss_top_ahb_clk";
+		qcom,clock-rates = <266670000 0 0 0 0>;
 	};
 
 	qcom,irqrouter@fda00000 {
@@ -268,16 +268,16 @@
 };
 
 &i2c_freq_100Khz {
-	qcom,hw-thigh = <78>;
-	qcom,hw-tlow = <114>;
-	qcom,hw-tsu-sto = <28>;
-	qcom,hw-tsu-sta = <28>;
-	qcom,hw-thd-dat = <10>;
-	qcom,hw-thd-sta = <77>;
-	qcom,hw-tbuf = <118>;
+	qcom,hw-thigh = <104>;
+	qcom,hw-tlow = <88>;
+	qcom,hw-tsu-sto = <105>;
+	qcom,hw-tsu-sta = <119>;
+	qcom,hw-thd-dat = <13>;
+	qcom,hw-thd-sta = <84>;
+	qcom,hw-tbuf = <116>;
 	qcom,hw-scl-stretch-en = <0>;
 	qcom,hw-trdhld = <6>;
-	qcom,hw-tsp = <1>;
+	qcom,hw-tsp = <3>;
 	status = "ok";
 };
 
@@ -288,7 +288,7 @@
 	qcom,hw-tsu-sta = <21>;
 	qcom,hw-thd-dat = <13>;
 	qcom,hw-thd-sta = <18>;
-	qcom,hw-tbuf = <25>;
+	qcom,hw-tbuf = <32>;
 	qcom,hw-scl-stretch-en = <0>;
 	qcom,hw-trdhld = <6>;
 	qcom,hw-tsp = <3>;

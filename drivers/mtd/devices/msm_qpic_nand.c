@@ -13,347 +13,7 @@
  *
  */
 
-#define pr_fmt(fmt) "%s: " fmt, __func__
-
-#include <linux/clk.h>
-#include <linux/pm_runtime.h>
-#include <linux/slab.h>
-#include <linux/kernel.h>
-#include <linux/module.h>
-#include <linux/mtd/mtd.h>
-#include <linux/mtd/nand.h>
-#include <linux/mtd/partitions.h>
-#include <linux/platform_device.h>
-#include <linux/dma-mapping.h>
-#include <linux/io.h>
-#include <linux/crc16.h>
-#include <linux/bitrev.h>
-#include <linux/mutex.h>
-#include <linux/of.h>
-#include <linux/ctype.h>
-#include <linux/msm-sps.h>
-#include <linux/msm-bus.h>
-#include <soc/qcom/smem.h>
-
-#define PAGE_SIZE_2K 2048
-#define PAGE_SIZE_4K 4096
-
-#undef WRITE /* To avoid redefinition in above header files */
-#define WRITE 1
-#define READ 0
-
-#define MSM_NAND_IDLE_TIMEOUT   200 /* msecs */
-#define MSM_NAND_BUS_VOTE_MAX_RATE  100000000 /* Hz */
-
-/*
- * The maximum no of descriptors per transfer (page read/write) won't be more
- * than 64. For more details on what those commands are, please refer to the
- * page read and page write functions in the driver.
- */
-#define SPS_MAX_DESC_NUM 64
-#define SPS_DATA_CONS_PIPE_INDEX 0
-#define SPS_DATA_PROD_PIPE_INDEX 1
-#define SPS_CMD_CONS_PIPE_INDEX 2
-
-#define msm_virt_to_dma(chip, vaddr) \
-	((chip)->dma_phys_addr + \
-	((uint8_t *)(vaddr) - (chip)->dma_virt_addr))
-
-/*
- * A single page read/write request would typically need DMA memory of about
- * 1K memory approximately. So for a single request this memory is more than
- * enough.
- *
- * But to accommodate multiple clients we allocate 8K of memory. Though only
- * one client request can be submitted to NANDc at any time, other clients can
- * still prepare the descriptors while waiting for current client request to
- * be done. Thus for a total memory of 8K, the driver can currently support
- * maximum clients up to 7 or 8 at a time. The client for which there is no
- * free DMA memory shall wait on the wait queue until other clients free up
- * the required memory.
- */
-#define MSM_NAND_DMA_BUFFER_SIZE SZ_8K
-/*
- * This defines the granularity at which the buffer management is done. The
- * total number of slots is based on the size of the atomic_t variable
- * dma_buffer_busy(number of bits) within the structure msm_nand_chip.
- */
-#define MSM_NAND_DMA_BUFFER_SLOT_SZ \
-	(MSM_NAND_DMA_BUFFER_SIZE / (sizeof(((atomic_t *)0)->counter) * 8))
-
-/* ONFI(Open NAND Flash Interface) parameters */
-#define MSM_NAND_CFG0_RAW_ONFI_IDENTIFIER 0x88000800
-#define MSM_NAND_CFG0_RAW_ONFI_PARAM_INFO 0x88040000
-#define MSM_NAND_CFG1_RAW_ONFI_IDENTIFIER 0x0005045d
-#define MSM_NAND_CFG1_RAW_ONFI_PARAM_INFO 0x0005045d
-#define ONFI_PARAM_INFO_LENGTH 0x0200
-#define ONFI_PARAM_PAGE_LENGTH 0x0100
-#define ONFI_PARAMETER_PAGE_SIGNATURE 0x49464E4F
-#define FLASH_READ_ONFI_SIGNATURE_ADDRESS 0x20
-#define FLASH_READ_ONFI_PARAMETERS_COMMAND 0xEC
-#define FLASH_READ_ONFI_PARAMETERS_ADDRESS 0x00
-#define FLASH_READ_DEVICE_ID_ADDRESS 0x00
-
-#define MSM_NAND_RESET_FLASH_STS 0x00000020
-#define MSM_NAND_RESET_READ_STS 0x000000C0
-
-/* QPIC NANDc (NAND Controller) Register Set */
-#define MSM_NAND_REG(info, off)		    (info->nand_phys + off)
-#define MSM_NAND_QPIC_VERSION(info)	    MSM_NAND_REG(info, 0x20100)
-#define MSM_NAND_FLASH_CMD(info)	    MSM_NAND_REG(info, 0x30000)
-#define MSM_NAND_ADDR0(info)                MSM_NAND_REG(info, 0x30004)
-#define MSM_NAND_ADDR1(info)                MSM_NAND_REG(info, 0x30008)
-#define MSM_NAND_EXEC_CMD(info)             MSM_NAND_REG(info, 0x30010)
-#define MSM_NAND_FLASH_STATUS(info)         MSM_NAND_REG(info, 0x30014)
-#define FS_OP_ERR (1 << 4)
-#define FS_MPU_ERR (1 << 8)
-#define FS_DEVICE_STS_ERR (1 << 16)
-#define FS_DEVICE_WP (1 << 23)
-
-#define MSM_NAND_BUFFER_STATUS(info)        MSM_NAND_REG(info, 0x30018)
-#define BS_UNCORRECTABLE_BIT (1 << 8)
-#define BS_CORRECTABLE_ERR_MSK 0x1F
-
-#define MSM_NAND_DEV0_CFG0(info)            MSM_NAND_REG(info, 0x30020)
-#define DISABLE_STATUS_AFTER_WRITE 4
-#define CW_PER_PAGE	6
-#define UD_SIZE_BYTES	9
-#define SPARE_SIZE_BYTES 23
-#define NUM_ADDR_CYCLES	27
-
-#define MSM_NAND_DEV0_CFG1(info)            MSM_NAND_REG(info, 0x30024)
-#define DEV0_CFG1_ECC_DISABLE	0
-#define WIDE_FLASH		1
-#define NAND_RECOVERY_CYCLES	2
-#define CS_ACTIVE_BSY		5
-#define BAD_BLOCK_BYTE_NUM	6
-#define BAD_BLOCK_IN_SPARE_AREA 16
-#define WR_RD_BSY_GAP		17
-#define ENABLE_BCH_ECC		27
-
-#define MSM_NAND_DEV0_ECC_CFG(info)	    MSM_NAND_REG(info, 0x30028)
-#define ECC_CFG_ECC_DISABLE	0
-#define ECC_SW_RESET	1
-#define ECC_MODE	4
-#define ECC_PARITY_SIZE_BYTES 8
-#define ECC_NUM_DATA_BYTES 16
-#define ECC_FORCE_CLK_OPEN 30
-
-#define MSM_NAND_READ_ID(info)              MSM_NAND_REG(info, 0x30040)
-#define MSM_NAND_READ_STATUS(info)          MSM_NAND_REG(info, 0x30044)
-#define MSM_NAND_DEV_CMD1(info)             MSM_NAND_REG(info, 0x300A4)
-#define MSM_NAND_DEV_CMD_VLD(info)          MSM_NAND_REG(info, 0x300AC)
-#define MSM_NAND_EBI2_ECC_BUF_CFG(info)     MSM_NAND_REG(info, 0x300F0)
-#define MSM_NAND_ERASED_CW_DETECT_CFG(info)	MSM_NAND_REG(info, 0x300E8)
-#define MSM_NAND_ERASED_CW_DETECT_STATUS(info)  MSM_NAND_REG(info, 0x300EC)
-
-#define MSM_NAND_CTRL(info)		    MSM_NAND_REG(info, 0x30F00)
-#define BAM_MODE_EN	0
-#define MSM_NAND_VERSION(info)         MSM_NAND_REG(info, 0x30F08)
-#define MSM_NAND_READ_LOCATION_0(info)      MSM_NAND_REG(info, 0x30F20)
-#define MSM_NAND_READ_LOCATION_1(info)      MSM_NAND_REG(info, 0x30F24)
-
-/* device commands */
-#define MSM_NAND_CMD_PAGE_READ          0x32
-#define MSM_NAND_CMD_PAGE_READ_ECC      0x33
-#define MSM_NAND_CMD_PAGE_READ_ALL      0x34
-#define MSM_NAND_CMD_PRG_PAGE           0x36
-#define MSM_NAND_CMD_PRG_PAGE_ECC       0x37
-#define MSM_NAND_CMD_PRG_PAGE_ALL       0x39
-#define MSM_NAND_CMD_BLOCK_ERASE        0x3A
-#define MSM_NAND_CMD_FETCH_ID           0x0B
-
-/* Version Mask */
-#define MSM_NAND_VERSION_MAJOR_MASK	0xF0000000
-#define MSM_NAND_VERSION_MAJOR_SHIFT	28
-#define MSM_NAND_VERSION_MINOR_MASK	0x0FFF0000
-#define MSM_NAND_VERSION_MINOR_SHIFT	16
-
-#define msm_nand_sps_get_iovec(pipe, indx, cnt, ret, label, iovec)	\
-	do {								\
-		do {							\
-			ret = sps_get_iovec((pipe), (iovec));		\
-		} while (((iovec)->addr == 0x0) && ((iovec)->size == 0x0));\
-		if (ret) {						\
-			pr_err("sps_get_iovec failed for pipe %d (ret: %d)\n",\
-					indx, ret);			\
-			goto label;					\
-		}							\
-	} while (--(cnt))
-
-/* Structure that defines a NAND SPS command element */
-struct msm_nand_sps_cmd {
-	struct sps_command_element ce;
-	uint32_t flags;
-};
-
-/*
- * Structure that defines the NAND controller properties as per the
- * NAND flash device/chip that is attached.
- */
-struct msm_nand_chip {
-	struct device *dev;
-	/*
-	 * DMA memory will be allocated only once during probe and this memory
-	 * will be used by all NAND clients. This wait queue is needed to
-	 * make the applications wait for DMA memory to be free'd when the
-	 * complete memory is exhausted.
-	 */
-	wait_queue_head_t dma_wait_queue;
-	atomic_t dma_buffer_busy;
-	uint8_t *dma_virt_addr;
-	dma_addr_t dma_phys_addr;
-	uint32_t ecc_parity_bytes;
-	uint32_t bch_caps; /* Controller BCH ECC capabilities */
-#define MSM_NAND_CAP_4_BIT_BCH      (1 << 0)
-#define MSM_NAND_CAP_8_BIT_BCH      (1 << 1)
-	uint32_t cw_size;
-	/* NANDc register configurations */
-	uint32_t cfg0, cfg1, cfg0_raw, cfg1_raw;
-	uint32_t ecc_buf_cfg;
-	uint32_t ecc_bch_cfg;
-};
-
-/* Structure that defines an SPS end point for a NANDc BAM pipe. */
-struct msm_nand_sps_endpt {
-	struct sps_pipe *handle;
-	struct sps_connect config;
-	struct sps_register_event event;
-	struct completion completion;
-	uint32_t index;
-};
-
-/*
- * Structure that defines NANDc SPS data - BAM handle and an end point
- * for each BAM pipe.
- */
-struct msm_nand_sps_info {
-	unsigned long bam_handle;
-	struct msm_nand_sps_endpt data_prod;
-	struct msm_nand_sps_endpt data_cons;
-	struct msm_nand_sps_endpt cmd_pipe;
-};
-
-/*
- * Structure that contains flash device information. This gets updated after
- * the NAND flash device detection.
- */
-struct flash_identification {
-	uint32_t flash_id;
-	uint64_t density;
-	uint32_t widebus;
-	uint32_t pagesize;
-	uint32_t blksize;
-	uint32_t oobsize;
-	uint32_t ecc_correctability;
-};
-
-struct msm_nand_clk_data {
-	struct clk *qpic_clk;
-	struct msm_bus_scale_pdata *use_cases;
-	uint32_t client_handle;
-	atomic_t clk_enabled;
-	atomic_t curr_vote;
-};
-
-/* Structure that defines NANDc private data. */
-struct msm_nand_info {
-	struct mtd_info		mtd;
-	struct msm_nand_chip	nand_chip;
-	struct msm_nand_sps_info sps;
-	unsigned long bam_phys;
-	unsigned long nand_phys;
-	void __iomem *bam_base;
-	int bam_irq;
-	/*
-	 * This lock must be acquired before submitting any command or data
-	 * descriptors to BAM pipes and must be held until all the submitted
-	 * descriptors are processed.
-	 *
-	 * This is required to ensure that both command and descriptors are
-	 * submitted atomically without interruption from other clients,
-	 * when there are requests from more than client at any time.
-	 * Othewise, data and command descriptors can be submitted out of
-	 * order for a request which can cause data corruption.
-	 */
-	struct mutex lock;
-	struct flash_identification flash_dev;
-	struct msm_nand_clk_data clk_data;
-};
-
-/* Structure that defines an ONFI parameter page (512B) */
-struct onfi_param_page {
-	uint32_t parameter_page_signature;
-	uint16_t revision_number;
-	uint16_t features_supported;
-	uint16_t optional_commands_supported;
-	uint8_t  reserved0[22];
-	uint8_t  device_manufacturer[12];
-	uint8_t  device_model[20];
-	uint8_t  jedec_manufacturer_id;
-	uint16_t date_code;
-	uint8_t  reserved1[13];
-	uint32_t number_of_data_bytes_per_page;
-	uint16_t number_of_spare_bytes_per_page;
-	uint32_t number_of_data_bytes_per_partial_page;
-	uint16_t number_of_spare_bytes_per_partial_page;
-	uint32_t number_of_pages_per_block;
-	uint32_t number_of_blocks_per_logical_unit;
-	uint8_t  number_of_logical_units;
-	uint8_t  number_of_address_cycles;
-	uint8_t  number_of_bits_per_cell;
-	uint16_t maximum_bad_blocks_per_logical_unit;
-	uint16_t block_endurance;
-	uint8_t  guaranteed_valid_begin_blocks;
-	uint16_t guaranteed_valid_begin_blocks_endurance;
-	uint8_t  number_of_programs_per_page;
-	uint8_t  partial_program_attributes;
-	uint8_t  number_of_bits_ecc_correctability;
-	uint8_t  number_of_interleaved_address_bits;
-	uint8_t  interleaved_operation_attributes;
-	uint8_t  reserved2[13];
-	uint8_t  io_pin_capacitance;
-	uint16_t timing_mode_support;
-	uint16_t program_cache_timing_mode_support;
-	uint16_t maximum_page_programming_time;
-	uint16_t maximum_block_erase_time;
-	uint16_t maximum_page_read_time;
-	uint16_t maximum_change_column_setup_time;
-	uint8_t  reserved3[23];
-	uint16_t vendor_specific_revision_number;
-	uint8_t  vendor_specific[88];
-	uint16_t integrity_crc;
-} __attribute__((__packed__));
-
-#define FLASH_PART_MAGIC1	0x55EE73AA
-#define FLASH_PART_MAGIC2	0xE35EBDDB
-#define FLASH_PTABLE_V3		3
-#define FLASH_PTABLE_V4		4
-#define FLASH_PTABLE_MAX_PARTS_V3 16
-#define FLASH_PTABLE_MAX_PARTS_V4 32
-#define FLASH_PTABLE_HDR_LEN (4*sizeof(uint32_t))
-#define FLASH_PTABLE_ENTRY_NAME_SIZE 16
-
-struct flash_partition_entry {
-	char name[FLASH_PTABLE_ENTRY_NAME_SIZE];
-	u32 offset;     /* Offset in blocks from beginning of device */
-	u32 length;     /* Length of the partition in blocks */
-	u8 attr;	/* Flags for this partition */
-};
-
-struct flash_partition_table {
-	u32 magic1;
-	u32 magic2;
-	u32 version;
-	u32 numparts;
-	struct flash_partition_entry part_entry[FLASH_PTABLE_MAX_PARTS_V4];
-};
-
-#ifdef CONFIG_MSM_SMD
-static struct flash_partition_table ptable;
-#endif
-
-static struct mtd_partition mtd_part[FLASH_PTABLE_MAX_PARTS_V4];
+#include "msm_qpic_nand.h"
 
 /*
  * Get the DMA memory for requested amount of size. It returns the pointer
@@ -428,13 +88,9 @@ static dma_addr_t msm_nand_dma_map(struct device *dev, void *addr, size_t size,
 	if (virt_addr_valid(addr))
 		page = virt_to_page(addr);
 	else {
-		page = vmalloc_to_page(addr);
-		if (!page) {
-			pr_err("%s: invalid addr 0x%lx\n",
-				   __func__, (unsigned long)addr);
-			WARN_ON(1);
+		if (WARN_ON(size + offset > PAGE_SIZE))
 			return ~0;
-		}
+		page = vmalloc_to_page(addr);
 	}
 	return dma_map_page(dev, page, offset, size, dir);
 }
@@ -621,8 +277,22 @@ static void msm_nand_bus_unregister(struct msm_nand_info *info)
 }
 
 /*
- * Wrapper function to prepare a SPS command element with the data that is
- * passed to this function.
+ * Wrapper function to prepare a single SPS command element with the data
+ * that is passed to this function.
+ */
+static inline void msm_nand_prep_ce(struct sps_command_element *ce,
+				uint32_t addr, uint32_t command, uint32_t data)
+{
+	ce->addr = addr;
+	ce->command = (command & WRITE) ? (uint32_t) SPS_WRITE_COMMAND :
+			(uint32_t) SPS_READ_COMMAND;
+	ce->data = data;
+	ce->mask = 0xFFFFFFFF;
+}
+
+/*
+ * Wrapper function to prepare a single command descriptor with a single
+ * SPS command element with the data that is passed to this function.
  *
  * Since for any command element it is a must to have this flag
  * SPS_IOVEC_FLAG_CMD, this function by default updates this flag for a
@@ -630,20 +300,13 @@ static void msm_nand_bus_unregister(struct msm_nand_info *info)
  * pass this flag. The other flags must be passed based on the need.  If a
  * command element doesn't have any other flag, then 0 can be passed to flags.
  */
-static inline void msm_nand_prep_ce(struct msm_nand_sps_cmd *sps_cmd,
+static inline void msm_nand_prep_single_desc(struct msm_nand_sps_cmd *sps_cmd,
 				uint32_t addr, uint32_t command,
 				uint32_t data, uint32_t flags)
 {
-	struct sps_command_element *cmd = &sps_cmd->ce;
-
-	cmd->addr = addr;
-	cmd->command = (command & WRITE) ? (uint32_t) SPS_WRITE_COMMAND :
-			(uint32_t) SPS_READ_COMMAND;
-	cmd->data = data;
-	cmd->mask = 0xFFFFFFFF;
+	msm_nand_prep_ce(&sps_cmd->ce, addr, command, data);
 	sps_cmd->flags = SPS_IOVEC_FLAG_CMD | flags;
 }
-
 /*
  * Read a single NANDc register as mentioned by its parameter addr. The return
  * value indicates whether read is successful or not. The register value read
@@ -664,7 +327,7 @@ static int msm_nand_flash_rd_reg(struct msm_nand_info *info, uint32_t addr,
 	wait_event(chip->dma_wait_queue, (dma_buffer = msm_nand_get_dma_buffer(
 		    chip, sizeof(*dma_buffer))));
 	cmd = &dma_buffer->cmd;
-	msm_nand_prep_ce(cmd, addr, READ, msm_virt_to_dma(chip,
+	msm_nand_prep_single_desc(cmd, addr, READ, msm_virt_to_dma(chip,
 			&dma_buffer->data), SPS_IOVEC_FLAG_INT);
 
 	mutex_lock(&info->lock);
@@ -731,19 +394,19 @@ static int msm_nand_flash_read_id(struct msm_nand_info *info,
 	dma_buffer->data[3] = 0xeeeeeeee;
 
 	cmd = dma_buffer->cmd;
-	msm_nand_prep_ce(cmd, MSM_NAND_ADDR0(info), WRITE,
+	msm_nand_prep_single_desc(cmd, MSM_NAND_ADDR0(info), WRITE,
 			dma_buffer->data[0], SPS_IOVEC_FLAG_LOCK);
 	cmd++;
 
-	msm_nand_prep_ce(cmd, MSM_NAND_FLASH_CMD(info), WRITE,
+	msm_nand_prep_single_desc(cmd, MSM_NAND_FLASH_CMD(info), WRITE,
 			dma_buffer->data[1], 0);
 	cmd++;
 
-	msm_nand_prep_ce(cmd, MSM_NAND_EXEC_CMD(info), WRITE,
+	msm_nand_prep_single_desc(cmd, MSM_NAND_EXEC_CMD(info), WRITE,
 			dma_buffer->data[2], SPS_IOVEC_FLAG_NWD);
 	cmd++;
 
-	msm_nand_prep_ce(cmd, MSM_NAND_READ_ID(info), READ,
+	msm_nand_prep_single_desc(cmd, MSM_NAND_READ_ID(info), READ,
 		msm_virt_to_dma(chip, &dma_buffer->data[3]),
 		SPS_IOVEC_FLAG_UNLOCK | SPS_IOVEC_FLAG_INT);
 	cmd++;
@@ -813,20 +476,24 @@ static void msm_nand_prep_cfg_cmd_desc(struct msm_nand_info *info,
 	struct msm_nand_sps_cmd *cmd;
 
 	cmd = *curr_cmd;
-	msm_nand_prep_ce(cmd, MSM_NAND_FLASH_CMD(info), WRITE, data.cmd,
-			SPS_IOVEC_FLAG_LOCK);
+	msm_nand_prep_single_desc(cmd, MSM_NAND_FLASH_CMD(info), WRITE,
+			data.cmd, SPS_IOVEC_FLAG_LOCK);
 	cmd++;
 
-	msm_nand_prep_ce(cmd, MSM_NAND_ADDR0(info), WRITE, data.addr0, 0);
+	msm_nand_prep_single_desc(cmd, MSM_NAND_ADDR0(info), WRITE,
+			data.addr0, 0);
 	cmd++;
 
-	msm_nand_prep_ce(cmd, MSM_NAND_ADDR1(info), WRITE, data.addr1, 0);
+	msm_nand_prep_single_desc(cmd, MSM_NAND_ADDR1(info), WRITE,
+			data.addr1, 0);
 	cmd++;
 
-	msm_nand_prep_ce(cmd, MSM_NAND_DEV0_CFG0(info), WRITE, data.cfg0, 0);
+	msm_nand_prep_single_desc(cmd, MSM_NAND_DEV0_CFG0(info), WRITE,
+			data.cfg0, 0);
 	cmd++;
 
-	msm_nand_prep_ce(cmd, MSM_NAND_DEV0_CFG1(info), WRITE, data.cfg1, 0);
+	msm_nand_prep_single_desc(cmd, MSM_NAND_DEV0_CFG1(info), WRITE,
+			data.cfg1, 0);
 	cmd++;
 	*curr_cmd = cmd;
 }
@@ -1013,36 +680,36 @@ static int msm_nand_flash_onfi_probe(struct msm_nand_info *info)
 	msm_nand_prep_cfg_cmd_desc(info, data.cfg, &curr_cmd);
 
 	cmd = curr_cmd;
-	msm_nand_prep_ce(cmd, MSM_NAND_DEV0_ECC_CFG(info), WRITE,
+	msm_nand_prep_single_desc(cmd, MSM_NAND_DEV0_ECC_CFG(info), WRITE,
 			data.ecc_bch_cfg, 0);
 	cmd++;
 
-	msm_nand_prep_ce(cmd, MSM_NAND_DEV_CMD_VLD(info), WRITE,
+	msm_nand_prep_single_desc(cmd, MSM_NAND_DEV_CMD_VLD(info), WRITE,
 			data.devcmdvld_mod, 0);
 	cmd++;
 
-	msm_nand_prep_ce(cmd, MSM_NAND_DEV_CMD1(info), WRITE,
+	msm_nand_prep_single_desc(cmd, MSM_NAND_DEV_CMD1(info), WRITE,
 			data.devcmd1_mod, 0);
 	cmd++;
 
 	rdata = (0 << 0) | (ONFI_PARAM_INFO_LENGTH << 16) | (1 << 31);
-	msm_nand_prep_ce(cmd, MSM_NAND_READ_LOCATION_0(info), WRITE,
+	msm_nand_prep_single_desc(cmd, MSM_NAND_READ_LOCATION_0(info), WRITE,
 			rdata, 0);
 	cmd++;
 
-	msm_nand_prep_ce(cmd, MSM_NAND_EXEC_CMD(info), WRITE,
+	msm_nand_prep_single_desc(cmd, MSM_NAND_EXEC_CMD(info), WRITE,
 		data.exec, SPS_IOVEC_FLAG_NWD);
 	cmd++;
 
-	msm_nand_prep_ce(cmd, MSM_NAND_FLASH_STATUS(info), READ,
+	msm_nand_prep_single_desc(cmd, MSM_NAND_FLASH_STATUS(info), READ,
 		msm_virt_to_dma(chip, &dma_buffer->flash_status), 0);
 	cmd++;
 
-	msm_nand_prep_ce(cmd, MSM_NAND_DEV_CMD1(info), WRITE,
+	msm_nand_prep_single_desc(cmd, MSM_NAND_DEV_CMD1(info), WRITE,
 			data.devcmd1_orig, 0);
 	cmd++;
 
-	msm_nand_prep_ce(cmd, MSM_NAND_DEV_CMD_VLD(info), WRITE,
+	msm_nand_prep_single_desc(cmd, MSM_NAND_DEV_CMD_VLD(info), WRITE,
 			data.devcmdvld_orig,
 			SPS_IOVEC_FLAG_UNLOCK | SPS_IOVEC_FLAG_INT);
 	cmd++;
@@ -1276,6 +943,8 @@ static int msm_nand_validate_mtd_params(struct mtd_info *mtd, bool read,
 	}
 
 	if (ops->datbuf) {
+		if (read)
+			memset(ops->datbuf, 0xFF, ops->len);
 		args->data_dma_addr_curr = args->data_dma_addr =
 			msm_nand_dma_map(chip->dev, ops->datbuf, ops->len,
 				      (read ? DMA_FROM_DEVICE : DMA_TO_DEVICE));
@@ -1358,61 +1027,81 @@ static void msm_nand_prep_rw_cmd_desc(struct mtd_oob_ops *ops,
 				struct msm_nand_rw_reg_data *data,
 				struct msm_nand_info *info,
 				uint32_t curr_cw,
-				struct msm_nand_sps_cmd **curr_cmd)
+				struct msm_nand_rw_cmd_desc *cmd_list,
+				uint32_t *cw_desc_cnt)
 {
 	struct msm_nand_chip *chip = &info->nand_chip;
-	struct msm_nand_sps_cmd *cmd;
 	uint32_t rdata;
 	/* read_location register parameters */
 	uint32_t offset, size, last_read;
-	static uint32_t prev_rdata;
+	struct sps_command_element *curr_ce, *start_ce;
+	uint32_t *flags_ptr, *num_ce_ptr;
 
-	cmd = *curr_cmd;
 	if (curr_cw == args->start_sector) {
-		msm_nand_prep_ce(cmd, MSM_NAND_FLASH_CMD(info), WRITE,
-				data->cmd,
-				((curr_cw == args->start_sector) ?
-				 SPS_IOVEC_FLAG_LOCK : 0));
-		cmd++;
+		curr_ce = start_ce = &cmd_list->setup_desc.ce[0];
+		num_ce_ptr = &cmd_list->setup_desc.num_ce;
+		flags_ptr = &cmd_list->setup_desc.flags;
+		*flags_ptr = CMD_LCK;
+		cmd_list->count = 1;
+		msm_nand_prep_ce(curr_ce, MSM_NAND_FLASH_CMD(info), WRITE,
+				data->cmd);
+		curr_ce++;
 
-		msm_nand_prep_ce(cmd, MSM_NAND_ADDR0(info), WRITE,
-				data->addr0, 0);
-		cmd++;
+		msm_nand_prep_ce(curr_ce, MSM_NAND_ADDR0(info), WRITE,
+				data->addr0);
+		curr_ce++;
 
-		msm_nand_prep_ce(cmd, MSM_NAND_ADDR1(info), WRITE,
-				data->addr1, 0);
-		cmd++;
+		msm_nand_prep_ce(curr_ce, MSM_NAND_ADDR1(info), WRITE,
+				data->addr1);
+		curr_ce++;
 
-		msm_nand_prep_ce(cmd, MSM_NAND_DEV0_CFG0(info), WRITE,
-				data->cfg0, 0);
-		cmd++;
+		msm_nand_prep_ce(curr_ce, MSM_NAND_DEV0_CFG0(info), WRITE,
+				data->cfg0);
+		curr_ce++;
 
-		msm_nand_prep_ce(cmd, MSM_NAND_DEV0_CFG1(info), WRITE,
-				data->cfg1, 0);
-		cmd++;
+		msm_nand_prep_ce(curr_ce, MSM_NAND_DEV0_CFG1(info), WRITE,
+				data->cfg1);
+		curr_ce++;
 
-		msm_nand_prep_ce(cmd, MSM_NAND_DEV0_ECC_CFG(info), WRITE,
-				data->ecc_bch_cfg, 0);
-		cmd++;
+		msm_nand_prep_ce(curr_ce, MSM_NAND_DEV0_ECC_CFG(info), WRITE,
+				data->ecc_bch_cfg);
+		curr_ce++;
 
-		msm_nand_prep_ce(cmd, MSM_NAND_EBI2_ECC_BUF_CFG(info),
-				WRITE, data->ecc_cfg, 0);
-		cmd++;
+		msm_nand_prep_ce(curr_ce, MSM_NAND_EBI2_ECC_BUF_CFG(info),
+				WRITE, data->ecc_cfg);
+		curr_ce++;
 
 		if (!args->read) {
-			msm_nand_prep_ce(cmd, MSM_NAND_FLASH_STATUS(info),
-					WRITE, data->clrfstatus, 0);
-			cmd++;
+			msm_nand_prep_ce(curr_ce, MSM_NAND_FLASH_STATUS(info),
+					WRITE, data->clrfstatus);
+			curr_ce++;
 			goto sub_exec_cmd;
+		} else {
+			msm_nand_prep_ce(curr_ce,
+					MSM_NAND_ERASED_CW_DETECT_CFG(info),
+					WRITE, CLR_ERASED_PAGE_DET);
+			curr_ce++;
+			msm_nand_prep_ce(curr_ce,
+					MSM_NAND_ERASED_CW_DETECT_CFG(info),
+					WRITE, SET_ERASED_PAGE_DET);
+			curr_ce++;
 		}
-
+	} else {
+		curr_ce = start_ce = &cmd_list->cw_desc[*cw_desc_cnt].ce[0];
+		num_ce_ptr = &cmd_list->cw_desc[*cw_desc_cnt].num_ce;
+		flags_ptr = &cmd_list->cw_desc[*cw_desc_cnt].flags;
+		*cw_desc_cnt += 1;
+		*flags_ptr = CMD;
+		cmd_list->count++;
 	}
+	if (!args->read)
+		goto sub_exec_cmd;
 
 	if (ops->mode == MTD_OPS_RAW) {
 		rdata = (0 << 0) | (chip->cw_size << 16) | (1 << 31);
-		msm_nand_prep_ce(cmd, MSM_NAND_READ_LOCATION_0(info), WRITE,
-				rdata, 0);
-		cmd++;
+		msm_nand_prep_ce(curr_ce, MSM_NAND_READ_LOCATION_0(info), WRITE,
+				rdata);
+		curr_ce++;
 	}
 	if (ops->mode == MTD_OPS_AUTO_OOB) {
 		if (ops->datbuf) {
@@ -1424,14 +1113,11 @@ static void msm_nand_prep_rw_cmd_desc(struct mtd_oob_ops *ops,
 			rdata = (offset << 0) | (size << 16) |
 				(last_read << 31);
 
-			if (prev_rdata != rdata) {
-				msm_nand_prep_ce(cmd,
-						MSM_NAND_READ_LOCATION_0(info),
-						WRITE,
-						rdata, 0);
-				cmd++;
-				prev_rdata = rdata;
-			}
+			msm_nand_prep_ce(curr_ce,
+					MSM_NAND_READ_LOCATION_0(info),
+					WRITE,
+					rdata);
+			curr_ce++;
 		}
 		if (curr_cw == (args->cwperpage - 1) && ops->oobbuf) {
 			offset = 512 - ((args->cwperpage - 1) << 2);
@@ -1443,24 +1129,23 @@ static void msm_nand_prep_rw_cmd_desc(struct mtd_oob_ops *ops,
 			rdata = (offset << 0) | (size << 16) |
 				(last_read << 31);
 
-			if (ops->datbuf)
-				msm_nand_prep_ce(cmd,
-						MSM_NAND_READ_LOCATION_1(info),
-						WRITE, rdata, 0);
-			else
-				msm_nand_prep_ce(cmd,
+			if (!ops->datbuf)
+				msm_nand_prep_ce(curr_ce,
 						MSM_NAND_READ_LOCATION_0(info),
-						WRITE, rdata, 0);
-			cmd++;
+						WRITE, rdata);
+			else
+				msm_nand_prep_ce(curr_ce,
+						MSM_NAND_READ_LOCATION_1(info),
+						WRITE, rdata);
+			curr_ce++;
 		}
 	}
-	if (curr_cw == (args->cwperpage - 1))
-		prev_rdata = 0;
 sub_exec_cmd:
-	msm_nand_prep_ce(cmd, MSM_NAND_EXEC_CMD(info), WRITE, data->exec,
-			SPS_IOVEC_FLAG_NWD);
-	cmd++;
-	*curr_cmd = cmd;
+	*flags_ptr |= NWD;
+	msm_nand_prep_ce(curr_ce, MSM_NAND_EXEC_CMD(info), WRITE, data->exec);
+	curr_ce++;
+
+	*num_ce_ptr = curr_ce - start_ce;
 }
 
 /*
@@ -1557,9 +1242,9 @@ static int msm_nand_read_oob(struct mtd_info *mtd, loff_t from,
 	uint32_t ecc_errors = 0, total_ecc_errors = 0;
 	struct msm_nand_rw_params rw_params;
 	struct msm_nand_rw_reg_data data;
-	struct msm_nand_sps_cmd *cmd, *curr_cmd;
 	struct sps_iovec *iovec;
 	struct sps_iovec iovec_temp;
+
 	/*
 	 * The following 6 commands will be sent only once for the first
 	 * codeword (CW) - addr0, addr1, dev0_cfg0, dev0_cfg1,
@@ -1567,16 +1252,22 @@ static int msm_nand_read_oob(struct mtd_info *mtd, loff_t from,
 	 * be sent for every CW - flash, read_location_0, read_location_1,
 	 * exec, flash_status and buffer_status.
 	 */
-	uint32_t total_cnt = (6 * cwperpage) + 6;
+	uint32_t desc_needed = 2 * cwperpage;
 	struct {
 		struct sps_transfer xfer;
-		struct sps_iovec cmd_iovec[total_cnt];
-		struct msm_nand_sps_cmd cmd[total_cnt];
+		struct sps_iovec cmd_iovec[desc_needed];
+		struct {
+			uint32_t count;
+			struct msm_nand_cmd_setup_desc setup_desc;
+			struct msm_nand_cmd_cw_desc cw_desc[desc_needed - 1];
+		} cmd_list;
 		struct {
 			uint32_t flash_status;
 			uint32_t buffer_status;
+			uint32_t erased_cw_status;
 		} result[cwperpage];
 	} *dma_buffer;
+	struct msm_nand_rw_cmd_desc *cmd_list = NULL;
 
 	memset(&rw_params, 0, sizeof(struct msm_nand_rw_params));
 	err = msm_nand_validate_mtd_params(mtd, true, from, ops, &rw_params);
@@ -1592,46 +1283,66 @@ static int msm_nand_read_oob(struct mtd_info *mtd, loff_t from,
 
 	memset(&data, 0, sizeof(struct msm_nand_rw_reg_data));
 	msm_nand_update_rw_reg_data(chip, ops, &rw_params, &data);
+	cmd_list = (struct msm_nand_rw_cmd_desc *)&dma_buffer->cmd_list;
 
 	while (rw_params.page_count-- > 0) {
+		uint32_t cw_desc_cnt = 0;
 		data.addr0 = (rw_params.page << 16) | rw_params.oob_col;
 		data.addr1 = (rw_params.page >> 16) & 0xff;
-		cmd = dma_buffer->cmd;
 		for (n = rw_params.start_sector; n < cwperpage; n++) {
+			struct sps_command_element *curr_ce, *start_ce;
 			dma_buffer->result[n].flash_status = 0xeeeeeeee;
 			dma_buffer->result[n].buffer_status = 0xeeeeeeee;
+			dma_buffer->result[n].erased_cw_status = 0xeeeeee00;
 
-			curr_cmd = cmd;
-			msm_nand_prep_rw_cmd_desc(ops, &rw_params,
-					&data, info, n, &curr_cmd);
+			msm_nand_prep_rw_cmd_desc(ops, &rw_params, &data, info,
+					n, cmd_list, &cw_desc_cnt);
 
-			cmd = curr_cmd;
-			msm_nand_prep_ce(cmd, MSM_NAND_FLASH_STATUS(info),
+			start_ce = &cmd_list->cw_desc[cw_desc_cnt].ce[0];
+			curr_ce = start_ce;
+			cmd_list->cw_desc[cw_desc_cnt].flags = CMD;
+			if (n == (cwperpage - 1))
+				cmd_list->cw_desc[cw_desc_cnt].flags |=
+								INT_UNLCK;
+			cmd_list->count++;
+
+			msm_nand_prep_ce(curr_ce, MSM_NAND_FLASH_STATUS(info),
 				READ, msm_virt_to_dma(chip,
-				&dma_buffer->result[n].flash_status), 0);
-			cmd++;
+					&dma_buffer->result[n].flash_status));
+			curr_ce++;
 
-			msm_nand_prep_ce(cmd, MSM_NAND_BUFFER_STATUS(info),
+			msm_nand_prep_ce(curr_ce, MSM_NAND_BUFFER_STATUS(info),
 				READ, msm_virt_to_dma(chip,
-				&dma_buffer->result[n].buffer_status),
-				((n == (cwperpage - 1)) ?
-				(SPS_IOVEC_FLAG_UNLOCK | SPS_IOVEC_FLAG_INT) :
-				0));
-			cmd++;
+					&dma_buffer->result[n].buffer_status));
+			curr_ce++;
+
+			msm_nand_prep_ce(curr_ce,
+				MSM_NAND_ERASED_CW_DETECT_STATUS(info),
+				READ, msm_virt_to_dma(chip,
+				&dma_buffer->result[n].erased_cw_status));
+			curr_ce++;
+			cmd_list->cw_desc[cw_desc_cnt++].num_ce = curr_ce -
+				start_ce;
 		}
 
-		BUG_ON(cmd - dma_buffer->cmd > ARRAY_SIZE(dma_buffer->cmd));
-		dma_buffer->xfer.iovec_count = (cmd - dma_buffer->cmd);
+		dma_buffer->xfer.iovec_count = cmd_list->count;
 		dma_buffer->xfer.iovec = dma_buffer->cmd_iovec;
 		dma_buffer->xfer.iovec_phys = msm_virt_to_dma(chip,
 						&dma_buffer->cmd_iovec);
 		iovec = dma_buffer->xfer.iovec;
 
-		for (n = 0; n < dma_buffer->xfer.iovec_count; n++) {
+		iovec->addr =  msm_virt_to_dma(chip,
+				&cmd_list->setup_desc.ce[0]);
+		iovec->size = sizeof(struct sps_command_element) *
+			cmd_list->setup_desc.num_ce;
+		iovec->flags = cmd_list->setup_desc.flags;
+		iovec++;
+		for (n = 0; n < (cmd_list->count - 1); n++) {
 			iovec->addr =  msm_virt_to_dma(chip,
-					&dma_buffer->cmd[n].ce);
-			iovec->size = sizeof(struct sps_command_element);
-			iovec->flags = dma_buffer->cmd[n].flags;
+						&cmd_list->cw_desc[n].ce[0]);
+			iovec->size = sizeof(struct sps_command_element) *
+						cmd_list->cw_desc[n].num_ce;
+			iovec->flags = cmd_list->cw_desc[n].flags;
 			iovec++;
 		}
 		mutex_lock(&info->lock);
@@ -1648,6 +1359,7 @@ static int msm_nand_read_oob(struct mtd_info *mtd, loff_t from,
 				goto put_dev;
 			}
 		}
+
 		if (ops->mode == MTD_OPS_RAW) {
 			submitted_num_desc = cwperpage - rw_params.start_sector;
 		} else if (ops->mode == MTD_OPS_AUTO_OOB) {
@@ -1684,52 +1396,28 @@ static int msm_nand_read_oob(struct mtd_info *mtd, loff_t from,
 			if (dma_buffer->result[n].flash_status & (FS_OP_ERR |
 					FS_MPU_ERR)) {
 				rawerr = -EIO;
+				/*
+				 * Check if ECC error was due to an erased
+				 * codeword. If so, ignore the error.
+				 *
+				 * NOTE: There is a bug in erased page
+				 * detection hardware block when reading
+				 * only spare data. In order to work around
+				 * this issue, instead of using PAGE_ALL_ERASED
+				 * bit to check for whether a whole page is
+				 * erased or not, we use CODEWORD_ALL_ERASED
+				 * and  CODEWORD_ERASED bits together and check
+				 * each codeword that has FP_OP_ERR bit set is
+				 * an erased codeword or not.
+				 */
+				if ((dma_buffer->result[n].erased_cw_status &
+					ERASED_CW) == ERASED_CW) {
+					pr_debug("erased codeword detected - ignore ecc error\n");
+					continue;
+				}
+				pageerr = rawerr;
 				break;
 			}
-		}
-		/* Check for ECC correction on empty block */
-		if (rawerr && ops->datbuf && ops->mode != MTD_OPS_RAW) {
-			uint8_t *datbuf = ops->datbuf +
-				pages_read * mtd->writesize;
-
-			dma_sync_single_for_cpu(chip->dev,
-			rw_params.data_dma_addr_curr - mtd->writesize,
-			mtd->writesize, DMA_BIDIRECTIONAL);
-
-			for (n = 0; n < mtd->writesize; n++) {
-				/* TODO: check offset for 4bit BCHECC */
-				if ((n % 516 == 3 || n % 516 == 175)
-						&& datbuf[n] == 0x54)
-					datbuf[n] = 0xff;
-				if (datbuf[n] != 0xff) {
-					pageerr = rawerr;
-					break;
-				}
-			}
-
-			dma_sync_single_for_device(chip->dev,
-			rw_params.data_dma_addr_curr - mtd->writesize,
-			mtd->writesize, DMA_BIDIRECTIONAL);
-		}
-		if (rawerr && ops->oobbuf) {
-			dma_sync_single_for_cpu(chip->dev,
-			rw_params.oob_dma_addr_curr - (ops->ooblen -
-			rw_params.oob_len_data),
-			ops->ooblen - rw_params.oob_len_data,
-			DMA_BIDIRECTIONAL);
-
-			for (n = 0; n < ops->ooblen; n++) {
-				if (ops->oobbuf[n] != 0xff) {
-					pageerr = rawerr;
-					break;
-				}
-			}
-
-			dma_sync_single_for_device(chip->dev,
-			rw_params.oob_dma_addr_curr - (ops->ooblen -
-			rw_params.oob_len_data),
-			ops->ooblen - rw_params.oob_len_data,
-			DMA_BIDIRECTIONAL);
 		}
 		/* check for uncorrectable errors */
 		if (pageerr) {
@@ -1770,9 +1458,11 @@ static int msm_nand_read_oob(struct mtd_info *mtd, loff_t from,
 			       ops->len, ops->ooblen);
 		} else {
 			for (n = rw_params.start_sector; n < cwperpage; n++)
-				pr_debug("cw %d: flash_sts %x buffr_sts %x\n",
+				pr_debug("cw %d: flash_sts %x buffr_sts %x, erased_cw_status: %x, pageerr: %d, rawerr: %d\n",
 				n, dma_buffer->result[n].flash_status,
-				dma_buffer->result[n].buffer_status);
+				dma_buffer->result[n].buffer_status,
+				dma_buffer->result[n].erased_cw_status,
+				pageerr, rawerr);
 		}
 		if (err && err != -EUCLEAN && err != -EBADMSG)
 			goto free_dma;
@@ -1856,6 +1546,10 @@ static int msm_nand_read_partial_page(struct mtd_info *mtd,
 		if (offset == 0 && len == mtd->writesize)
 			no_copy = true;
 
+		if (!virt_addr_valid(actual_buf) &&
+				!is_buffer_in_page(actual_buf, ops->len))
+			no_copy = false;
+
 		ops->datbuf = no_copy ? actual_buf : bounce_buf;
 		err = msm_nand_read_oob(mtd, aligned_from, ops);
 		if (err < 0) {
@@ -1892,6 +1586,7 @@ static int msm_nand_read(struct mtd_info *mtd, loff_t from, size_t len,
 {
 	int ret;
 	struct mtd_oob_ops ops;
+	unsigned char *bounce_buf = NULL;
 
 	ops.mode = MTD_OPS_AUTO_OOB;
 	ops.retlen = 0;
@@ -1904,15 +1599,33 @@ static int msm_nand_read(struct mtd_info *mtd, loff_t from, size_t len,
 		 * Handle reading of large size read buffer in vmalloc
 		 * address space that does not fit in an MMU page.
 		 */
-		if (!virt_addr_valid(buf) &&
-		   ((unsigned long) buf & ~PAGE_MASK) + len > PAGE_SIZE) {
+		if (!virt_addr_valid(buf) && !is_buffer_in_page(buf, len)) {
 			ops.len = mtd->writesize;
 
+			bounce_buf = kmalloc(ops.len, GFP_KERNEL);
+			if (!bounce_buf) {
+				pr_err("%s: unable to allocate memory\n",
+						__func__);
+				ret = -ENOMEM;
+				goto out;
+			}
+
 			for (;;) {
-				ops.datbuf = (uint8_t *)buf;
+				bool no_copy = false;
+
+				if (!is_buffer_in_page(buf, ops.len)) {
+					memcpy(bounce_buf, buf, ops.len);
+					ops.datbuf = (uint8_t *) bounce_buf;
+				} else {
+					ops.datbuf = (uint8_t *) buf;
+					no_copy = true;
+				}
 				ret = msm_nand_read_oob(mtd, from, &ops);
 				if (ret < 0)
 					break;
+
+				if (!no_copy)
+					memcpy(buf, bounce_buf, ops.retlen);
 
 				len -= ops.retlen;
 				*retlen += ops.retlen;
@@ -1930,6 +1643,7 @@ static int msm_nand_read(struct mtd_info *mtd, loff_t from, size_t len,
 					break;
 				}
 			}
+			kfree(bounce_buf);
 		} else {
 			ops.len = len;
 			ops.datbuf = (uint8_t *)buf;
@@ -1942,7 +1656,7 @@ static int msm_nand_read(struct mtd_info *mtd, loff_t from, size_t len,
 		ret = msm_nand_read_partial_page(mtd, from, &ops);
 		*retlen = ops.retlen;
 	}
-
+out:
 	return ret;
 }
 
@@ -1960,7 +1674,6 @@ static int msm_nand_write_oob(struct mtd_info *mtd, loff_t to,
 	int err = 0, submitted_num_desc = 0;
 	struct msm_nand_rw_params rw_params;
 	struct msm_nand_rw_reg_data data;
-	struct msm_nand_sps_cmd *cmd, *curr_cmd;
 	struct sps_iovec *iovec;
 	struct sps_iovec iovec_temp;
 	/*
@@ -1972,15 +1685,20 @@ static int msm_nand_write_oob(struct mtd_info *mtd, loff_t to,
 	 * The following 4 commands will be sent for every CW :
 	 * flash, exec, flash_status (read), flash_status (write).
 	 */
-	uint32_t total_cnt = (4 * cwperpage) + 7;
+	uint32_t desc_needed = 2 * cwperpage;
 	struct {
 		struct sps_transfer xfer;
-		struct sps_iovec cmd_iovec[total_cnt];
-		struct msm_nand_sps_cmd cmd[total_cnt];
+		struct sps_iovec cmd_iovec[desc_needed + 1];
 		struct {
-			uint32_t flash_status[cwperpage];
-		} data;
+			uint32_t count;
+			struct msm_nand_cmd_setup_desc setup_desc;
+			struct msm_nand_cmd_cw_desc cw_desc[desc_needed];
+		} cmd_list;
+		struct {
+			uint32_t flash_status;
+		} data[cwperpage];
 	} *dma_buffer;
+	struct msm_nand_rw_cmd_desc *cmd_list = NULL;
 
 	memset(&rw_params, 0, sizeof(struct msm_nand_rw_params));
 	err = msm_nand_validate_mtd_params(mtd, false, to, ops, &rw_params);
@@ -1992,51 +1710,61 @@ static int msm_nand_write_oob(struct mtd_info *mtd, loff_t to,
 
 	memset(&data, 0, sizeof(struct msm_nand_rw_reg_data));
 	msm_nand_update_rw_reg_data(chip, ops, &rw_params, &data);
+	cmd_list = (struct msm_nand_rw_cmd_desc *)&dma_buffer->cmd_list;
 
 	while (rw_params.page_count-- > 0) {
+		uint32_t cw_desc_cnt = 0;
+		struct sps_command_element *curr_ce, *start_ce;
 		data.addr0 = (rw_params.page << 16);
 		data.addr1 = (rw_params.page >> 16) & 0xff;
-		cmd = dma_buffer->cmd;
 
 		for (n = 0; n < cwperpage ; n++) {
-			dma_buffer->data.flash_status[n] = 0xeeeeeeee;
+			dma_buffer->data[n].flash_status = 0xeeeeeeee;
 
-			curr_cmd = cmd;
-			msm_nand_prep_rw_cmd_desc(ops, &rw_params,
-					&data, info, n, &curr_cmd);
+			msm_nand_prep_rw_cmd_desc(ops, &rw_params, &data, info,
+					n, cmd_list, &cw_desc_cnt);
 
-			cmd = curr_cmd;
-			msm_nand_prep_ce(cmd, MSM_NAND_FLASH_STATUS(info),
+			curr_ce = &cmd_list->cw_desc[cw_desc_cnt].ce[0];
+			cmd_list->cw_desc[cw_desc_cnt].flags = CMD;
+			cmd_list->count++;
+
+			msm_nand_prep_ce(curr_ce, MSM_NAND_FLASH_STATUS(info),
 				READ, msm_virt_to_dma(chip,
-				&dma_buffer->data.flash_status[n]), 0);
-			cmd++;
-
-			if (n == (cwperpage - 1)) {
-				msm_nand_prep_ce(cmd,
-						MSM_NAND_FLASH_STATUS(info),
-						WRITE, data.clrfstatus, 0);
-				cmd++;
-				msm_nand_prep_ce(cmd,
-						MSM_NAND_READ_STATUS(info),
-						WRITE, data.clrrstatus,
-						SPS_IOVEC_FLAG_UNLOCK
-						| SPS_IOVEC_FLAG_INT);
-				cmd++;
-			}
+					&dma_buffer->data[n].flash_status));
+			cmd_list->cw_desc[cw_desc_cnt++].num_ce = 1;
 		}
 
-		BUG_ON(cmd - dma_buffer->cmd > ARRAY_SIZE(dma_buffer->cmd));
-		dma_buffer->xfer.iovec_count = (cmd - dma_buffer->cmd);
+		start_ce = &cmd_list->cw_desc[cw_desc_cnt].ce[0];
+		curr_ce = start_ce;
+		cmd_list->cw_desc[cw_desc_cnt].flags = CMD_INT_UNLCK;
+		cmd_list->count++;
+		msm_nand_prep_ce(curr_ce, MSM_NAND_FLASH_STATUS(info),
+				WRITE, data.clrfstatus);
+		curr_ce++;
+
+		msm_nand_prep_ce(curr_ce, MSM_NAND_READ_STATUS(info),
+				WRITE, data.clrrstatus);
+		curr_ce++;
+		cmd_list->cw_desc[cw_desc_cnt++].num_ce = curr_ce - start_ce;
+
+		dma_buffer->xfer.iovec_count = cmd_list->count;
 		dma_buffer->xfer.iovec = dma_buffer->cmd_iovec;
 		dma_buffer->xfer.iovec_phys = msm_virt_to_dma(chip,
 						&dma_buffer->cmd_iovec);
 		iovec = dma_buffer->xfer.iovec;
 
-		for (n = 0; n < dma_buffer->xfer.iovec_count; n++) {
+		iovec->addr =  msm_virt_to_dma(chip,
+				&cmd_list->setup_desc.ce[0]);
+		iovec->size = sizeof(struct sps_command_element) *
+					cmd_list->setup_desc.num_ce;
+		iovec->flags = cmd_list->setup_desc.flags;
+		iovec++;
+		for (n = 0; n < (cmd_list->count - 1); n++) {
 			iovec->addr =  msm_virt_to_dma(chip,
-					&dma_buffer->cmd[n].ce);
-			iovec->size = sizeof(struct sps_command_element);
-			iovec->flags = dma_buffer->cmd[n].flags;
+					&cmd_list->cw_desc[n].ce[0]);
+			iovec->size = sizeof(struct sps_command_element) *
+					cmd_list->cw_desc[n].num_ce;
+			iovec->flags = cmd_list->cw_desc[n].flags;
 			iovec++;
 		}
 		mutex_lock(&info->lock);
@@ -2053,6 +1781,7 @@ static int msm_nand_write_oob(struct mtd_info *mtd, loff_t to,
 				goto put_dev;
 			}
 		}
+
 		if (ops->mode == MTD_OPS_RAW) {
 			submitted_num_desc = n;
 		} else if (ops->mode == MTD_OPS_AUTO_OOB) {
@@ -2086,11 +1815,11 @@ static int msm_nand_write_oob(struct mtd_info *mtd, loff_t to,
 		for (n = 0; n < cwperpage; n++)
 			pr_debug("write pg %d: flash_status[%d] = %x\n",
 				rw_params.page, n,
-				dma_buffer->data.flash_status[n]);
+				dma_buffer->data[n].flash_status);
 
 		/*  Check for flash status errors */
 		for (n = 0; n < cwperpage; n++) {
-			flash_sts = dma_buffer->data.flash_status[n];
+			flash_sts = dma_buffer->data[n].flash_status;
 			if (flash_sts & (FS_OP_ERR | FS_MPU_ERR)) {
 				pr_err("MPU/OP err (0x%x) set\n", flash_sts);
 				err = -EIO;
@@ -2147,6 +1876,7 @@ static int msm_nand_write(struct mtd_info *mtd, loff_t to, size_t len,
 {
 	int ret;
 	struct mtd_oob_ops ops;
+	unsigned char *bounce_buf = NULL;
 
 	ops.mode = MTD_OPS_AUTO_OOB;
 	ops.retlen = 0;
@@ -2165,12 +1895,24 @@ static int msm_nand_write(struct mtd_info *mtd, loff_t to, size_t len,
 	 * Handle writing of large size write buffer in vmalloc
 	 * address space that does not fit in an MMU page.
 	 */
-	if (!virt_addr_valid(buf) &&
-		((unsigned long) buf & ~PAGE_MASK) + len > PAGE_SIZE) {
+	if (!virt_addr_valid(buf) && !is_buffer_in_page(buf, len)) {
 		ops.len = mtd->writesize;
 
+		bounce_buf = kmalloc(ops.len, GFP_KERNEL);
+		if (!bounce_buf) {
+			pr_err("%s: unable to allocate memory\n",
+					__func__);
+			ret = -ENOMEM;
+			goto out;
+		}
+
 		for (;;) {
-			ops.datbuf = (uint8_t *) buf;
+			if (!is_buffer_in_page(buf, ops.len)) {
+				memcpy(bounce_buf, buf, ops.len);
+				ops.datbuf = (uint8_t *) bounce_buf;
+			} else {
+				ops.datbuf = (uint8_t *) buf;
+			}
 			ret = msm_nand_write_oob(mtd, to, &ops);
 			if (ret < 0)
 				break;
@@ -2183,6 +1925,7 @@ static int msm_nand_write(struct mtd_info *mtd, loff_t to, size_t len,
 			buf += mtd->writesize;
 			to += mtd->writesize;
 		}
+		kfree(bounce_buf);
 	} else {
 		ops.len = len;
 		ops.datbuf = (uint8_t *)buf;
@@ -2268,19 +2011,19 @@ static int msm_nand_erase(struct mtd_info *mtd, struct erase_info *instr)
 	msm_nand_prep_cfg_cmd_desc(info, data.cfg, &curr_cmd);
 
 	cmd = curr_cmd;
-	msm_nand_prep_ce(cmd, MSM_NAND_EXEC_CMD(info), WRITE, data.exec,
-			SPS_IOVEC_FLAG_NWD);
+	msm_nand_prep_single_desc(cmd, MSM_NAND_EXEC_CMD(info), WRITE,
+			data.exec, SPS_IOVEC_FLAG_NWD);
 	cmd++;
 
-	msm_nand_prep_ce(cmd, MSM_NAND_FLASH_STATUS(info), READ,
+	msm_nand_prep_single_desc(cmd, MSM_NAND_FLASH_STATUS(info), READ,
 		msm_virt_to_dma(chip, &dma_buffer->flash_status), 0);
 	cmd++;
 
-	msm_nand_prep_ce(cmd, MSM_NAND_FLASH_STATUS(info), WRITE,
+	msm_nand_prep_single_desc(cmd, MSM_NAND_FLASH_STATUS(info), WRITE,
 			data.clrfstatus, 0);
 	cmd++;
 
-	msm_nand_prep_ce(cmd, MSM_NAND_READ_STATUS(info), WRITE,
+	msm_nand_prep_single_desc(cmd, MSM_NAND_READ_STATUS(info), WRITE,
 			data.clrrstatus,
 			SPS_IOVEC_FLAG_UNLOCK | SPS_IOVEC_FLAG_INT);
 	cmd++;
@@ -2431,19 +2174,20 @@ static int msm_nand_block_isbad(struct mtd_info *mtd, loff_t ofs)
 	msm_nand_prep_cfg_cmd_desc(info, data.cfg, &curr_cmd);
 
 	cmd = curr_cmd;
-	msm_nand_prep_ce(cmd, MSM_NAND_DEV0_ECC_CFG(info), WRITE,
+	msm_nand_prep_single_desc(cmd, MSM_NAND_DEV0_ECC_CFG(info), WRITE,
 			data.ecc_bch_cfg, 0);
 	cmd++;
 
 	rdata = (data.read_offset << 0) | (4 << 16) | (1 << 31);
-	msm_nand_prep_ce(cmd, MSM_NAND_READ_LOCATION_0(info), WRITE, rdata, 0);
+	msm_nand_prep_single_desc(cmd, MSM_NAND_READ_LOCATION_0(info), WRITE,
+			rdata, 0);
 	cmd++;
 
-	msm_nand_prep_ce(cmd, MSM_NAND_EXEC_CMD(info), WRITE,
+	msm_nand_prep_single_desc(cmd, MSM_NAND_EXEC_CMD(info), WRITE,
 			data.exec, SPS_IOVEC_FLAG_NWD);
 	cmd++;
 
-	msm_nand_prep_ce(cmd, MSM_NAND_FLASH_STATUS(info), READ,
+	msm_nand_prep_single_desc(cmd, MSM_NAND_FLASH_STATUS(info), READ,
 		msm_virt_to_dma(chip, &dma_buffer->flash_status),
 		SPS_IOVEC_FLAG_INT | SPS_IOVEC_FLAG_UNLOCK);
 	cmd++;
@@ -2575,6 +2319,7 @@ int msm_nand_scan(struct mtd_info *mtd)
 	uint32_t i, mtd_writesize;
 	uint8_t dev_found = 0, wide_bus;
 	uint32_t manid, devid, devcfg;
+	uint8_t id_byte0, id_byte1, id_byte2, id_byte3;
 	uint32_t bad_block_byte;
 	struct nand_flash_dev *flashdev = NULL;
 	struct nand_manufacturers  *flashman = NULL;
@@ -2589,16 +2334,33 @@ int msm_nand_scan(struct mtd_info *mtd)
 			err = -EINVAL;
 			goto out;
 		}
-		manid = flash_id & 0xFF;
-		devid = (flash_id >> 8) & 0xFF;
-		devcfg = (flash_id >> 24) & 0xFF;
+		manid  = id_byte0 = flash_id & 0xFF;
+		devid  = id_byte1 = (flash_id >> 8) & 0xFF;
+		devcfg = id_byte3 = (flash_id >> 24) & 0xFF;
+		id_byte2 = (flash_id >> 16) & 0xFF;
 
 		for (i = 0; !flashman && nand_manuf_ids[i].id; ++i)
 			if (nand_manuf_ids[i].id == manid)
 				flashman = &nand_manuf_ids[i];
-		for (i = 0; !flashdev && nand_flash_ids[i].id; ++i)
-			if (nand_flash_ids[i].dev_id == devid)
+		for (i = 0; !flashdev && nand_flash_ids[i].id; ++i) {
+			/*
+			 * If id_len is specified for an entry in the nand ids
+			 * array, then at least 4 bytes of the nand id is
+			 * present in the nand ids array - use that to identify
+			 * the nand device first. If that is not present, only
+			 * then fall back to searching the legacy or extended
+			 * ids in the nand ids array.
+			 */
+			if (nand_flash_ids[i].id_len &&
+			   (nand_flash_ids[i].id[0] == id_byte0) &&
+			   (nand_flash_ids[i].id[1] == id_byte1) &&
+			   (nand_flash_ids[i].id[2] == id_byte2) &&
+			   (nand_flash_ids[i].id[3] == id_byte3))
 				flashdev = &nand_flash_ids[i];
+			else if (!nand_flash_ids[i].id_len &&
+					nand_flash_ids[i].dev_id == devid)
+				flashdev = &nand_flash_ids[i];
+		}
 		if (!flashdev || !flashman) {
 			pr_err("unknown nand flashid=%x manuf=%x devid=%x\n",
 				flash_id, manid, devid);
@@ -2607,6 +2369,7 @@ int msm_nand_scan(struct mtd_info *mtd)
 		}
 		dev_found = 1;
 		if (!flashdev->pagesize) {
+			pr_err("missing page size info - extract from NAND ID\n");
 			supported_flash->widebus = devcfg & (1 << 6) ? 1 : 0;
 			supported_flash->pagesize = 1024 << (devcfg & 0x3);
 			supported_flash->blksize = (64 * 1024) <<
@@ -2618,7 +2381,11 @@ int msm_nand_scan(struct mtd_info *mtd)
 				       NAND_BUSWIDTH_16 ? 1 : 0;
 			supported_flash->pagesize = flashdev->pagesize;
 			supported_flash->blksize = flashdev->erasesize;
-			supported_flash->oobsize = flashdev->pagesize >> 5;
+			supported_flash->oobsize = flashdev->oobsize;
+			supported_flash->ecc_correctability =
+					flashdev->ecc_correctable_bits;
+			if (!flashdev->ecc_correctable_bits)
+				pr_err("num ecc correctable bit not specified and defaults to 4 bit BCH\n");
 		}
 		supported_flash->flash_id = flash_id;
 		supported_flash->density = ((uint64_t)flashdev->chipsize) << 20;
@@ -2934,7 +2701,7 @@ static int msm_nand_enable_dma(struct msm_nand_info *info)
 	wait_event(chip->dma_wait_queue,
 		   (sps_cmd = msm_nand_get_dma_buffer(chip, sizeof(*sps_cmd))));
 
-	msm_nand_prep_ce(sps_cmd, MSM_NAND_CTRL(info), WRITE,
+	msm_nand_prep_single_desc(sps_cmd, MSM_NAND_CTRL(info), WRITE,
 			(1 << BAM_MODE_EN), SPS_IOVEC_FLAG_INT);
 
 	mutex_lock(&info->lock);

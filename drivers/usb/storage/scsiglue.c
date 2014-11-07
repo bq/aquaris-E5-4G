@@ -78,6 +78,8 @@ static const char* host_info(struct Scsi_Host *host)
 
 static int slave_alloc (struct scsi_device *sdev)
 {
+	struct us_data *us = host_to_us(sdev->host);
+
 	/*
 	 * Set the INQUIRY transfer length to 36.  We don't use any of
 	 * the extra data and many devices choke if asked for more or
@@ -101,6 +103,10 @@ static int slave_alloc (struct scsi_device *sdev)
 	 * will require changes to the block layer.
 	 */
 	blk_queue_update_dma_alignment(sdev->request_queue, (512 - 1));
+
+	/* Tell the SCSI layer if we know there is more than one LUN */
+	if (us->protocol == USB_PR_BULK && us->max_lun > 0)
+		sdev->sdev_bflags |= BLIST_FORCELUN;
 
 	return 0;
 }
@@ -254,14 +260,6 @@ static int slave_configure(struct scsi_device *sdev)
 			sdev->use_rpm_auto = 1;
 			sdev->autosuspend_delay = us->sdev_autosuspend_delay;
 		}
-
-		/*
-		 * This quirk enables sending consecutive TEST_UNIT_READY
-		 * commands in WRITE(10) command processing context. Increase
-		 * the timeout to 60 seconds.
-		 */
-		if (us->fflags & US_FL_TUR_AFTER_WRITE)
-			blk_queue_rq_timeout(sdev->request_queue, (60 * HZ));
 
 	} else {
 

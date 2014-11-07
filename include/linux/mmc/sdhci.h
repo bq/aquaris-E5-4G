@@ -166,7 +166,14 @@ struct sdhci_host {
  * Some SDHC controllers are unable to handle data-end bit error in
  * 1-bit mode of SDIO.
  */
-#define SDHCI_QUIRK2_IGN_DATA_END_BIT_ERROR             (1<<9)
+#define SDHCI_QUIRK2_IGN_DATA_END_BIT_ERROR             (1<<12)
+
+/*
+ * Some SDHC controllers do not require data buffers alignment, skip
+ * the bounce buffer logic when preparing data
+ */
+#define SDHCI_QUIRK2_ADMA_SKIP_DATA_ALIGNMENT             (1<<13)
+
 	int irq;		/* Device IRQ */
 	void __iomem *ioaddr;	/* Mapped address */
 

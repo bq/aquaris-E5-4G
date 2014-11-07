@@ -223,7 +223,7 @@ struct se_dev_entry *core_get_se_deve_from_rtpi(
 			continue;
 
 		atomic_inc(&deve->pr_ref_count);
-		smp_mb__after_atomic_inc();
+		smp_mb__after_atomic();
 		spin_unlock_irq(&nacl->device_list_lock);
 
 		return deve;
@@ -614,6 +614,7 @@ void core_dev_unexport(
 	dev->export_count--;
 	spin_unlock(&hba->device_lock);
 
+	lun->lun_sep = NULL;
 	lun->lun_se_dev = NULL;
 }
 
@@ -796,10 +797,10 @@ int se_dev_set_emulate_write_cache(struct se_device *dev, int flag)
 		pr_err("emulate_write_cache not supported for pSCSI\n");
 		return -EINVAL;
 	}
-	if (dev->transport->get_write_cache) {
-		pr_warn("emulate_write_cache cannot be changed when underlying"
-			" HW reports WriteCacheEnabled, ignoring request\n");
-		return 0;
+	if (flag &&
+	    dev->transport->get_write_cache) {
+		pr_err("emulate_write_cache not supported for this device\n");
+		return -EINVAL;
 	}
 
 	dev->dev_attrib.emulate_write_cache = flag;
@@ -1280,7 +1281,7 @@ int core_dev_add_initiator_node_lun_acl(
 	spin_lock(&lun->lun_acl_lock);
 	list_add_tail(&lacl->lacl_list, &lun->lun_acl_list);
 	atomic_inc(&lun->lun_acl_count);
-	smp_mb__after_atomic_inc();
+	smp_mb__after_atomic();
 	spin_unlock(&lun->lun_acl_lock);
 
 	pr_debug("%s_TPG[%hu]_LUN[%u->%u] - Added %s ACL for "
@@ -1314,7 +1315,7 @@ int core_dev_del_initiator_node_lun_acl(
 	spin_lock(&lun->lun_acl_lock);
 	list_del(&lacl->lacl_list);
 	atomic_dec(&lun->lun_acl_count);
-	smp_mb__after_atomic_dec();
+	smp_mb__after_atomic();
 	spin_unlock(&lun->lun_acl_lock);
 
 	core_disable_device_list_for_node(lun, NULL, lacl->mapped_lun,

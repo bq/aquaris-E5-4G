@@ -10,7 +10,7 @@
  * GNU General Public License for more details.
  */
 
-#include <msm8x16_wcd_registers.h>
+#include "msm8x16_wcd_registers.h"
 #include "msm8x16-wcd.h"
 
 const u8 msm8x16_wcd_reg_readable[MSM8X16_WCD_CACHE_SIZE] = {
@@ -258,6 +258,8 @@ const u8 msm8x16_wcd_reg_readonly[MSM8X16_WCD_CACHE_SIZE] = {
 		[MSM8X16_WCD_A_DIGITAL_INT_LATCHED_STS] = 1,
 		[MSM8X16_WCD_A_DIGITAL_INT_PENDING_STS] = 1,
 		[MSM8X16_WCD_A_DIGITAL_PIN_STATUS] = 1,
+		[MSM8X16_WCD_A_DIGITAL_SEC_ACCESS] = 1,
+		[MSM8X16_WCD_A_ANALOG_SEC_ACCESS] = 1,
 		[MSM8X16_WCD_A_ANALOG_REVISION1] = 1,
 		[MSM8X16_WCD_A_ANALOG_REVISION2] = 1,
 		[MSM8X16_WCD_A_ANALOG_REVISION3] = 1,

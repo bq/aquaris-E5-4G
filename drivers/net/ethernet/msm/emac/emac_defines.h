@@ -178,6 +178,7 @@
 
 /* EMAC_INT_STATUS */
 #define DIS_INT                                              0x80000000
+#define PTP_INT                                              0x40000000
 #define RFD4_UR_INT                                          0x20000000
 #define TX_PKT_INT3                                           0x4000000
 #define TX_PKT_INT2                                           0x2000000
@@ -279,6 +280,10 @@
 #define H1TPD_PROD_IDX_SHFT                                           0
 
 /* EMAC_EMAC_WRAPPER_CSR1 */
+#define TX_INDX_FIFO_SYNC_RST                                  0x800000
+#define TX_TS_FIFO_SYNC_RST                                    0x400000
+#define RX_TS_FIFO2_SYNC_RST                                   0x200000
+#define RX_TS_FIFO1_SYNC_RST                                   0x100000
 #define TX_TS_ENABLE                                            0x10000
 #define DIS_1588_CLKS                                             0x800
 #define FREQ_MODE                                                 0x200
@@ -324,6 +329,10 @@
 #define CLOCK_MODE_SHFT                                               1
 #define ETH_MODE_SW                                                 0x1
 
+/* EMAC_P1588_TX_LATENCY */
+#define TX_LATENCY_BMSK                                          0xffff
+#define TX_LATENCY_SHFT                                               0
+
 /* EMAC_P1588_INC_VALUE_2 */
 #define INC_VALUE_2_BMSK                                         0xffff
 
@@ -362,6 +371,9 @@
 #define REAL_TIME_1_BMSK                                         0xffff
 #define REAL_TIME_1_SHFT                                              0
 
+/* EMAC_P1588_EXPANDED_INT_STATUS */
+#define PPS_IN                                                     0x20
+
 /* EMAC_P1588_RTC_EXPANDED_CONFIG */
 #define RTC_READ_MODE                                              0x20
 #define RTC_SNAPSHOT                                               0x10
@@ -378,6 +390,10 @@
 
 /* EMAC_P1588_RTC_PRELOADED_1 */
 #define RTC_PRELOADED_1_BMSK                                     0xffff
+
+/* EMAC_P1588_GRAND_MASTER_CONFIG_0 */
+#define GRANDMASTER_MODE                                           0x40
+#define GM_PPS_SYNC                                                0x20
 
 /* EMAC_QSERDES_COM_SYS_CLK_CTRL */
 #define SYSCLK_CM                                                  0x10

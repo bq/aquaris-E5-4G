@@ -18,12 +18,19 @@
 #include <linux/regulator/consumer.h>
 #include <linux/msm_iommu_domains.h>
 #include <linux/spinlock.h>
+#include <linux/iommu.h>
 #include <linux/qcom_iommu.h>
 #include <linux/msm_ion.h>
+#include <linux/msm-bus.h>
+#include <linux/msm-bus-board.h>
 #include <media/videobuf2-core.h>
 
 #include "msm_fd_dev.h"
+#include "msm_fd_hw.h"
 #include "msm_fd_regs.h"
+
+/* Face detection processing timeout in ms */
+#define MSM_FD_PROCESSING_TIMEOUT_MS 500
 
 /* Fd iommu partition definition */
 static struct msm_iova_partition msm_fd_fw_partition = {
@@ -37,6 +44,29 @@ static struct msm_iova_layout msm_fd_fw_layout = {
 	.npartitions = 1,
 	.client_name = "fd_iommu",
 	.domain_flags = 0,
+};
+
+/* Face detection bus bandwidth definitions */
+static struct msm_bus_vectors msm_fd_bandwidth_vectors[] = {
+	{
+		.src = MSM_BUS_MASTER_VPU,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab  = 450000000,
+		.ib  = 900000000,
+	},
+};
+
+static struct msm_bus_paths msm_fd_bus_client_config[] = {
+	{
+		ARRAY_SIZE(msm_fd_bandwidth_vectors),
+		msm_fd_bandwidth_vectors,
+	},
+};
+
+static struct msm_bus_scale_pdata msm_fd_bus_scale_data = {
+	msm_fd_bus_client_config,
+	ARRAY_SIZE(msm_fd_bus_client_config),
+	.name = "msm_face_detect",
 };
 
 /*
@@ -166,13 +196,18 @@ static inline void msm_fd_hw_set_direction_angle(struct msm_fd_device *fd,
 	u32 direction, u32 angle)
 {
 	u32 reg;
+	u32 value;
 
-	reg = direction | (angle ? 1 << (angle + 1) : 0);
-	if (reg > MSM_FD_CONDT_DIR_MAX)
-		reg = MSM_FD_CONDT_DIR_MAX;
+	value = direction | (angle ? 1 << (angle + 1) : 0);
+	if (value > MSM_FD_CONDT_DIR_MAX)
+		value = MSM_FD_CONDT_DIR_MAX;
 
-	msm_fd_hw_reg_set(fd, MSM_FD_IOMEM_CORE, MSM_FD_CONDT,
-		(reg << MSM_FD_CONDT_DIR_SHIFT));
+	reg = msm_fd_hw_read_reg(fd, MSM_FD_IOMEM_CORE, MSM_FD_CONDT);
+
+	reg &= ~MSM_FD_CONDT_DIR_MASK;
+	reg |= (value << MSM_FD_CONDT_DIR_SHIFT);
+
+	msm_fd_hw_write_reg(fd, MSM_FD_IOMEM_CORE, MSM_FD_CONDT, reg);
 }
 
 /*
@@ -182,8 +217,14 @@ static inline void msm_fd_hw_set_direction_angle(struct msm_fd_device *fd,
  */
 static inline void msm_fd_hw_set_min_face(struct msm_fd_device *fd, u32 size)
 {
-	msm_fd_hw_reg_set(fd, MSM_FD_IOMEM_CORE, MSM_FD_CONDT,
-		(size & MSM_FD_CONDT_MIN_MASK) << MSM_FD_CONDT_MIN_SHIFT);
+	u32 reg;
+
+	reg = msm_fd_hw_read_reg(fd, MSM_FD_IOMEM_CORE, MSM_FD_CONDT);
+
+	reg &= ~MSM_FD_CONDT_MIN_MASK;
+	reg |= (size << MSM_FD_CONDT_MIN_SHIFT);
+
+	msm_fd_hw_write_reg(fd, MSM_FD_IOMEM_CORE, MSM_FD_CONDT, reg);
 }
 
 /*
@@ -218,10 +259,17 @@ static inline void msm_fd_hw_srst(struct msm_fd_device *fd)
 int msm_fd_hw_get_face_count(struct msm_fd_device *fd)
 {
 	u32 reg;
+	u32 value;
 
 	reg = msm_fd_hw_read_reg(fd, MSM_FD_IOMEM_CORE, MSM_FD_RESULT_CNT);
 
-	return reg & MSM_FD_RESULT_CNT_MASK;
+	value = reg & MSM_FD_RESULT_CNT_MASK;
+	if (value > MSM_FD_MAX_FACES_DETECTED) {
+		dev_warn(fd->dev, "Face count %d out of limit\n", value);
+		value = MSM_FD_MAX_FACES_DETECTED;
+	}
+
+	return value;
 }
 
 /*
@@ -328,8 +376,7 @@ void msm_fd_hw_get_result_angle_pose(struct msm_fd_device *fd, int idx,
 	u32 reg;
 
 	reg = msm_fd_hw_read_reg(fd, MSM_FD_IOMEM_CORE,
-		MSM_FD_RESULT_CONF_SIZE(idx));
-
+		MSM_FD_RESULT_ANGLE_POSE(idx));
 	*angle = (reg >> MSM_FD_RESULT_ANGLE_SHIFT) & MSM_FD_RESULT_ANGLE_MASK;
 	*pose = (reg >> MSM_FD_RESULT_POSE_SHIFT) & MSM_FD_RESULT_POSE_MASK;
 }
@@ -518,6 +565,7 @@ int msm_fd_hw_get_clocks(struct msm_fd_device *fd)
 {
 	const char *clk_name;
 	size_t cnt;
+	int clk_rates;
 	int i;
 	int ret;
 
@@ -527,6 +575,7 @@ int msm_fd_hw_get_clocks(struct msm_fd_device *fd)
 		return -EINVAL;
 	}
 
+	clk_rates = 0;
 	for (i = 0; i < cnt; i++) {
 		ret = of_property_read_string_index(fd->dev->of_node,
 			"clock-names", i, &clk_name);
@@ -545,13 +594,27 @@ int msm_fd_hw_get_clocks(struct msm_fd_device *fd)
 	}
 	fd->clk_num = cnt;
 
-	ret = of_property_read_u32_array(fd->dev->of_node, "clock-rates",
-		fd->clk_rates[0], fd->clk_num);
-	if (ret < 0) {
+	cnt = 0;
+	for (clk_rates = 0; clk_rates < MSM_FD_MAX_CLK_RATES; clk_rates++) {
+		for (i = 0; i < fd->clk_num; i++) {
+			ret = of_property_read_u32_index(fd->dev->of_node,
+				"clock-rates", cnt++,
+				&fd->clk_rates[clk_rates][i]);
+			if (ret < 0)
+				break;
+			dev_dbg(fd->dev, "Clock rate idx %d idx %d value %d\n",
+				clk_rates, i, fd->clk_rates[clk_rates][i]);
+
+		}
+		if (ret < 0)
+			break;
+	}
+	fd->clk_rates_num = clk_rates;
+	if (fd->clk_rates_num == 0) {
+		ret = -ENOENT;
 		dev_err(fd->dev, "Can not get clock rates\n");
 		goto error;
 	}
-	fd->clk_rates_num = 1;
 
 	return 0;
 error:
@@ -596,8 +659,8 @@ static int msm_fd_hw_set_clock_rate_idx(struct msm_fd_device *fd,
 
 		clk_rate = clk_round_rate(fd->clk[i], fd->clk_rates[idx][i]);
 		if (clk_rate < 0) {
-			dev_err(fd->dev, "Fail clock round rate\n");
-			return -EINVAL;
+			dev_dbg(fd->dev, "Clk raund rate fail skip %d\n", i);
+			continue;
 		}
 
 		ret = clk_set_rate(fd->clk[i], clk_rate);
@@ -657,6 +720,41 @@ static void msm_fd_hw_disable_clocks(struct msm_fd_device *fd)
 }
 
 /*
+ * msm_fd_hw_bus_request - Request bus for memory access.
+ * @fd: Pointer to fd device.
+ */
+static int msm_fd_hw_bus_request(struct msm_fd_device *fd)
+{
+	int ret;
+
+	fd->bus_client = msm_bus_scale_register_client(&msm_fd_bus_scale_data);
+	if (!fd->bus_client) {
+		dev_err(fd->dev, "Fail to register bus client\n");
+		return -ENOENT;
+	}
+
+	ret = msm_bus_scale_client_update_request(fd->bus_client, 0);
+	if (ret < 0) {
+		dev_err(fd->dev, "Fail bus scale update %d\n", ret);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+/*
+ * msm_fd_hw_bus_release - Release memory access bus.
+ * @fd: Pointer to fd device.
+ */
+static void msm_fd_hw_bus_release(struct msm_fd_device *fd)
+{
+	if (fd->bus_client) {
+		msm_bus_scale_unregister_client(fd->bus_client);
+		fd->bus_client = 0;
+	}
+}
+
+/*
  * msm_fd_hw_get - Get fd hw for performing any hw operation.
  * @fd: Pointer to fd device.
  * @clock_rate_idx: Clock rate index.
@@ -688,6 +786,12 @@ int msm_fd_hw_get(struct msm_fd_device *fd, unsigned int clock_rate_idx)
 			dev_err(fd->dev, "Fail to enable clocks\n");
 			goto error_clocks;
 		}
+
+		ret = msm_fd_hw_bus_request(fd);
+		if (ret < 0) {
+			dev_err(fd->dev, "Fail bus request\n");
+			goto error_bus_request;
+		}
 		msm_fd_hw_vbif_register(fd);
 	}
 
@@ -696,6 +800,8 @@ int msm_fd_hw_get(struct msm_fd_device *fd, unsigned int clock_rate_idx)
 
 	return 0;
 
+error_bus_request:
+	msm_fd_hw_disable_clocks(fd);
 error_clocks:
 	regulator_disable(fd->vdd);
 error:
@@ -717,9 +823,67 @@ void msm_fd_hw_put(struct msm_fd_device *fd)
 
 	if (--fd->ref_count == 0) {
 		msm_fd_hw_vbif_unregister(fd);
+		msm_fd_hw_bus_release(fd);
 		msm_fd_hw_disable_clocks(fd);
 		regulator_disable(fd->vdd);
 	}
+	mutex_unlock(&fd->lock);
+}
+
+/*
+ * msm_fd_hw_attach_iommu - Attach iommu to face detection engine.
+ * @fd: Pointer to fd device.
+ *
+ * Iommu attach have reference count protected by
+ * fd device mutex.
+ */
+static int msm_fd_hw_attach_iommu(struct msm_fd_device *fd)
+{
+	int ret;
+
+	mutex_lock(&fd->lock);
+
+	if (fd->iommu_attached_cnt == UINT_MAX) {
+		dev_err(fd->dev, "Max count reached! can not attach iommu\n");
+		goto error;
+	}
+
+	if (fd->iommu_attached_cnt == 0) {
+		ret = iommu_attach_device(fd->iommu_domain, fd->iommu_dev);
+		if (ret < 0) {
+			dev_err(fd->dev, "Can not attach iommu domain\n");
+			goto error;
+		}
+	}
+	fd->iommu_attached_cnt++;
+	mutex_unlock(&fd->lock);
+
+	return 0;
+
+error:
+	mutex_unlock(&fd->lock);
+	return ret;
+}
+
+/*
+ * msm_fd_hw_detach_iommu - Detach iommu from face detection engine.
+ * @fd: Pointer to fd device.
+ *
+ * Iommu detach have reference count protected by
+ * fd device mutex.
+ */
+static void msm_fd_hw_detach_iommu(struct msm_fd_device *fd)
+{
+	mutex_lock(&fd->lock);
+	if (fd->iommu_attached_cnt == 0) {
+		dev_err(fd->dev, "There is no attached device\n");
+		mutex_unlock(&fd->lock);
+		return;
+	}
+
+	if (--fd->iommu_attached_cnt == 0)
+		iommu_detach_device(fd->iommu_domain, fd->iommu_dev);
+
 	mutex_unlock(&fd->lock);
 }
 
@@ -739,12 +903,16 @@ int msm_fd_hw_map_buffer(struct msm_fd_mem_pool *pool, int fd,
 	if (!pool || fd < 0)
 		return -EINVAL;
 
+	ret = msm_fd_hw_attach_iommu(pool->fd_device);
+	if (ret < 0)
+		goto error;
+
 	buf->pool = pool;
 	buf->fd = fd;
 
 	buf->handle = ion_import_dma_buf(pool->client, buf->fd);
 	if (IS_ERR_OR_NULL(buf->handle))
-		goto error;
+		goto error_import_dma;
 
 	ret = ion_map_iommu(pool->client, buf->handle, pool->domain_num,
 		0, SZ_4K, 0, &buf->addr, &buf->size, 0, 0);
@@ -755,6 +923,8 @@ int msm_fd_hw_map_buffer(struct msm_fd_mem_pool *pool, int fd,
 
 error_map_iommu:
 	ion_free(pool->client, buf->handle);
+error_import_dma:
+	msm_fd_hw_detach_iommu(pool->fd_device);
 error:
 	return -ENOMEM;
 }
@@ -765,15 +935,18 @@ error:
  */
 void msm_fd_hw_unmap_buffer(struct msm_fd_buf_handle *buf)
 {
-	if (buf->size)
+	if (buf->size) {
 		ion_unmap_iommu(buf->pool->client, buf->handle,
 			buf->pool->domain_num, 0);
+		msm_fd_hw_detach_iommu(buf->pool->fd_device);
+	}
 
 	if (!IS_ERR_OR_NULL(buf->handle))
 		ion_free(buf->pool->client, buf->handle);
 
 	buf->fd = -1;
 	buf->pool = NULL;
+	buf->handle = NULL;
 }
 
 /*
@@ -876,6 +1049,7 @@ void msm_fd_hw_remove_buffers_from_queue(struct msm_fd_device *fd,
 	struct msm_fd_buffer *curr_buff;
 	struct msm_fd_buffer *temp;
 	struct msm_fd_buffer *active_buffer;
+	unsigned long time;
 
 	spin_lock(&fd->slock);
 
@@ -893,8 +1067,16 @@ void msm_fd_hw_remove_buffers_from_queue(struct msm_fd_device *fd,
 	spin_unlock(&fd->slock);
 
 	/* We need to wait active buffer to finish */
-	if (active_buffer)
-		wait_for_completion(&active_buffer->completion);
+	if (active_buffer) {
+		time = wait_for_completion_timeout(&active_buffer->completion,
+			msecs_to_jiffies(MSM_FD_PROCESSING_TIMEOUT_MS));
+		if (!time) {
+			/* Remove active buffer */
+			msm_fd_hw_get_active_buffer(fd);
+			/* Schedule if other buffers are present in device */
+			msm_fd_hw_schedule_next_buffer(fd);
+		}
+	}
 
 	return;
 }

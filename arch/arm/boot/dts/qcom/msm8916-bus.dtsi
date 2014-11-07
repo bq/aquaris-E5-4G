@@ -10,8 +10,73 @@
  * GNU General Public License for more details.
  */
 
+#include <dt-bindings/msm/msm-bus-rule-ops.h>
+
 &soc {
-	 ad_hoc_bus: ad-hoc-bus { };
+	ad_hoc_bus: ad-hoc-bus { };
+
+	static-rules {
+		compatible = "qcom,msm-bus-static-bw-rules";
+
+		rule0 {
+			qcom,src-nodes = <&mas_apss>;
+			qcom,src-field = <FLD_IB>;
+			qcom,src-op = <OP_LE>;
+			qcom,thresh = <1600000>;
+			qcom,mode = <THROTTLE_ON>;
+			qcom,dest-node = <&mas_apss>;
+			qcom,dest-bw = <600000>;
+		};
+
+
+		rule1 {
+			qcom,src-nodes = <&mas_apss>;
+			qcom,src-field = <FLD_IB>;
+			qcom,src-op = <OP_LE>;
+			qcom,thresh = <3200000>;
+			qcom,mode = <THROTTLE_ON>;
+			qcom,dest-node = <&mas_apss>;
+			qcom,dest-bw = <1200000>;
+		};
+
+		rule2 {
+			qcom,src-nodes = <&mas_apss>;
+			qcom,src-field = <FLD_IB>;
+			qcom,src-op = <OP_GT>;
+			qcom,thresh = <3200000>;
+			qcom,mode = <THROTTLE_OFF>;
+			qcom,dest-node = <&mas_apss>;
+		};
+
+		rule3 {
+			qcom,src-nodes = <&mas_gfx>;
+			qcom,src-field = <FLD_IB>;
+			qcom,src-op = <OP_LE>;
+			qcom,thresh = <1600000>;
+			qcom,mode = <THROTTLE_ON>;
+			qcom,dest-node = <&mas_gfx>;
+			qcom,dest-bw = <600000>;
+		};
+
+		rule4 {
+			qcom,src-nodes = <&mas_gfx>;
+			qcom,src-field = <FLD_IB>;
+			qcom,src-op = <OP_LE>;
+			qcom,thresh = <3200000>;
+			qcom,mode = <THROTTLE_ON>;
+			qcom,dest-node = <&mas_gfx>;
+			qcom,dest-bw = <1200000>;
+		};
+
+		rule5 {
+			qcom,src-nodes = <&mas_gfx>;
+			qcom,src-field = <FLD_IB>;
+			qcom,src-op = <OP_GT>;
+			qcom,thresh = <3200000>;
+			qcom,mode = <THROTTLE_OFF>;
+			qcom,dest-node = <&mas_gfx>;
+		};
+	};
 };
 
 &ad_hoc_bus {
@@ -339,6 +404,9 @@
 		qcom,prio-lvl = <0>;
 		qcom,prio-rd = <0>;
 		qcom,prio-wr = <0>;
+		qcom,ws = <10000>;
+		qcom,gp = <5000>;
+		qcom,thmp = <50>;
 		qom,buswidth = <8>;
 	};
 
@@ -382,6 +450,9 @@
 		qcom,prio-rd = <0>;
 		qcom,prio-wr = <0>;
 		qom,buswidth = <8>;
+		qcom,ws = <10000>;
+		qcom,gp = <5000>;
+		qcom,thmp = <50>;
 	};
 
 	bimc_snoc_mas: bimc-snoc-mas {
@@ -783,26 +854,18 @@
 		cell-id = <78>;
 		label = "mas-pnoc-sdcc-1";
 		qcom,qport = <7>;
-		qcom,ap-owned;
 		qcom,connections = <&pnoc_int_1>;
 		qcom,bus-dev = <&fab_pnoc>;
 		qcom,buswidth = <8>;
-		qcom,qos-mode = "fixed";
-		qcom,prio1 = <1>;
-		qcom,prio0 = <1>;
 	};
 
 	mas_pnoc_sdcc_2: mas-pnoc-sdcc-2 {
 		cell-id = <81>;
 		label = "mas-pnoc-sdcc-2";
 		qcom,qport = <8>;
-		qcom,ap-owned;
 		qcom,connections = <&pnoc_int_1>;
 		qcom,bus-dev = <&fab_pnoc>;
 		qcom,buswidth = <8>;
-		qcom,qos-mode = "fixed";
-		qcom,prio1 = <1>;
-		qcom,prio0 = <1>;
 	};
 
 	pnoc_snoc_mas: pnoc-snoc-mas {

@@ -15,7 +15,12 @@
 #define MDSS_DEBUG_H
 
 #include <stdarg.h>
+#include <linux/debugfs.h>
+#include <linux/list.h>
+#include <linux/mdss_io_util.h>
+
 #include "mdss.h"
+#include "mdss_mdp_trace.h"
 
 #define MISR_POLL_SLEEP		2000
 #define MISR_POLL_TIMEOUT	32000
@@ -29,6 +34,13 @@
 #define MDSS_XLOG(...) mdss_xlog(__func__, ##__VA_ARGS__, DATA_LIMITER)
 #define MDSS_XLOG_TOUT_HANDLER(...)	\
 	mdss_xlog_tout_handler(__func__, ##__VA_ARGS__, XLOG_TOUT_DATA_LIMITER)
+
+#define ATRACE_END(name) trace_tracing_mark_write(current->tgid, name, 0)
+#define ATRACE_BEGIN(name) trace_tracing_mark_write(current->tgid, name, 1)
+#define ATRACE_FUNC() ATRACE_BEGIN(__func__)
+
+#define ATRACE_INT(name, value) \
+	trace_mdp_trace_counter(current->tgid, name, value)
 
 #ifdef CONFIG_DEBUG_FS
 struct mdss_debug_base {
@@ -57,6 +69,19 @@ struct mdss_debug_data {
 	struct debug_log logd;
 };
 
+#define DEFINE_MDSS_DEBUGFS_SEQ_FOPS(__prefix)				\
+static int __prefix ## _open(struct inode *inode, struct file *file)	\
+{									\
+	return single_open(file, __prefix ## _show, inode->i_private);	\
+}									\
+static const struct file_operations __prefix ## _fops = {		\
+	.owner = THIS_MODULE,						\
+	.open = __prefix ## _open,					\
+	.release = single_release,					\
+	.read = seq_read,						\
+	.llseek = seq_lseek,						\
+};
+
 int mdss_debugfs_init(struct mdss_data_type *mdata);
 int mdss_debugfs_remove(struct mdss_data_type *mdata);
 int mdss_debug_register_base(const char *name, void __iomem *base,
@@ -74,6 +99,10 @@ void mdss_dump_reg(char __iomem *base, int len);
 void mdss_xlog_tout_handler(const char *name, ...);
 #else
 static inline int mdss_debugfs_init(struct mdss_data_type *mdata) { return 0; }
+static inline int mdss_debugfs_remove(struct mdss_data_type *mdata)
+{
+	return 0;
+}
 static inline int mdss_debug_register_base(const char *name, void __iomem *base,
 					size_t max_offset) { return 0; }
 static inline int mdss_misr_set(struct mdss_data_type *mdata,
@@ -87,11 +116,18 @@ static inline int mdss_misr_get(struct mdss_data_type *mdata,
 static inline void mdss_misr_crc_collect(struct mdss_data_type *mdata,
 						int block_id) { }
 
-static inline int create_xlog_debug(struct mdss_data_type *mdata) { }
+static inline int create_xlog_debug(struct mdss_data_type *mdata) { return 0; }
 static inline void mdss_xlog(const char *name, ...) { }
 static inline void mdss_xlog_dump(void) { }
 static inline void mdss_dump_reg(char __iomem *base, int len) { }
 static inline void mdss_dsi_debug_check_te(struct mdss_panel_data *pdata) { }
 static inline void mdss_xlog_tout_handler(const char *name, ...) { }
 #endif
+
+static inline int mdss_debug_register_io(const char *name,
+		struct dss_io_data *io_data)
+{
+	return mdss_debug_register_base(name, io_data->base, io_data->len);
+}
+
 #endif /* MDSS_DEBUG_H */

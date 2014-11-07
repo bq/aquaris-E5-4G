@@ -15,7 +15,6 @@
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
-#include <linux/iommu.h>
 #include <linux/spinlock.h>
 #include <linux/interrupt.h>
 #include <linux/ion.h>
@@ -110,12 +109,18 @@ static int msm_fd_get_format_index(struct v4l2_format *f)
 static int msm_fd_get_idx_from_value(int value, int *array, int array_size)
 {
 	int index;
+	int i;
 
-	for (index = 0; index < array_size; index++) {
-		if (value <=  array[index])
-			return index;
+	index = 0;
+	for (i = 1; i < array_size; i++) {
+		if (value == array[i]) {
+			index = i;
+			break;
+		}
+		if (abs(value - array[i]) < abs(value - array[index]))
+			index = i;
 	}
-	return index - 1;
+	return index;
 }
 
 /*
@@ -237,10 +242,17 @@ static int msm_fd_start_streaming(struct vb2_queue *q, unsigned int count)
 		return -EINVAL;
 	}
 
+	ret = msm_fd_hw_get(ctx->fd_device, ctx->settings.speed);
+	if (ret < 0) {
+		dev_err(ctx->fd_device->dev, "Can not acquire fd hw\n");
+		goto out;
+	}
+
 	ret = msm_fd_hw_schedule_and_start(ctx->fd_device);
 	if (ret < 0)
 		dev_err(ctx->fd_device->dev, "Can not start fd hw\n");
 
+out:
 	return ret;
 }
 
@@ -253,6 +265,7 @@ static int msm_fd_stop_streaming(struct vb2_queue *q)
 	struct fd_ctx *ctx = vb2_get_drv_priv(q);
 
 	msm_fd_hw_remove_buffers_from_queue(ctx->fd_device, q);
+	msm_fd_hw_put(ctx->fd_device);
 
 	return 0;
 }
@@ -362,19 +375,13 @@ static int msm_fd_open(struct file *file)
 		goto error_vb2_queue_init;
 	}
 
-	ctx->mem_pool.client = msm_ion_client_create(-1, MSM_FD_DRV_NAME);
+	ctx->mem_pool.client = msm_ion_client_create(MSM_FD_DRV_NAME);
 	if (IS_ERR_OR_NULL(ctx->mem_pool.client)) {
 		dev_err(device->dev, "Error ion client create\n");
 		goto error_ion_client_create;
 	}
+	ctx->mem_pool.fd_device = ctx->fd_device;
 	ctx->mem_pool.domain_num = ctx->fd_device->iommu_domain_num;
-
-	ret = iommu_attach_device(ctx->fd_device->iommu_domain,
-		ctx->fd_device->iommu_dev);
-	if (ret) {
-		dev_err(device->dev, "Can not attach iommu domain\n");
-		goto error_iommu_attach;
-	}
 
 	ctx->stats = vmalloc(sizeof(*ctx->stats) * MSM_FD_MAX_RESULT_BUFS);
 	if (!ctx->stats) {
@@ -386,9 +393,6 @@ static int msm_fd_open(struct file *file)
 	return 0;
 
 error_stats_vmalloc:
-	iommu_detach_device(ctx->fd_device->iommu_domain,
-			ctx->fd_device->iommu_dev);
-error_iommu_attach:
 	ion_client_destroy(ctx->mem_pool.client);
 error_ion_client_create:
 	vb2_queue_release(&ctx->vb2_q);
@@ -414,8 +418,6 @@ static int msm_fd_release(struct file *file)
 	if (ctx->work_buf.handle)
 		msm_fd_hw_unmap_buffer(&ctx->work_buf);
 
-	iommu_detach_device(ctx->fd_device->iommu_domain,
-		ctx->fd_device->iommu_dev);
 	ion_client_destroy(ctx->mem_pool.client);
 
 	v4l2_fh_del(&ctx->fh);
@@ -717,16 +719,10 @@ static int msm_fd_streamon(struct file *file,
 	struct fd_ctx *ctx = msm_fd_ctx_from_fh(fh);
 	int ret;
 
-	ret = msm_fd_hw_get(ctx->fd_device, ctx->settings.speed);
-	if (ret < 0) {
-		dev_err(ctx->fd_device->dev, "Can not acquire fd hw\n");
-		goto out;
-	}
-
 	ret = vb2_streamon(&ctx->vb2_q, buf_type);
 	if (ret < 0)
 		dev_err(ctx->fd_device->dev, "Stream on fails\n");
-out:
+
 	return ret;
 }
 
@@ -743,13 +739,9 @@ static int msm_fd_streamoff(struct file *file,
 	int ret;
 
 	ret = vb2_streamoff(&ctx->vb2_q, buf_type);
-	if (ret < 0) {
+	if (ret < 0)
 		dev_err(ctx->fd_device->dev, "Stream off fails\n");
-		goto out;
-	}
 
-	msm_fd_hw_put(ctx->fd_device);
-out:
 	return ret;
 }
 
@@ -1107,6 +1099,8 @@ static const struct v4l2_ioctl_ops fd_ioctl_ops = {
 static void msm_fd_fill_results(struct msm_fd_device *fd,
 	struct msm_fd_face_data *face, int idx)
 {
+	int half_face_size;
+
 	msm_fd_hw_get_result_angle_pose(fd, idx, &face->angle, &face->pose);
 
 	msm_fd_hw_get_result_conf_size(fd, idx, &face->confidence,
@@ -1116,8 +1110,17 @@ static void msm_fd_fill_results(struct msm_fd_device *fd,
 	face->face.left = msm_fd_hw_get_result_x(fd, idx);
 	face->face.top = msm_fd_hw_get_result_y(fd, idx);
 
-	face->face.left -= (face->face.width >> 1);
-	face->face.top -= (face->face.height >> 1);
+	half_face_size = (face->face.width >> 1);
+	if (face->face.left > half_face_size)
+		face->face.left -= half_face_size;
+	else
+		face->face.left = 0;
+
+	half_face_size = (face->face.height >> 1);
+	if (face->face.top > half_face_size)
+		face->face.top -= half_face_size;
+	else
+		face->face.top = 0;
 }
 
 /*

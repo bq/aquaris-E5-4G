@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -105,5 +105,14 @@ qcom,mtp-3000mah {
 				<2119 430 121 99 94>,
 				<2795 497 144 114 104>,
 				<8769 1035 672 322 234>;
+	};
+
+	qcom,ibat-acc-lut {
+		qcom,lut-col-legend = <(-20) 0 25>;
+		qcom,lut-row-legend = <0 250 500 1000>;
+		qcom,lut-data = <3030 3033 3037>,
+				<1898 2943 2960>,
+				<1184 2855 2948>,
+				<209 2464 2921>;
 	};
 };

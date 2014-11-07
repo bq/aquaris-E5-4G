@@ -11,6 +11,7 @@
  *
  */
 
+#define CREATE_TRACE_POINTS
 #include "msm_vidc_debug.h"
 #include "vidc_hfi_api.h"
 
@@ -22,6 +23,12 @@ int msm_fw_debug_mode = 0x1;
 int msm_fw_low_power_mode = 0x1;
 int msm_vidc_hw_rsp_timeout = 1000;
 u32 msm_fw_coverage = 0x0;
+int msm_vidc_vpe_csc_601_to_709 = 0x0;
+int msm_vidc_dec_dcvs_mode = 0x1;
+int msm_vidc_enc_dcvs_mode = 0x0;
+int msm_vidc_sys_idle_indicator = 0x0;
+u32 msm_vidc_firmware_unload_delay = 15000;
+int msm_vidc_thermal_mitigation_disabled = 0x0;
 
 struct debug_buffer {
 	char ptr[MAX_DBG_BUF_SIZE];
@@ -155,6 +162,16 @@ struct dentry *msm_vidc_debugfs_init_drv(void)
 		dprintk(VIDC_WARN, "debugfs_create_file fw_coverage: fail\n");
 		goto failed_create_dir;
 	}
+	if (!debugfs_create_u32("dcvs_dec_mode", S_IRUGO | S_IWUSR,
+			dir, &msm_vidc_dec_dcvs_mode)) {
+		dprintk(VIDC_WARN, "debugfs_create_file dcvs_dec_mode: fail\n");
+		goto failed_create_dir;
+	}
+	if (!debugfs_create_u32("dcvs_enc_mode", S_IRUGO | S_IWUSR,
+			dir, &msm_vidc_enc_dcvs_mode)) {
+		dprintk(VIDC_WARN, "debugfs_create_file dcvs_enc_mode: fail\n");
+		goto failed_create_dir;
+	}
 	if (!debugfs_create_u32("fw_low_power_mode", S_IRUGO | S_IWUSR,
 			dir, &msm_fw_low_power_mode)) {
 		dprintk(VIDC_ERR, "debugfs_create_file: fail\n");
@@ -168,6 +185,29 @@ struct dentry *msm_vidc_debugfs_init_drv(void)
 	if (!debugfs_create_u32("hw_rsp_timeout", S_IRUGO | S_IWUSR,
 			dir, &msm_vidc_hw_rsp_timeout)) {
 		dprintk(VIDC_ERR, "debugfs_create_file: fail\n");
+		goto failed_create_dir;
+	}
+	if (!debugfs_create_bool("enable_vpe_csc_601_709", S_IRUGO | S_IWUSR,
+			dir, &msm_vidc_vpe_csc_601_to_709)) {
+		dprintk(VIDC_ERR, "debugfs_create_file: fail\n");
+		goto failed_create_dir;
+	}
+	if (!debugfs_create_bool("sys_idle_indicator", S_IRUGO | S_IWUSR,
+			dir, &msm_vidc_sys_idle_indicator)) {
+		dprintk(VIDC_ERR,
+			"debugfs_create_file: sys_idle_indicator fail\n");
+		goto failed_create_dir;
+	}
+	if (!debugfs_create_u32("firmware_unload_delay", S_IRUGO | S_IWUSR,
+			dir, &msm_vidc_firmware_unload_delay)) {
+		dprintk(VIDC_ERR,
+			"debugfs_create_file: firmware_unload_delay fail\n");
+		goto failed_create_dir;
+	}
+	if (!debugfs_create_u32("disable_thermal_mitigation", S_IRUGO | S_IWUSR,
+			dir, &msm_vidc_thermal_mitigation_disabled)) {
+		dprintk(VIDC_ERR,
+			"debugfs_create_file: disable_thermal_mitigation fail\n");
 		goto failed_create_dir;
 	}
 	return dir;
@@ -217,20 +257,18 @@ static int inst_info_open(struct inode *inode, struct file *file)
 static int publish_unreleased_reference(struct msm_vidc_inst *inst)
 {
 	struct buffer_info *temp = NULL;
-	struct buffer_info *dummy = NULL;
-	struct list_head *list = NULL;
 
 	if (!inst) {
 		dprintk(VIDC_ERR, "%s: invalid param\n", __func__);
 		return -EINVAL;
 	}
 
-	list = &inst->registered_bufs;
-	mutex_lock(&inst->lock);
 	if (inst->buffer_mode_set[CAPTURE_PORT] == HAL_BUFFER_MODE_DYNAMIC) {
-		list_for_each_entry_safe(temp, dummy, list, list) {
-			if (temp && temp->type ==
-			V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE &&
+		write_str(&dbg_buf, "Pending buffer references:\n");
+
+		mutex_lock(&inst->registeredbufs.lock);
+		list_for_each_entry(temp, &inst->registeredbufs.list, list) {
+			if (temp->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE &&
 			!temp->inactive && atomic_read(&temp->ref_count)) {
 				write_str(&dbg_buf,
 				"\tpending buffer: 0x%lx fd[0] = %d ref_count = %d held by: %s\n",
@@ -240,8 +278,8 @@ static int publish_unreleased_reference(struct msm_vidc_inst *inst)
 				DYNAMIC_BUF_OWNER(temp));
 			}
 		}
+		mutex_unlock(&inst->registeredbufs.lock);
 	}
-	mutex_unlock(&inst->lock);
 	return 0;
 }
 
@@ -287,9 +325,16 @@ static ssize_t inst_info_read(struct file *file, char __user *buf,
 		default:
 			write_str(&dbg_buf, "buffer mode : unsupported\n");
 		}
+
+		write_str(&dbg_buf, "count: %u\n",
+				inst->bufq[i].vb2_bufq.num_buffers);
+
 		for (j = 0; j < inst->fmts[i]->num_planes; j++)
 			write_str(&dbg_buf, "size for plane %d: %u\n", j,
 			inst->bufq[i].vb2_bufq.plane_sizes[j]);
+
+		if (i < MAX_PORT_NUM - 1)
+			write_str(&dbg_buf, "\n");
 	}
 	write_str(&dbg_buf, "-------------------------------\n");
 	for (i = SESSION_MSG_START; i < SESSION_MSG_END; i++) {
@@ -301,6 +346,7 @@ static ssize_t inst_info_read(struct file *file, char __user *buf,
 	write_str(&dbg_buf, "EBD Count: %d\n", inst->count.ebd);
 	write_str(&dbg_buf, "FTB Count: %d\n", inst->count.ftb);
 	write_str(&dbg_buf, "FBD Count: %d\n", inst->count.fbd);
+
 	publish_unreleased_reference(inst);
 
 	return simple_read_from_buffer(buf, count, ppos,
@@ -343,14 +389,18 @@ void msm_vidc_debugfs_update(struct msm_vidc_inst *inst,
 	char a[64] = "Frame processing";
 	switch (e) {
 	case MSM_VIDC_DEBUGFS_EVENT_ETB:
+		mutex_lock(&inst->lock);
 		inst->count.etb++;
+		mutex_unlock(&inst->lock);
 		if (inst->count.ebd && inst->count.ftb > inst->count.fbd) {
 			d->pdata[FRAME_PROCESSING].name[0] = '\0';
 			tic(inst, FRAME_PROCESSING, a);
 		}
 	break;
 	case MSM_VIDC_DEBUGFS_EVENT_EBD:
+		mutex_lock(&inst->lock);
 		inst->count.ebd++;
+		mutex_unlock(&inst->lock);
 		if (inst->count.ebd && inst->count.ebd == inst->count.etb) {
 			toc(inst, FRAME_PROCESSING);
 			dprintk(VIDC_PROF, "EBD: FW needs input buffers\n");

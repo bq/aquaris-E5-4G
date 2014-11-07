@@ -231,7 +231,7 @@ static int __vpu_load_bus_vector_data(struct vpu_platform_resources *res,
 		return -EINVAL;
 	}
 
-	bus_pdata->name = bus_pdata_config.name;
+	bus_pdata->name = "msm_vpu";
 	bus_pdata->num_usecases = num_elements;
 
 	bus_pdata->usecase = devm_kzalloc(&pdev->dev,
@@ -253,10 +253,11 @@ static int __vpu_load_bus_vector_data(struct vpu_platform_resources *res,
 		res->bus_table.loads[i] = vectors[i].load;
 
 		for (j = 0; j < num_ports; j++) {
+			/* change ab and ib values from kilobits to bytes */
 			bus_pdata->usecase[i].vectors[j].ab =
-					(u64)vectors[i].ab * 1000;
+					(u64)vectors[i].ab * 1000 / 8;
 			bus_pdata->usecase[i].vectors[j].ib =
-					(u64)vectors[i].ib * 1000;
+					(u64)vectors[i].ib * 1000 / 8;
 			bus_pdata->usecase[i].vectors[j].src =
 					bus_pdata_config.masters[j];
 			bus_pdata->usecase[i].vectors[j].dst =
@@ -593,7 +594,7 @@ static void *__vpu_mem_create_client(struct vpu_platform_resources *res)
 		return NULL;
 	}
 
-	ion_client = msm_ion_client_create(-1, "VPU");
+	ion_client = msm_ion_client_create("VPU");
 	if (IS_ERR(ion_client)) {
 		pr_err("ION client creation failed\n");
 		kfree(mem_client);
@@ -665,12 +666,6 @@ static void __vpu_mem_release_handle(void *mem_handle, u32 device_id)
 				ion_unmap_iommu(ion_client, ion_handle,
 					handle->domain_num[i], 0);
 
-			if (handle->flags & MEM_SECURE) {
-				if (msm_ion_unsecure_buffer(ion_client,
-						ion_handle))
-					pr_warn("Failed to unsecure memory\n");
-			}
-
 			handle->mapped &= ~(1 << i);
 			handle->domain_num[i] = -1;
 			handle->device_addr[i] = 0;
@@ -732,16 +727,8 @@ static int __vpu_mem_map_handle(struct vpu_mem_handle *handle, u32 device_id,
 
 		domain_number = handle->domain_num[device_id];
 
-		if (handle->flags & MEM_SECURE) { /* handle secure buffers */
-			pr_debug("Securing ION buffer\n");
+		if (handle->flags & MEM_SECURE) /* handle secure buffers */
 			align = SZ_1M;
-			ret = msm_ion_secure_buffer(ion_client, ion_handle,
-					VIDEO_PIXEL, 0);
-			if (ret) {
-				pr_err("Failed to secure memory\n");
-				return ret;
-			}
-		}
 
 		pr_debug("Using IOMMU mapping\n");
 		ret = ion_map_iommu(ion_client, ion_handle, domain_number, 0,
@@ -756,8 +743,6 @@ static int __vpu_mem_map_handle(struct vpu_mem_handle *handle, u32 device_id,
 
 	if (ret) {
 		pr_err("Failed to map ion buffer\n");
-		if (handle->flags & MEM_SECURE)
-			msm_ion_unsecure_buffer(ion_client, ion_handle);
 		return ret;
 	}
 

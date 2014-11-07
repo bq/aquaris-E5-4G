@@ -437,9 +437,9 @@ static void audio_aio_unmap_ion_region(struct q6audio_aio *audio)
 	pr_debug("%s[%p]:\n", __func__, audio);
 	list_for_each_safe(ptr, next, &audio->ion_region_queue) {
 		region = list_entry(ptr, struct audio_aio_ion_region, list);
-		pr_debug("%s[%p]: phy_address = 0x%pa\n",
-				__func__, audio, &region->paddr);
 		if (region != NULL) {
+			pr_debug("%s[%p]: phy_address = 0x%pa\n",
+				__func__, audio, &region->paddr);
 			rc = q6asm_memory_unmap(audio->ac,
 						region->paddr, IN);
 			if (rc < 0)
@@ -873,9 +873,8 @@ static long audio_aio_process_event_req_compat(struct q6audio_aio *audio,
 			usr_evt.event_payload.error_info.err_type;
 		break;
 	default:
-		pr_err("%s: unknown audio event type = %d",
-			__func__, usr_evt_32.event_type);
-		rc = -EINVAL;
+		pr_debug("%s: unknown audio event type = %d rc = %ld",
+			 __func__, usr_evt_32.event_type, rc);
 		return rc;
 	}
 	if (copy_to_user(arg, &usr_evt_32, sizeof(usr_evt_32))) {
@@ -1327,8 +1326,7 @@ int audio_aio_open(struct q6audio_aio *audio, struct file *file)
 			goto cleanup;
 		}
 	}
-	audio->client = msm_audio_ion_client_create(UINT_MAX,
-						    "Audio_Dec_Client");
+	audio->client = msm_audio_ion_client_create("Audio_Dec_Client");
 	if (IS_ERR_OR_NULL(audio->client)) {
 		pr_err("Unable to create ION client\n");
 		rc = -ENOMEM;
@@ -1492,6 +1490,7 @@ static long audio_aio_ioctl(struct file *file, unsigned int cmd,
 	case AUDIO_STOP:
 	case AUDIO_PAUSE:
 	case AUDIO_FLUSH:
+	case AUDIO_GET_SESSION_ID:
 		rc = audio_aio_shared_ioctl(file, cmd, arg);
 		break;
 	case AUDIO_GET_STATS: {
@@ -1538,7 +1537,7 @@ static long audio_aio_ioctl(struct file *file, unsigned int cmd,
 	}
 	case AUDIO_ASYNC_READ: {
 		mutex_lock(&audio->read_lock);
-		if ((audio->feedback) && (audio->enabled))
+		if (audio->feedback)
 			rc = audio_aio_buf_add(audio, 0,
 					(void __user *)arg);
 		else
@@ -1779,6 +1778,7 @@ static long audio_aio_compat_ioctl(struct file *file, unsigned int cmd,
 	case AUDIO_STOP:
 	case AUDIO_PAUSE:
 	case AUDIO_FLUSH:
+	case AUDIO_GET_SESSION_ID:
 		rc = audio_aio_shared_ioctl(file, cmd, arg);
 		break;
 	case AUDIO_GET_STATS_32: {
@@ -1826,7 +1826,7 @@ static long audio_aio_compat_ioctl(struct file *file, unsigned int cmd,
 	}
 	case AUDIO_ASYNC_READ_32: {
 		mutex_lock(&audio->read_lock);
-		if ((audio->feedback) && (audio->enabled))
+		if (audio->feedback)
 			rc = audio_aio_buf_add_compat(audio, 0,
 					(void __user *)arg);
 		else

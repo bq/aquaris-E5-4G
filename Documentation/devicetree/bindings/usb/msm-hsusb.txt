@@ -4,14 +4,23 @@ OTG:
 
 Required properties :
 - compatible : should be "qcom,hsusb-otg"
-- regs : offset and length of the register set in the memory map
+- regs : Array of offset and length of the register sets in the memory map
+- reg-names : indicates various iomem resources passed by name. The possible
+	strings in this field are:
+	"core": USB controller register space. (Required)
+	"tcsr": TCSR register for routing USB Controller signals to
+	either picoPHY0 or picoPHY1. (Optional)
+	"phy_csr": PHY Wrapper CSR register space. Provides register level
+	interface through AHB2PHY for performing PHY related operations
+	like retention and HV interrupts management.
 - interrupts: IRQ line
 - interrupt-names: OTG interrupt name(s) referenced in interrupts above
             HSUSB OTG expects "core_irq" which is IRQ line from CORE and
             optional ones are described in next section.
 - qcom,hsusb-otg-phy-type: PHY type can be one of
-            1 - Chipidea 45nm PHY
-	    2 - Synopsis 28nm PHY
+	    1 - Chipidea PHY (obsolete)
+	    2 - Synopsis Pico PHY
+	    3 - Synopsis Femto PHY
 - qcom,hsusb-otg-mode: Operational mode. Can be one of
             1 - Peripheral only mode
 	    2 - Host only mode
@@ -30,10 +39,30 @@ Required properties :
 - qcom,vdd-voltage-level: This property must be a list of three integer
 	values (no, min, max) where each value represents either a voltage
 	in microvolts or a value corresponding to voltage corner.
+- clocks: a list of phandles to the USB clocks. Usage is as per
+	Documentation/devicetree/bindings/clock/clock-bindings.txt
+- clock-names: Names of the clocks in 1-1 correspondence with the "clocks"
+	property.
+
+	Required clocks:
+	"core_clk": USB core clock that is required for data transfers.
+	"iface_clk": USB core clock that is required for register access.
+
+	Optional clocks:
+	"sleep_clk": PHY sleep clock. Required for interrupts.
+	"phy_reset_clk": PHY blocks asynchronous reset clock. Required
+		for the USB block reset. It is a reset only clock.
+	"phy_por_clk": Reset only clock for asserting/de-asserting
+		PHY POR signal. Required for overriding PHY parameters.
+	"phy_csr_clk": Required for accessing PHY CSR registers through
+		AHB2PHY interface.
+	"xo": XO clock. The source clock that is used as a reference clock
+		to the PHY.
+	"bimc_clk", "snoc_clk", "pcnoc_clk": bus voting clocks. Used to
+		keep buses at a nominal frequency during USB peripheral
+		mode for achieving max throughput.
 
 Optional properties :
-- reg : offset and length of the TCSR register for routing USB Controller
-	signals to either picoPHY0 or picoPHY1.
 - interrupt-names : Optional interrupt resource entries are:
     "async_irq" : Interrupt from HSPHY for asynchronous wakeup events in LPM.
     "pmic_id_irq" : Interrupt from PMIC for external ID pin notification.
@@ -58,7 +87,12 @@ Optional properties :
     - qcom,msm-bus,num_cases - There are three valid cases for this: NONE, MAX
 		and MIN bandwidth votes. Minimum two cases must be defined for
 		both NONE and MAX votes. If MIN vote is different from NONE VOTE
-		then specify third case for MIN VOTE.
+		then specify third case for MIN VOTE. If explicit NOC clock rates
+		are not specified then MAX value should be large enough to get
+		desired BUS frequencies. In case explicit NOC clock rates are
+		specified, peripheral mode bus bandwidth vote should be defined
+		to vote for arbitrated bandwidth so that 60MHz frequency is met.
+
     - qcom,msm-bus,num_paths
     - qcom,msm-bus,vectors
 - qcom,hsusb-otg-lpm-on-dev-suspend: If present then USB enter to
@@ -68,9 +102,6 @@ Optional properties :
 	    Used for allowing USB to respond for remote wakup.
 - qcom,hsusb-otg-delay-lpm: If present then USB core will wait one second
 	after disconnect before entering low power mode.
-- qcom,hsusb-otg-delay-lpm-hndshk-on-disconnect: If present then USB core will
-	wait for the handshake with the IPA to complete before entering low
-	power mode.
 - <supply-name>-supply: handle to the regulator device tree node.
          Optional "supply-name" is "vbus_otg" to supply vbus in host mode.
 - qcom,dp-manual-pullup: If present, vbus is not routed to USB controller/phy
@@ -107,17 +138,30 @@ Optional properties :
 	mode with device controller for better throughput. With this mode, USB Core
 	runs using PNOC clock and synchronous to it. Hence it is must to have proper
 	"qcom,msm-bus,vectors" to have high bus frequency. User shouldn't try to
-	enable this feature without proper bus voting.
+	enable this feature without proper bus voting. When this feature is enabled,
+	it is required to do HW reset during cable disconnect for host mode functionality
+	working and hence need to disable qcom,hsusb-otg-disable-reset. With this feature
+	enabled, USB HW has to vote for maximum PNOC frequency as USB HW cannot tolerate
+	changes in PNOC frequncy which results in USB functionality failure.
 - qcom,disable-retention-with-vdd-min: If present don't allow phy retention but allow
 	vdd min.
 - qcom,usbin-vadc: Corresponding vadc device's phandle to read usbin voltage using VADC.
 	This will be used to get value of usb power supply's VOLTAGE_NOW property.
 - qcom,usbid-gpio: This corresponds to gpio which is used for USB ID detection.
+- qcom,bus-clk-rate: If present, indicates nominal bus frequency to be voted for
+	bimc/snoc/pcnoc clock with usb cable connected. If AHB2AHB bypass is enabled,
+	pcnoc value should be defined to very large number so that PNOC runs at max
+	frequency.
+- qcom,phy-dvdd-always-on: If present PHY DVDD is supplied by a always-on
+	regulator unlike vddcx/vddmx. PHY can keep D+ pull-up and D+/D-
+	pull-down resistors during peripheral and host bus suspend without
+	any re-work.
 
 Example HSUSB OTG controller device node :
 	usb@f9690000 {
 		compatible = "qcom,hsusb-otg";
 		reg = <0xf9690000 0x400>;
+		reg-names = "core";
 		interrupts = <134>;
 		interrupt-names = "core_irq";
 
@@ -196,6 +240,7 @@ Optional properties :
   the USB host controller and its RESET_N signal is connected to this
   ext-hub-reset-gpio GPIO. It should be driven LOW to RESET the HUB.
 - qcom,usb2-enable-uicc: If present, usb2 port will be used for uicc card connection.
+- usb-phy: phandle for the PHY device, if described as a separate device tree node
 
 Example MSM HSUSB EHCI controller device node :
 	ehci: qcom,ehci-host@f9a55000 {
@@ -216,33 +261,4 @@ Example MSM HSUSB EHCI controller device node :
 		qcom,usb2-power-budget = <500>;
 		qcom,vdd-voltage-level = <1 2 3 5 7>;
 		qcom,usb2-enable-uicc;
-	};
-
-ANDROID USB:
-
-Required properties:
-- compatible: should be "qcom,android-usb"
-
-Optional properties :
-- reg  : offset and length of memory region that is used by device to
-  update USB PID and serial numbers used by bootloader in DLOAD mode.
-- qcom,android-usb-swfi-latency : value to be used by device to vote
-  for DMA latency in microsecs.
-- qcom,streaming-func : add list of usb function name. If mention usb function
-  is being enable as part of USB composition, streaming mode is enable with
-  usb device controller to get better throughput. NOTE: Inverted CRC and
-  turnaround timeout is observed on enabling streaming. Hence it is required
-  to see these errors and number of erros on enabling this at USB level to make
-  final decision to enable this feature or not.
-- qcom,android-usb-cdrom : if this property is present then device creates
-  a new LUN as CD-ROM.
-- qcom,android-usb-uicc-nluns : Number of mass storage LUNs (8 bits) required
-  for the UICC card.
-Example Android USB device node :
-	android_usb@fc42b0c8 {
-		compatible = "qcom,android-usb";
-		reg = <0xfc42b0c8 0xc8>;
-		qcom,android-usb-swfi-latency = <1>;
-		qcom,streaming-func = "rndis","mtp";
-		qcom,android-usb-uicc-nluns = /bits/ 8 <1>;
 	};

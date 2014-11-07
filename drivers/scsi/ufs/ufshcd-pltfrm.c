@@ -37,7 +37,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/of.h>
 
-#include "ufshcd.h"
+#include <linux/scsi/ufs/ufshcd.h>
 
 static const struct of_device_id ufs_of_match[];
 static struct ufs_hba_variant_ops *get_variant_ops(struct device *dev)
@@ -236,7 +236,44 @@ out:
 	return err;
 }
 
-#ifdef CONFIG_PM
+static void ufshcd_parse_pm_levels(struct ufs_hba *hba)
+{
+	struct device *dev = hba->dev;
+	struct device_node *np = dev->of_node;
+
+	if (np) {
+		if (of_property_read_u32(np, "rpm-level", &hba->rpm_lvl))
+			hba->rpm_lvl = -1;
+		if (of_property_read_u32(np, "spm-level", &hba->spm_lvl))
+			hba->spm_lvl = -1;
+	}
+}
+
+#ifdef CONFIG_SMP
+static void ufshcd_parse_pm_qos(struct ufs_hba *hba)
+{
+	const char *cpu_affinity = NULL;
+
+	hba->pm_qos.cpu_dma_latency_us = UFS_DEFAULT_CPU_DMA_LATENCY_US;
+	of_property_read_u32(hba->dev->of_node, "qcom,cpu-dma-latency-us",
+		&hba->pm_qos.cpu_dma_latency_us);
+	dev_dbg(hba->dev, "cpu_dma_latency_us = %u\n",
+		hba->pm_qos.cpu_dma_latency_us);
+
+	hba->pm_qos.req.type = PM_QOS_REQ_AFFINE_IRQ;
+	if (!of_property_read_string(hba->dev->of_node, "qcom,cpu-affinity",
+		&cpu_affinity)) {
+		if (!strcmp(cpu_affinity, "all_cores"))
+			hba->pm_qos.req.type = PM_QOS_REQ_ALL_CORES;
+		else if (!strcmp(cpu_affinity, "affine_cores"))
+			hba->pm_qos.req.type = PM_QOS_REQ_AFFINE_CORES;
+		else if (!strcmp(cpu_affinity, "affine_irq"))
+			hba->pm_qos.req.type = PM_QOS_REQ_AFFINE_IRQ;
+	}
+	dev_dbg(hba->dev, "hba->pm_qos.pm_qos_req.type = %u\n",
+		hba->pm_qos.req.type);
+}
+
 /**
  * ufshcd_pltfrm_suspend - suspend power management function
  * @dev: pointer to device handle
@@ -338,6 +375,8 @@ static int ufshcd_pltfrm_probe(struct platform_device *pdev)
 		goto dealloc_host;
 	}
 
+	ufshcd_parse_pm_qos(hba);
+	ufshcd_parse_pm_levels(hba);
 	pm_runtime_set_active(&pdev->dev);
 	pm_runtime_enable(&pdev->dev);
 
@@ -381,7 +420,7 @@ static int ufshcd_pltfrm_remove(struct platform_device *pdev)
 
 static const struct of_device_id ufs_of_match[] = {
 	{ .compatible = "jedec,ufs-1.1"},
-	{ .compatible = "qcom,ufshc", .data = (void *)&ufs_hba_msm_vops, },
+	{ .compatible = "qcom,ufshc", .data = (void *)&ufs_hba_qcom_vops, },
 	{},
 };
 

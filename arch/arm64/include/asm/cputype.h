@@ -18,6 +18,8 @@
 
 #define INVALID_HWID		ULONG_MAX
 
+#define MPIDR_UP_BITMASK	(0x1 << 30)
+#define MPIDR_MT_BITMASK	(0x1 << 24)
 #define MPIDR_HWID_BITMASK	0xff00ffffff
 
 #define MPIDR_LEVEL_BITS_SHIFT	3
@@ -30,6 +32,9 @@
 #define MPIDR_AFFINITY_LEVEL(mpidr, level) \
 	((mpidr >> MPIDR_LEVEL_SHIFT(level)) & MPIDR_LEVEL_MASK)
 
+#define MPIDR_AFF_MASK(level) \
+	((u64)MPIDR_LEVEL_MASK << MPIDR_LEVEL_SHIFT(level))
+
 #define read_cpuid(reg) ({						\
 	u64 __val;							\
 	asm("mrs	%0, " #reg : "=r" (__val));			\
@@ -41,6 +46,7 @@
 
 #define ARM_CPU_PART_AEM_V8	0xD0F0
 #define ARM_CPU_PART_FOUNDATION	0xD000
+#define ARM_CPU_PART_CORTEX_A53	0xD030
 #define ARM_CPU_PART_CORTEX_A57	0xD070
 
 #define APM_CPU_PART_POTENZA	0x0000

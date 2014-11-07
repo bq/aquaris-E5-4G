@@ -34,9 +34,12 @@ enum hdmi_tx_power_module_type {
 /* Data filled from device tree */
 struct hdmi_tx_platform_data {
 	bool primary;
+	bool cont_splash_enabled;
 	bool cond_power_on;
 	struct dss_io_data io[HDMI_TX_MAX_IO];
 	struct dss_module_power power_data[HDMI_TX_MAX_PM];
+	/* bitfield representing each module's pin state */
+	u64 pin_states;
 };
 
 struct hdmi_audio {
@@ -47,11 +50,23 @@ struct hdmi_audio {
 	int down_mix;
 };
 
+struct hdmi_tx_pinctrl {
+	struct pinctrl *pinctrl;
+	struct pinctrl_state *state_active;
+	struct pinctrl_state *state_hpd_active;
+	struct pinctrl_state *state_cec_active;
+	struct pinctrl_state *state_ddc_active;
+	struct pinctrl_state *state_suspend;
+};
+
 struct hdmi_tx_ctrl {
 	struct platform_device *pdev;
 	struct hdmi_tx_platform_data pdata;
 	struct mdss_panel_data panel_data;
+	struct mdss_util_intf *mdss_util;
 
+
+	struct hdmi_tx_pinctrl pin_res;
 	struct hdmi_audio audio_data;
 
 	struct mutex mutex;

@@ -82,6 +82,7 @@ struct thread_struct {
 	unsigned long		tp_value;
 	struct fpsimd_state	fpsimd_state;
 	unsigned long		fault_address;	/* fault info */
+	unsigned long		fault_code;	/* ESR_EL1 value */
 	struct debug_info	debug;		/* debugging */
 };
 
@@ -140,7 +141,19 @@ extern struct task_struct *cpu_switch_to(struct task_struct *prev,
 	((struct pt_regs *)(THREAD_START_SP + task_stack_page(p)) - 1)
 
 #define KSTK_EIP(tsk)	task_pt_regs(tsk)->pc
+#ifndef CONFIG_COMPAT
 #define KSTK_ESP(tsk)	task_pt_regs(tsk)->sp
+#else
+#define KSTK_ESP(tsk)					\
+({							\
+	u64 ptr;					\
+	if (is_compat_thread(task_thread_info(tsk)))	\
+		ptr = task_pt_regs(tsk)->compat_sp;	\
+	else						\
+		ptr = task_pt_regs(tsk)->sp;		\
+	ptr;						\
+})
+#endif
 
 /*
  * Prefetching support

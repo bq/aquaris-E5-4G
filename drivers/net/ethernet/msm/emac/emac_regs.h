@@ -124,6 +124,7 @@
 
 /* EMAC_1588 register offsets */
 #define EMAC_P1588_CTRL_REG                      0x000048
+#define EMAC_P1588_TX_LATENCY                    0x0000d4
 #define EMAC_P1588_INC_VALUE_2                   0x0000d8
 #define EMAC_P1588_INC_VALUE_1                   0x0000dc
 #define EMAC_P1588_NANO_OFFSET_2                 0x0000e0
@@ -145,6 +146,9 @@
 #define EMAC_P1588_RTC_PRELOADED_3               0x00040c
 #define EMAC_P1588_RTC_PRELOADED_2               0x000410
 #define EMAC_P1588_RTC_PRELOADED_1               0x000414
+#define EMAC_P1588_GRAND_MASTER_CONFIG_0         0x000800
+#define EMAC_P1588_GM_PPS_TIMESTAMP_2            0x000814
+#define EMAC_P1588_GM_PPS_TIMESTAMP_1            0x000818
 
 /* EMAC_QSERDES register offsets */
 #define EMAC_QSERDES_COM_SYS_CLK_CTRL            0x000000

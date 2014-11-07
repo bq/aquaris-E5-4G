@@ -23,9 +23,9 @@
 #include <linux/of.h>
 #include <linux/of_gpio.h>
 #include <linux/regmap.h>
+#include <linux/debugfs.h>
 #include <linux/regulator/onsemi-ncp6335d.h>
 #include <linux/string.h>
-#include <mach/gpiomux.h>
 
 /* registers */
 #define REG_NCP6335D_PID		0x03
@@ -69,14 +69,73 @@ struct ncp6335d_info {
 	unsigned int min_voltage;
 	unsigned int min_slew_ns;
 	unsigned int max_slew_ns;
+	unsigned int peek_poke_address;
+
+	struct dentry *debug_root;
 };
+
+static int delay_array[] = {10, 20, 30, 40, 50};
+
+static int ncp6335x_read(struct ncp6335d_info *dd, unsigned int reg,
+						unsigned int *val)
+{
+	int i = 0, rc = 0;
+
+	rc = regmap_read(dd->regmap, reg, val);
+	for (i = 0; rc && i < ARRAY_SIZE(delay_array); i++) {
+		pr_debug("Failed reading reg=%u - retry(%d)\n", reg, i);
+		msleep(delay_array[i]);
+		rc = regmap_read(dd->regmap, reg, val);
+	}
+
+	if (rc)
+		pr_err("Failed reading reg=%u rc=%d\n", reg, rc);
+
+	return rc;
+}
+
+static int ncp6335x_write(struct ncp6335d_info *dd, unsigned int reg,
+						unsigned int val)
+{
+	int i = 0, rc = 0;
+
+	rc = regmap_write(dd->regmap, reg, val);
+	for (i = 0; rc && i < ARRAY_SIZE(delay_array); i++) {
+		pr_debug("Failed writing reg=%u - retry(%d)\n", reg, i);
+		msleep(delay_array[i]);
+		rc = regmap_write(dd->regmap, reg, val);
+	}
+
+	if (rc)
+		pr_err("Failed writing reg=%u rc=%d\n", reg, rc);
+
+	return rc;
+}
+
+static int ncp6335x_update_bits(struct ncp6335d_info *dd, unsigned int reg,
+					unsigned int mask, unsigned int val)
+{
+	int i = 0, rc = 0;
+
+	rc = regmap_update_bits(dd->regmap, reg, mask, val);
+	for (i = 0; rc && i < ARRAY_SIZE(delay_array); i++) {
+		pr_debug("Failed updating reg=%u- retry(%d)\n", reg, i);
+		msleep(delay_array[i]);
+		rc = regmap_update_bits(dd->regmap, reg, mask, val);
+	}
+
+	if (rc)
+		pr_err("Failed updating reg=%u rc=%d\n", reg, rc);
+
+	return rc;
+}
 
 static void dump_registers(struct ncp6335d_info *dd,
 			unsigned int reg, const char *func)
 {
 	unsigned int val = 0;
 
-	regmap_read(dd->regmap, reg, &val);
+	ncp6335x_read(dd, reg, &val);
 	dev_dbg(dd->dev, "%s: NCP6335D: Reg = %x, Val = %x\n", func, reg, val);
 }
 
@@ -99,8 +158,8 @@ static int ncp6335d_enable(struct regulator_dev *rdev)
 	int rc;
 	struct ncp6335d_info *dd = rdev_get_drvdata(rdev);
 
-	rc = regmap_update_bits(dd->regmap, dd->vsel_reg,
-				NCP6335D_ENABLE, NCP6335D_ENABLE);
+	rc = ncp6335x_update_bits(dd, dd->vsel_reg,
+			NCP6335D_ENABLE, NCP6335D_ENABLE);
 	if (rc)
 		dev_err(dd->dev, "Unable to enable regualtor rc(%d)", rc);
 
@@ -114,7 +173,7 @@ static int ncp6335d_disable(struct regulator_dev *rdev)
 	int rc;
 	struct ncp6335d_info *dd = rdev_get_drvdata(rdev);
 
-	rc = regmap_update_bits(dd->regmap, dd->vsel_reg,
+	rc = ncp6335x_update_bits(dd, dd->vsel_reg,
 					NCP6335D_ENABLE, 0);
 	if (rc)
 		dev_err(dd->dev, "Unable to disable regualtor rc(%d)", rc);
@@ -130,7 +189,7 @@ static int ncp6335d_get_voltage(struct regulator_dev *rdev)
 	int rc;
 	struct ncp6335d_info *dd = rdev_get_drvdata(rdev);
 
-	rc = regmap_read(dd->regmap, dd->vsel_reg, &val);
+	rc = ncp6335x_read(dd, dd->vsel_reg, &val);
 	if (rc) {
 		dev_err(dd->dev, "Unable to get volatge rc(%d)", rc);
 		return rc;
@@ -157,7 +216,7 @@ static int ncp6335d_set_voltage(struct regulator_dev *rdev,
 		return -EINVAL;
 	}
 
-	rc = regmap_update_bits(dd->regmap, dd->vsel_reg,
+	rc = ncp6335x_update_bits(dd, dd->vsel_reg,
 		NCP6335D_VOUT_SEL_MASK, (set_val & NCP6335D_VOUT_SEL_MASK));
 	if (rc) {
 		dev_err(dd->dev, "Unable to set volatge (%d %d)\n",
@@ -195,14 +254,14 @@ static int ncp6335d_set_mode(struct regulator_dev *rdev,
 		return -EINVAL;
 	}
 
-	rc = regmap_update_bits(dd->regmap, REG_NCP6335D_COMMAND, dd->mode_bit,
+	rc = ncp6335x_update_bits(dd, REG_NCP6335D_COMMAND, dd->mode_bit,
 			(mode == REGULATOR_MODE_FAST) ? dd->mode_bit : 0);
 	if (rc) {
 		dev_err(dd->dev, "Unable to set operating mode rc(%d)", rc);
 		return rc;
 	}
 
-	rc = regmap_update_bits(dd->regmap, REG_NCP6335D_COMMAND,
+	rc = ncp6335x_update_bits(dd, REG_NCP6335D_COMMAND,
 					NCP6335D_DVS_PWM_MODE,
 					(mode == REGULATOR_MODE_FAST) ?
 					NCP6335D_DVS_PWM_MODE : 0);
@@ -220,7 +279,7 @@ static unsigned int ncp6335d_get_mode(struct regulator_dev *rdev)
 	int rc;
 	struct ncp6335d_info *dd = rdev_get_drvdata(rdev);
 
-	rc = regmap_read(dd->regmap, REG_NCP6335D_COMMAND, &val);
+	rc = ncp6335x_read(dd, REG_NCP6335D_COMMAND, &val);
 	if (rc) {
 		dev_err(dd->dev, "Unable to get regulator mode rc(%d)\n", rc);
 		return rc;
@@ -258,14 +317,14 @@ static int ncp6335d_restore_working_reg(struct device_node *node,
 	unsigned int val;
 
 	/* Restore register from back up register */
-	ret = regmap_read(dd->regmap, dd->vsel_backup_reg, &val);
+	ret = ncp6335x_read(dd, dd->vsel_backup_reg, &val);
 	if (ret < 0) {
 		dev_err(dd->dev, "Failed to get backup data from reg %d, ret = %d\n",
 			dd->vsel_backup_reg, ret);
 		return ret;
 	}
 
-	ret = regmap_update_bits(dd->regmap, dd->vsel_reg,
+	ret = ncp6335x_update_bits(dd, dd->vsel_reg,
 					NCP6335D_VOUT_SEL_MASK, val);
 	if (ret < 0) {
 		dev_err(dd->dev, "Failed to update working reg %d, ret = %d\n",
@@ -313,30 +372,6 @@ static int ncp6335d_parse_gpio(struct device_node *node,
 	return ret;
 }
 
-static int ncp6335d_parse_tlmm(struct device_node *node,
-				struct ncp6335d_info *dd)
-{
-	int val, ret = 0;
-	u32 tmp[2];
-
-	if (!of_find_property(node, "onnn,tlmm-config", NULL))
-		return ret;
-
-	ret = of_property_read_u32_array(node, "onnn,tlmm-config", tmp, 2);
-	if (ret) {
-		dev_err(dd->dev, "onnn,tlmm-config is misconfigured, ret = %d",
-			ret);
-		return ret;
-	}
-
-	val = msm_tlmm_misc_reg_read(TLMM_SPARE_REG);
-	val &= ~tmp[0];
-	val |= tmp[1] & tmp[0];
-	msm_tlmm_misc_reg_write(TLMM_SPARE_REG, val);
-
-	return ret;
-}
-
 static int ncp6335d_init(struct i2c_client *client, struct ncp6335d_info *dd,
 			const struct ncp6335d_platform_data *pdata)
 {
@@ -369,12 +404,8 @@ static int ncp6335d_init(struct i2c_client *client, struct ncp6335d_info *dd,
 	if (rc)
 		return rc;
 
-	rc = ncp6335d_parse_tlmm(client->dev.of_node, dd);
-	if (rc)
-		return rc;
-
 	/* get the current programmed voltage */
-	rc = regmap_read(dd->regmap, dd->vsel_reg, &val);
+	rc = ncp6335x_read(dd, dd->vsel_reg, &val);
 	if (rc) {
 		dev_err(dd->dev, "Unable to get volatge rc(%d)", rc);
 		return rc;
@@ -383,7 +414,7 @@ static int ncp6335d_init(struct i2c_client *client, struct ncp6335d_info *dd,
 				dd->step_size) + dd->min_voltage;
 
 	/* set discharge */
-	rc = regmap_update_bits(dd->regmap, REG_NCP6335D_PGOOD,
+	rc = ncp6335x_update_bits(dd, REG_NCP6335D_PGOOD,
 					NCP6335D_PGOOD_DISCHG,
 					(pdata->discharge_enable ?
 					NCP6335D_PGOOD_DISCHG : 0));
@@ -403,13 +434,13 @@ static int ncp6335d_init(struct i2c_client *client, struct ncp6335d_info *dd,
 	val = DIV_ROUND_UP(pdata->slew_rate_ns, dd->min_slew_ns);
 	val = ilog2(val);
 
-	rc = regmap_update_bits(dd->regmap, REG_NCP6335D_TIMING,
+	rc = ncp6335x_update_bits(dd, REG_NCP6335D_TIMING,
 			NCP6335D_SLEW_MASK, val << NCP6335D_SLEW_SHIFT);
 	if (rc)
 		dev_err(dd->dev, "Unable to set slew rate rc(%d)\n", rc);
 
 	/* Set Sleep mode bit */
-	rc = regmap_update_bits(dd->regmap, REG_NCP6335D_COMMAND,
+	rc = ncp6335x_update_bits(dd, REG_NCP6335D_COMMAND,
 				NCP6335D_SLEEP_MODE, pdata->sleep_enable ?
 						NCP6335D_SLEEP_MODE : 0);
 	if (rc)
@@ -538,6 +569,38 @@ static struct ncp6335d_platform_data *
 	return pdata;
 }
 
+static int get_reg(void *data, u64 *val)
+{
+	struct ncp6335d_info *dd = data;
+	int rc;
+	unsigned int temp = 0;
+
+	rc = ncp6335x_read(dd, dd->peek_poke_address, &temp);
+	if (rc < 0)
+		dev_err(dd->dev, "Couldn't read reg %x rc = %d\n",
+				dd->peek_poke_address, rc);
+	else
+		*val = temp;
+
+	return rc;
+}
+
+static int set_reg(void *data, u64 val)
+{
+	struct ncp6335d_info *dd = data;
+	int rc;
+	unsigned int temp = 0;
+
+	temp = (unsigned int) val;
+	rc = ncp6335x_write(dd, dd->peek_poke_address, temp);
+	if (rc < 0)
+		dev_err(dd->dev, "Couldn't write 0x%02x to 0x%02x rc= %d\n",
+			dd->peek_poke_address, temp, rc);
+
+	return rc;
+}
+DEFINE_SIMPLE_ATTRIBUTE(poke_poke_debug_ops, get_reg, set_reg, "0x%02llx\n");
+
 static int ncp6335d_regulator_probe(struct i2c_client *client,
 					const struct i2c_device_id *id)
 {
@@ -580,7 +643,7 @@ static int ncp6335d_regulator_probe(struct i2c_client *client,
 		return PTR_ERR(dd->regmap);
 	}
 
-	rc = regmap_read(dd->regmap, REG_NCP6335D_PID, &val);
+	rc = ncp6335x_read(dd, REG_NCP6335D_PID, &val);
 	if (rc) {
 		dev_err(&client->dev, "Unable to identify NCP6335D, rc(%d)\n",
 									rc);
@@ -613,6 +676,28 @@ static int ncp6335d_regulator_probe(struct i2c_client *client,
 		return PTR_ERR(dd->regulator);
 	}
 
+	dd->debug_root = debugfs_create_dir("ncp6335x", NULL);
+	if (!dd->debug_root)
+		dev_err(&client->dev, "Couldn't create debug dir\n");
+
+	if (dd->debug_root) {
+		struct dentry *ent;
+
+		ent = debugfs_create_x32("address", S_IFREG | S_IWUSR | S_IRUGO,
+					  dd->debug_root,
+					  &(dd->peek_poke_address));
+		if (!ent)
+			dev_err(&client->dev, "Couldn't create address debug file rc = %d\n",
+									rc);
+
+		ent = debugfs_create_file("data", S_IFREG | S_IWUSR | S_IRUGO,
+					  dd->debug_root, dd,
+					  &poke_poke_debug_ops);
+		if (!ent)
+			dev_err(&client->dev, "Couldn't create data debug file rc = %d\n",
+									rc);
+	}
+
 	return 0;
 }
 
@@ -621,6 +706,8 @@ static int ncp6335d_regulator_remove(struct i2c_client *client)
 	struct ncp6335d_info *dd = i2c_get_clientdata(client);
 
 	regulator_unregister(dd->regulator);
+
+	debugfs_remove_recursive(dd->debug_root);
 
 	return 0;
 }
@@ -665,7 +752,7 @@ int __init ncp6335d_regulator_init(void)
 	return i2c_add_driver(&ncp6335d_regulator_driver);
 }
 EXPORT_SYMBOL(ncp6335d_regulator_init);
-subsys_initcall(ncp6335d_regulator_init);
+arch_initcall(ncp6335d_regulator_init);
 
 static void __exit ncp6335d_regulator_exit(void)
 {

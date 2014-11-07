@@ -44,6 +44,14 @@
 #define TAPAN_IS_1_0(ver) \
 	((ver == TAPAN_VERSION_1_0) ? 1 : 0)
 
+#define TOMTOM_VERSION_1_0	1
+#define TOMTOM_IS_1_0(ver) \
+	((ver == TOMTOM_VERSION_1_0) ? 1 : 0)
+
+#define TOMBAK_VERSION_1_0	0
+#define TOMBAK_IS_1_0(ver) \
+	((ver == TOMBAK_VERSION_1_0) ? 1 : 0)
+
 enum wcd9xxx_slim_slave_addr_type {
 	WCD9XXX_SLIM_SLAVE_ADDR_TYPE_TABLA,
 	WCD9XXX_SLIM_SLAVE_ADDR_TYPE_TAIKO,
@@ -89,7 +97,8 @@ enum {
 	WCD9XXX_IRQ_MAD_BEACON,
 	WCD9XXX_IRQ_SPEAKER_CLIPPING,
 	WCD9320_IRQ_MBHC_JACK_SWITCH,
-	WCD9XXX_IRQ_VBAT_MONITOR_ATTACK,
+	WCD9306_NUM_IRQS,
+	WCD9XXX_IRQ_VBAT_MONITOR_ATTACK = WCD9306_NUM_IRQS,
 	WCD9XXX_IRQ_VBAT_MONITOR_RELEASE,
 	WCD9XXX_NUM_IRQS,
 	/* WCD9330 INTR1_REG 3*/
@@ -109,7 +118,7 @@ enum {
 	TABLA_NUM_IRQS = WCD9310_NUM_IRQS,
 	SITAR_NUM_IRQS = WCD9310_NUM_IRQS,
 	TAIKO_NUM_IRQS = WCD9XXX_NUM_IRQS,
-	TAPAN_NUM_IRQS = WCD9XXX_NUM_IRQS,
+	TAPAN_NUM_IRQS = WCD9306_NUM_IRQS,
 	TOMTOM_NUM_IRQS = WCD9330_NUM_IRQS,
 };
 
@@ -146,6 +155,7 @@ struct wcd9xxx_codec_dai_data {
 	u16 grph;				/* slimbus group handle */
 	unsigned long ch_mask;
 	wait_queue_head_t dai_wait;
+	bool bus_down_in_recovery;
 };
 
 #define WCD9XXX_CH(xport, xshift) \
@@ -214,11 +224,15 @@ int wcd9xxx_interface_reg_write(struct wcd9xxx *wcd9xxx, unsigned short reg,
 int wcd9xxx_get_logical_addresses(u8 *pgd_la, u8 *inf_la);
 int wcd9xxx_slim_write_repeat(struct wcd9xxx *wcd9xxx, unsigned short reg,
 			     int bytes, void *src);
+int wcd9xxx_slim_reserve_bw(struct wcd9xxx *wcd9xxx,
+			    u32 bw_ops, bool commit);
 
 #if defined(CONFIG_WCD9310_CODEC) || \
 	defined(CONFIG_WCD9304_CODEC) || \
 	defined(CONFIG_WCD9320_CODEC) || \
-	defined(CONFIG_WCD9306_CODEC)
+	defined(CONFIG_WCD9330_CODEC) || \
+	defined(CONFIG_WCD9306_CODEC) || \
+	defined(CONFIG_SND_SOC_MSM8X16_WCD)
 int __init wcd9xxx_irq_of_init(struct device_node *node,
 			       struct device_node *parent);
 #else

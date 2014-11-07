@@ -940,4 +940,30 @@ static inline int rdev_set_qos_map(struct cfg80211_registered_device *rdev,
 	return ret;
 }
 
+static inline int
+rdev_set_ap_chanwidth(struct cfg80211_registered_device *rdev,
+		      struct net_device *dev, struct cfg80211_chan_def *chandef)
+{
+	int ret;
+
+	trace_rdev_set_ap_chanwidth(&rdev->wiphy, dev, chandef);
+	ret = rdev->ops->set_ap_chanwidth(&rdev->wiphy, dev, chandef);
+	trace_rdev_return_int(&rdev->wiphy, ret);
+
+	return ret;
+}
+
+static inline int rdev_key_mgmt_set_pmk(struct cfg80211_registered_device *rdev,
+				   struct net_device *dev, u8 *pmk,
+				   size_t pmk_len)
+{
+	int ret;
+
+	trace_rdev_key_mgmt_set_pmk(&rdev->wiphy, dev, pmk);
+	ret = rdev->ops->key_mgmt_set_pmk(&rdev->wiphy, dev, pmk, pmk_len);
+	trace_rdev_return_int(&rdev->wiphy, ret);
+
+	return ret;
+}
+
 #endif /* __CFG80211_RDEV_OPS */

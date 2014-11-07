@@ -19,7 +19,7 @@
 
 enum clock_properties {
 	CLOCK_PROP_HAS_SCALING = 1 << 0,
-	CLOCK_PROP_HAS_SW_POWER_COLLAPSE = 1 << 1,
+	CLOCK_PROP_HAS_GATING = 1 << 1,
 };
 
 static size_t get_u32_array_num_elements(struct platform_device *pdev,
@@ -40,7 +40,7 @@ static size_t get_u32_array_num_elements(struct platform_device *pdev,
 			name);
 		goto fail_read;
 	}
-	return num_elements / 2;
+	return num_elements;
 
 fail_read:
 	return 0;
@@ -100,12 +100,6 @@ static inline void msm_vidc_free_iommu_groups(
 	res->iommu_group_set.iommu_maps = NULL;
 }
 
-static inline void msm_vidc_free_buffer_usage_table(
-			struct msm_vidc_platform_resources *res)
-{
-	res->buffer_usage_set.buffer_usage_tbl = NULL;
-}
-
 static inline void msm_vidc_free_regulator_table(
 			struct msm_vidc_platform_resources *res)
 {
@@ -141,7 +135,6 @@ void msm_vidc_free_platform_resources(
 	msm_vidc_free_reg_table(res);
 	msm_vidc_free_bus_vectors(res);
 	msm_vidc_free_iommu_groups(res);
-	msm_vidc_free_buffer_usage_table(res);
 }
 
 static int msm_vidc_load_reg_table(struct msm_vidc_platform_resources *res)
@@ -160,6 +153,8 @@ static int msm_vidc_load_reg_table(struct msm_vidc_platform_resources *res)
 
 	reg_set = &res->reg_set;
 	reg_set->count = get_u32_array_num_elements(pdev, "qcom,reg-presets");
+	reg_set->count /=  sizeof(*reg_set->reg_tbl) / sizeof(u32);
+
 	if (reg_set->count == 0) {
 		dprintk(VIDC_DBG, "no elements in reg set\n");
 		return rc;
@@ -202,6 +197,7 @@ static int msm_vidc_load_freq_table(struct msm_vidc_platform_resources *res)
 	}
 
 	num_elements = get_u32_array_num_elements(pdev, "qcom,load-freq-tbl");
+	num_elements /= sizeof(*res->load_freq_tbl) / sizeof(u32);
 	if (num_elements == 0) {
 		dprintk(VIDC_ERR, "no elements in frequency table\n");
 		return rc;
@@ -218,7 +214,7 @@ static int msm_vidc_load_freq_table(struct msm_vidc_platform_resources *res)
 
 	if (of_property_read_u32_array(pdev->dev.of_node,
 		"qcom,load-freq-tbl", (u32 *)res->load_freq_tbl,
-		num_elements * 2)) {
+		num_elements * sizeof(*res->load_freq_tbl) / sizeof(u32))) {
 		dprintk(VIDC_ERR, "Failed to read frequency table\n");
 		msm_vidc_free_freq_table(res);
 		return -EINVAL;
@@ -427,56 +423,6 @@ err_no_of_node:
 	return rc;
 }
 
-static int msm_vidc_load_buffer_usage_table(
-		struct msm_vidc_platform_resources *res)
-{
-	int rc = 0;
-	struct platform_device *pdev = res->pdev;
-	struct buffer_usage_set *buffer_usage_set = &res->buffer_usage_set;
-
-	if (!of_find_property(pdev->dev.of_node,
-				"qcom,buffer-type-tz-usage-table", NULL)) {
-		/* qcom,buffer-type-tz-usage-table is an optional property.  It
-		 * likely won't be present if the core doesn't support content
-		 * protection */
-		dprintk(VIDC_DBG, "buffer-type-tz-usage-table not found\n");
-		return 0;
-	}
-
-	buffer_usage_set->count = get_u32_array_num_elements(
-				    pdev, "qcom,buffer-type-tz-usage-table");
-	if (buffer_usage_set->count == 0) {
-		dprintk(VIDC_DBG, "no elements in buffer usage set\n");
-		return 0;
-	}
-
-	buffer_usage_set->buffer_usage_tbl = devm_kzalloc(&pdev->dev,
-			buffer_usage_set->count *
-			sizeof(*buffer_usage_set->buffer_usage_tbl),
-			GFP_KERNEL);
-	if (!buffer_usage_set->buffer_usage_tbl) {
-		dprintk(VIDC_ERR, "%s Failed to alloc buffer usage table\n",
-			__func__);
-		rc = -ENOMEM;
-		goto err_load_buf_usage;
-	}
-
-	rc = of_property_read_u32_array(pdev->dev.of_node,
-		    "qcom,buffer-type-tz-usage-table",
-		(u32 *)buffer_usage_set->buffer_usage_tbl,
-		buffer_usage_set->count *
-		(sizeof(*buffer_usage_set->buffer_usage_tbl)/sizeof(u32)));
-	if (rc) {
-		dprintk(VIDC_ERR, "Failed to read buffer usage table\n");
-		goto err_load_buf_usage;
-	}
-
-	return 0;
-err_load_buf_usage:
-	msm_vidc_free_buffer_usage_table(res);
-	return rc;
-}
-
 static int msm_vidc_load_regulator_table(
 		struct msm_vidc_platform_resources *res)
 {
@@ -567,7 +513,7 @@ static int msm_vidc_load_clock_table(
 	struct clock_set *clocks = &res->clock_set;
 
 	num_clocks = of_property_count_strings(pdev->dev.of_node,
-				"qcom,clock-names");
+				"clock-names");
 	if (num_clocks <= 0) {
 		/* Devices such as Q6 might not have any control over clocks
 		 * hence have none specified, which is ok. */
@@ -608,7 +554,7 @@ static int msm_vidc_load_clock_table(
 		struct clock_info *vc = &res->clock_set.clock_tbl[c];
 
 		of_property_read_string_index(pdev->dev.of_node,
-				"qcom,clock-names", c, &vc->name);
+				"clock-names", c, &vc->name);
 
 		if (clock_props[c] & CLOCK_PROP_HAS_SCALING) {
 			vc->count = res->load_freq_tbl_size;
@@ -618,15 +564,23 @@ static int msm_vidc_load_clock_table(
 			vc->load_freq_tbl = NULL;
 		}
 
-		vc->has_sw_power_collapse = !!(clock_props[c] &
-				CLOCK_PROP_HAS_SW_POWER_COLLAPSE);
+		vc->has_gating = !!(clock_props[c] & CLOCK_PROP_HAS_GATING);
 
 		dprintk(VIDC_DBG,
-				"Found clock %s: scales = %s, s/w collapse = %s\n",
-				vc->name,
-				vc->count ? "yes" : "no",
-				vc->has_sw_power_collapse ? "yes" : "no");
+			"Found clock %s: scale-able = %s, gate-able = %s\n",
+			vc->name, vc->count ? "yes" : "no",
+			vc->has_gating ? "yes" : "no");
 	}
+
+	res->sw_power_collapsible = of_property_read_bool(pdev->dev.of_node,
+					"qcom,sw-power-collapse");
+	dprintk(VIDC_DBG, "Power collapse supported = %s\n",
+		res->sw_power_collapsible ? "yes" : "no");
+
+	res->early_fw_load = of_property_read_bool(pdev->dev.of_node,
+				"qcom,early-fw-load");
+	dprintk(VIDC_DBG, "Early fw load = %s\n",
+				res->early_fw_load ? "yes" : "no");
 
 	return 0;
 
@@ -660,6 +614,18 @@ int read_platform_resources_from_dt(
 	of_property_read_u32(pdev->dev.of_node,
 			"qcom,ocmem-size", &res->ocmem_size);
 
+	res->dynamic_bw_update = of_property_read_bool(pdev->dev.of_node,
+			"qcom,use-dynamic-bw-update");
+	res->sys_idle_indicator = of_property_read_bool(pdev->dev.of_node,
+			"qcom,enable-idle-indicator");
+
+	res->minimum_vote = of_property_read_bool(pdev->dev.of_node,
+			"qcom,enable-minimum-voting");
+
+	res->thermal_mitigable =
+			of_property_read_bool(pdev->dev.of_node,
+			"qcom,enable-thermal-mitigation");
+
 	rc = msm_vidc_load_freq_table(res);
 	if (rc) {
 		dprintk(VIDC_ERR, "Failed to load freq table: %d\n", rc);
@@ -679,12 +645,6 @@ int read_platform_resources_from_dt(
 	if (rc) {
 		dprintk(VIDC_ERR, "Failed to load iommu groups: %d\n", rc);
 		goto err_load_iommu_groups;
-	}
-	rc = msm_vidc_load_buffer_usage_table(res);
-	if (rc) {
-		dprintk(VIDC_ERR,
-			"Failed to load buffer usage table: %d\n", rc);
-		goto err_load_buffer_usage_table;
 	}
 
 	rc = msm_vidc_load_regulator_table(res);
@@ -711,7 +671,7 @@ int read_platform_resources_from_dt(
 	res->use_non_secure_pil = of_property_read_bool(pdev->dev.of_node,
 			"qcom,use-non-secure-pil");
 
-	if (!is_iommu_present(res)) {
+	if (res->use_non_secure_pil || !is_iommu_present(res)) {
 		of_property_read_u32(pdev->dev.of_node, "qcom,fw-bias",
 				&firmware_base);
 		res->firmware_base = (phys_addr_t)firmware_base;
@@ -724,8 +684,6 @@ err_load_max_hw_load:
 err_load_clock_table:
 	msm_vidc_free_regulator_table(res);
 err_load_regulator_table:
-	msm_vidc_free_buffer_usage_table(res);
-err_load_buffer_usage_table:
 	msm_vidc_free_iommu_groups(res);
 err_load_iommu_groups:
 	msm_vidc_free_bus_vectors(res);

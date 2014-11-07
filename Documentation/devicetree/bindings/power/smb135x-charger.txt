@@ -6,7 +6,8 @@ the battery and power the system via the USB and AC adapter input.
 The smb135x interface is via I2C bus.
 
 Required Properties:
-- compatible:			Must be "qcom,smb1357-charger" or  "qcom,smb1359-charger".
+- compatible:			Must be "qcom,smb1357-charger", "qcom,smb1358-charger"
+				or  "qcom,smb1359-charger".
 - reg:				The device 7-bit I2C address.
 
 Optional Properties:
@@ -51,6 +52,20 @@ Optional Properties:
 - therm-bias-supply			The supply that provides bias voltage to the battery
 					thermistor. This is useful in designs that do not use the SYSON
 					pin to bias the thermistor.
+- qcom,parallel-charger:		A flag to indicate if the charger merely assists for USB
+					charging. In this case the input current from USB is split
+					between a main charger and smb135x for reducing thermal impact
+					of high current charging from USB path.
+- qcom,inhibit-disabled:	Disables the charger-inhibit function.
+- qcom,bms-controlled-charging: This property enables BMS to control EOC and
+				recharge. BMS and charger communicates with each
+				other via power_supply framework. This
+				property should be used with 'qcom,iterm-disabled'
+				to ensure EOC detection in charger is
+				disabled.
+- qcom,fastchg-ma:		Specifies the maximum fastcharge current.
+				The possible range for fastcharge current is
+				from 300mA to 3000mA.
 
 Example:
 	i2c@f9967000 {
@@ -67,5 +82,6 @@ Example:
 			qcom,recharge-thresh-mv = <100>;
 			regulator-name = "smb1357-otg";
 			qcom,thermal-mitigation = <1500 700 600 325>;
+			qcom,fastchg-ma = <3000>;
 		};
 	};

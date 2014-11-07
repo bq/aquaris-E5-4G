@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -46,6 +46,7 @@ u32 evt_type_base[4] = {0xcc, 0xd0, 0xd4, 0xd8};
 #define VENUM_BASE_OFFSET 3
 
 #define KRAIT_MAX_L1_REG 3
+#define KRAIT_MAX_VENUM_REG 0
 
 /*
  * Every 4 bytes represents a prefix.
@@ -214,7 +215,7 @@ static unsigned int get_krait_evtinfo(unsigned int krait_evt_type,
 		return -EINVAL;
 
 	if (prefix == KRAIT_VENUMEVT_PREFIX) {
-		if (code & 0xe0)
+		if ((code & 0xe0) || (reg > KRAIT_MAX_VENUM_REG))
 			return -EINVAL;
 		else
 			reg += VENUM_BASE_OFFSET;
@@ -446,37 +447,29 @@ static void krait_pmu_enable_event(struct perf_event *event)
 	/* Disable counter */
 	armv7_pmnc_disable_counter(idx);
 
-	/*
-	 * Set event (if destined for PMNx counters)
-	 * We don't need to set the event if it's a cycle count
-	 */
-	if (idx != ARMV7_IDX_CYCLE_COUNTER) {
-		val = hwc->config_base;
-		val &= KRAIT_EVENT_MASK;
+	val = hwc->config_base;
+	val &= KRAIT_EVENT_MASK;
 
-		if (val < 0x40) {
-			armv7_pmnc_write_evtsel(idx, hwc->config_base);
-		} else {
-			ev_num = get_krait_evtinfo(val, &evtinfo);
+	/* set event for ARM-architected events, and filter for CC */
+	if ((val < 0x40) || (idx == ARMV7_IDX_CYCLE_COUNTER)) {
+		armv7_pmnc_write_evtsel(idx, hwc->config_base);
+	} else {
+		ev_num = get_krait_evtinfo(val, &evtinfo);
 
-			if (ev_num == -EINVAL)
-				goto krait_out;
+		if (ev_num == -EINVAL)
+			goto krait_out;
 
-			/* Restore Mode-exclusion bits */
-			ev_num |= (hwc->config_base & KRAIT_MODE_EXCL_MASK);
+		/* Restore Mode-exclusion bits */
+		ev_num |= (hwc->config_base & KRAIT_MODE_EXCL_MASK);
 
-			/*
-			 * Set event (if destined for PMNx counters)
-			 * We don't need to set the event if it's a cycle count
-			 */
-			armv7_pmnc_write_evtsel(idx, ev_num);
-			val = 0x0;
-			asm volatile("mcr p15, 0, %0, c9, c15, 0" : :
-				"r" (val));
-			val = evtinfo.group_setval;
-			gr = evtinfo.groupcode;
-			krait_evt_setup(gr, val, evtinfo.armv7_evt_type);
-		}
+		/* Set event (if destined for PMNx counters) */
+		armv7_pmnc_write_evtsel(idx, ev_num);
+		val = 0x0;
+		asm volatile("mcr p15, 0, %0, c9, c15, 0" : :
+			     "r" (val));
+		val = evtinfo.group_setval;
+		gr = evtinfo.groupcode;
+		krait_evt_setup(gr, val, evtinfo.armv7_evt_type);
 	}
 
 	/* Enable interrupt for this counter */
@@ -492,12 +485,32 @@ krait_out:
 	raw_spin_unlock_irqrestore(&events->pmu_lock, flags);
 }
 
+#ifdef CONFIG_PERF_EVENTS_USERMODE
+static void krait_init_usermode(void)
+{
+	u32 val;
+
+	/* Set PMACTLR[UEN] */
+	asm volatile("mrc p15, 0, %0, c9, c15, 5" : "=r" (val));
+	val |= 1;
+	asm volatile("mcr p15, 0, %0, c9, c15, 5" : : "r" (val));
+	/* Set PMUSERENR[UEN] */
+	asm volatile("mrc p15, 0, %0, c9, c14, 0" : "=r" (val));
+	val |= 1;
+	asm volatile("mcr p15, 0, %0, c9, c14, 0" : : "r" (val));
+}
+#else
+static inline void krait_init_usermode(void)
+{
+}
+#endif
+
 static void krait_pmu_reset(void *info)
 {
 	u32 idx, nb_cnt = cpu_pmu->num_events;
 
 	/* Stop all counters and their interrupts */
-	for (idx = 1; idx < nb_cnt; ++idx) {
+	for (idx = ARMV7_IDX_CYCLE_COUNTER; idx < nb_cnt; ++idx) {
 		armv7_pmnc_disable_counter(idx);
 		armv7_pmnc_disable_intens(idx);
 	}
@@ -505,12 +518,44 @@ static void krait_pmu_reset(void *info)
 	/* Clear all pmresrs */
 	krait_clear_pmuregs();
 
+	krait_init_usermode();
+
 	/* Reset irq stat reg */
 	armv7_pmnc_getreset_flags();
 
 	/* Reset all ctrs to 0 */
 	armv7_pmnc_write(ARMV7_PMNC_P | ARMV7_PMNC_C);
 }
+
+#ifdef CONFIG_PERF_EVENTS_RESET_PMU_DEBUGFS
+static void (*l2_reset_pmu)(void);
+void msm_perf_register_l2_reset_callback(void (*reset_l2_pmu))
+{
+	if (reset_l2_pmu != NULL)
+		l2_reset_pmu = reset_l2_pmu;
+}
+
+static void krait_force_pmu_reset(void *info)
+{
+	/* krait specific reset */
+	krait_pmu_reset(info);
+	/* Reset column exclusion mask */
+	__get_cpu_var(pmu_bitmap) = 0;
+	/* Clear L2 PMU */
+	if (msm_perf_clear_l2_pmu && l2_reset_pmu) {
+		l2_reset_pmu();
+		msm_perf_clear_l2_pmu = 0;
+	}
+}
+#else
+static inline void krait_force_pmu_reset(void *info)
+{
+}
+
+inline void msm_perf_register_l2_reset_callback(void (*reset_l2_pmu))
+{
+}
+#endif
 
 /*
  * We check for column exclusion constraints here.
@@ -630,6 +675,7 @@ static int armv7_krait_pmu_init(struct arm_pmu *cpu_pmu)
 	cpu_pmu->start			= armv7pmu_start;
 	cpu_pmu->stop			= armv7pmu_stop;
 	cpu_pmu->reset			= krait_pmu_reset;
+	cpu_pmu->force_reset			= krait_force_pmu_reset;
 	cpu_pmu->test_set_event_constraints	= msm_test_set_ev_constraint;
 	cpu_pmu->clear_event_constraints	= msm_clear_ev_constraint;
 	cpu_pmu->save_pm_registers	= krait_save_pm_registers;

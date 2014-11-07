@@ -31,6 +31,9 @@
 #define CPP_HW_VERSION_2_0_0  0x20000000
 #define CPP_HW_VERSION_4_0_0  0x40000000
 #define CPP_HW_VERSION_4_1_0  0x40010000
+#define CPP_HW_VERSION_5_0_0  0x50000000
+
+#define VBIF_VERSION_2_3_0  0x20030000
 
 #define MAX_ACTIVE_CPP_INSTANCE 8
 #define MAX_CPP_PROCESSING_FRAME 2
@@ -84,6 +87,7 @@
 #define MSM_CPP_POLL_RETRIES		20
 #define MSM_CPP_TASKLETQ_SIZE		16
 #define MSM_CPP_TX_FIFO_LEVEL		16
+#define MSM_CPP_RX_FIFO_LEVEL		512
 
 struct cpp_subscribe_info {
 	struct v4l2_fh *vfh;

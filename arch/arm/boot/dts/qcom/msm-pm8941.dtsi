@@ -217,7 +217,7 @@
 		qcom,chg-adc_tm = <&pm8941_adc_tm>;
 		qcom,ibat-calibration-enabled;
 
-		qcom,chgr@1000 {
+		pm8941_chg_chgr: qcom,chgr@1000 {
 			status = "disabled";
 			reg = <0x1000 0x100>;
 			interrupts =	<0x0 0x10 0x0>,
@@ -835,10 +835,6 @@
 			label = "internal_rsense";
 			reg = <0>;
 			qcom,decimation = <0>;
-			qcom,pre-div-channel-scaling = <1>;
-			qcom,calibration-type = "absolute";
-			qcom,scale-function = <0>;
-			qcom,hw-settle-time = <0>;
 			qcom,fast-avg-setup = <0>;
 		};
 	};
@@ -1268,6 +1264,7 @@
 		compatible = "qcom,leds-qpnp";
 		reg = <0xd300 0x100>;
 		label = "flash";
+		flash-wa-supply = <&pm8941_chg_chgr>;
 	};
 
 	qcom,leds@d400 {
@@ -1368,6 +1365,7 @@
 		qcom,channel-id = <0>;
 		qcom,supported-sizes = <6>, <7>, <9>;
 		qcom,ramp-index = <0>;
+		#pwm-cells = <2>;
 	};
 
 	pwm@b200 {
@@ -1378,6 +1376,7 @@
 		qcom,channel-id = <1>;
 		qcom,supported-sizes = <6>, <7>, <9>;
 		qcom,ramp-index = <1>;
+		#pwm-cells = <2>;
 	};
 
 	pwm@b300 {
@@ -1388,6 +1387,7 @@
 		qcom,channel-id = <2>;
 		qcom,supported-sizes = <6>, <7>, <9>;
 		qcom,ramp-index = <2>;
+		#pwm-cells = <2>;
 	};
 
 	pwm@b400 {
@@ -1398,9 +1398,10 @@
 		qcom,channel-id = <3>;
 		qcom,supported-sizes = <6>, <7>, <9>;
 		qcom,ramp-index = <3>;
+		#pwm-cells = <2>;
 	};
 
-	pwm@b500 {
+	pm8941_pwm_5: pwm@b500 {
 		compatible = "qcom,qpnp-pwm";
 		reg = <0xb500 0x100>,
 		      <0xb042 0x7e>;
@@ -1408,9 +1409,10 @@
 		qcom,channel-id = <4>;
 		qcom,supported-sizes = <6>, <7>, <9>;
 		qcom,ramp-index = <4>;
+		#pwm-cells = <2>;
 	};
 
-	pwm@b600 {
+	pm8941_pwm_6: pwm@b600 {
 		compatible = "qcom,qpnp-pwm";
 		reg = <0xb600 0x100>,
 		      <0xb042 0x7e>;
@@ -1418,9 +1420,10 @@
 		qcom,channel-id = <5>;
 		qcom,supported-sizes = <6>, <7>, <9>;
 		qcom,ramp-index = <5>;
+		#pwm-cells = <2>;
 	};
 
-	pwm@b700 {
+	pm8941_pwm_7: pwm@b700 {
 		compatible = "qcom,qpnp-pwm";
 		reg = <0xb700 0x100>,
 		      <0xb042 0x7e>;
@@ -1428,6 +1431,7 @@
 		qcom,channel-id = <6>;
 		qcom,supported-sizes = <6>, <7>, <9>;
 		qcom,ramp-index = <6>;
+		#pwm-cells = <2>;
 	};
 
 	pwm@b800 {
@@ -1438,9 +1442,10 @@
 		qcom,channel-id = <7>;
 		qcom,supported-sizes = <6>, <7>, <9>;
 		qcom,ramp-index = <7>;
+		#pwm-cells = <2>;
 	};
 
-	pwm@e400 {
+	pm8941_pwm_9: pwm@e400 {
 		compatible = "qcom,qpnp-pwm";
 		reg = <0xe400 0x100>,
 		      <0xe342 0x1e>;
@@ -1448,9 +1453,10 @@
 		qcom,channel-id = <8>;
 		qcom,supported-sizes = <7>, <8>;
 		qcom,ramp-index = <0>;
+		#pwm-cells = <2>;
 	};
 
-	pwm@e500 {
+	pm8941_pwm_10: pwm@e500 {
 		compatible = "qcom,qpnp-pwm";
 		reg = <0xe500 0x100>,
 		      <0xe342 0x1e>;
@@ -1458,9 +1464,10 @@
 		qcom,channel-id = <9>;
 		qcom,supported-sizes = <7>, <8>;
 		qcom,ramp-index = <1>;
+		#pwm-cells = <2>;
 	};
 
-	pwm@e600 {
+	pm8941_pwm_11: pwm@e600 {
 		compatible = "qcom,qpnp-pwm";
 		reg = <0xe600 0x100>,
 		      <0xe342 0x1e>;
@@ -1468,9 +1475,10 @@
 		qcom,channel-id = <10>;
 		qcom,supported-sizes = <7>, <8>;
 		qcom,ramp-index = <2>;
+		#pwm-cells = <2>;
 	};
 
-	pwm@e700 {
+	pm8941_pwm_12: pwm@e700 {
 		compatible = "qcom,qpnp-pwm";
 		reg = <0xe700 0x100>,
 		      <0xe342 0x1e>;
@@ -1478,5 +1486,6 @@
 		qcom,channel-id = <11>;
 		qcom,supported-sizes = <7>, <8>;
 		qcom,ramp-index = <3>;
+		#pwm-cells = <2>;
 	};
 };

@@ -9,7 +9,9 @@ Required properties:
 - reg               : <registers mapping>
 
 Optional properties:
-- ufs-phy               : phandle to UFS PHY node
+- phys                  : phandle to UFS PHY node
+- phy-names             : the string "ufsphy" when is found in a node, along
+                          with "phys" attribute, provides phandle to UFS PHY node
 - vdd-hba-supply        : phandle to UFS host controller supply regulator node
 - vcc-supply            : phandle to VCC supply regulator node
 - vccq-supply           : phandle to VCCQ supply regulator node
@@ -32,6 +34,15 @@ Optional properties:
 			  defined or a value in the array is "0" then it is assumed
 			  that the frequency is set by the parent clock or a
 			  fixed rate clock source.
+- rpm-level		: UFS Runtime power management level. Following PM levels are suppported:
+			  0 - Both UFS device and Link in active state (Highest power consumption)
+			  1 - UFS device in active state but Link in Hibern8 state
+			  2 - UFS device in Sleep state but Link in active state
+			  3 - UFS device in Sleep state and Link in hibern8 state (default PM level)
+			  4 - UFS device in Power-down state and Link in Hibern8 state
+			  5 - UFS device in Power-down state and Link in OFF state (Lowest power consumption)
+- spm-level		: UFS System power management level. Allowed PM levels are same as rpm-level.
+- ufs-qcom-crypto	: phandle to UFS-QCOM ICE (Inline Cryptographic Engine) node
 
 Note: If above properties are not defined it can be assumed that the supply
 regulators or clocks are always on.
@@ -43,6 +54,7 @@ Example:
 		interrupts = <0 28 0>;
 
 		ufs-phy = <&ufsphy>;
+		ufs-qcom-crypto = <&ufs_ice>;
 		vdd-hba-supply = <&xxx_reg0>;
 		vdd-hba-fixed-regulator;
 		vcc-supply = <&xxx_reg1>;
@@ -56,6 +68,8 @@ Example:
 		clocks = <&core 0>, <&ref 0>, <&iface 0>;
 		clock-names = "core_clk", "ref_clk", "iface_clk";
 		freq-table-hz = <100000000 200000000>, <0 0>, <0 0>;
+		rpm-level = <3>;
+		spm-level = <5>;
 	};
 
 ==== MSM UFS platform driver properties =====
@@ -93,6 +107,20 @@ Note: The instantaneous bandwidth (IB) value in the vectors-KBps field should
 
 - qcom,bus-vector-names: specifies string IDs for the corresponding
 bus vectors in the same order as qcom,msm-bus,vectors-KBps property.
+
+- qcom,cpu-dma-latency-us: optional parameter specifying the allowed CPU-DMA
+  latency parameter for PM QOS, in units of microseconds. If this parameter is
+  not specified a default of 200us is used.
+- qcom,cpu-affinity: this is a string that specifies the pm QoS request type.
+  The supported cpu affinity modes are:
+  "all_cores" - PM_QOS_REQ_ALL_CORES is applicable to all CPU cores that are
+  online and this would have a power impact when there are more number of CPUs.
+  "affine_irq" - PM_QOS_REQ_AFFINE_IRQ request type shall update/apply the vote
+  only to that CPU to which this IRQ's affinity is set to.
+  "affine_cores" - PM_QOS_REQ_AFFINE_CORES request type is used for targets that
+  have little cluster and will update/apply the vote to all the cores in the
+  little cluster.
+  The default CPU affinity mode is PM_QOS_REQ_AFFINE_IRQ.
 
 Example:
 	ufshc@0xfc598000 {

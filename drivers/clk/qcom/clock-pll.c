@@ -12,12 +12,15 @@
  *
  */
 
+#define pr_fmt(fmt) "%s: " fmt, __func__
+
 #include <linux/kernel.h>
 #include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/clk.h>
 #include <linux/io.h>
 #include <soc/qcom/clock-pll.h>
+#include <soc/qcom/msm-clock-controller.h>
 
 #include "clock.h"
 
@@ -33,20 +36,19 @@
 #define PLL_M_REG(x)		(*(x)->base + (unsigned long) (x)->m_reg)
 #define PLL_N_REG(x)		(*(x)->base + (unsigned long) (x)->n_reg)
 #define PLL_CONFIG_REG(x)	(*(x)->base + (unsigned long) (x)->config_reg)
+#define PLL_ALPHA_REG(x)	(*(x)->base + (unsigned long) (x)->alpha_reg)
 #define PLL_CFG_ALT_REG(x)	(*(x)->base + (unsigned long) \
 							(x)->config_alt_reg)
 #define PLL_CFG_CTL_REG(x)	(*(x)->base + (unsigned long) \
 							(x)->config_ctl_reg)
-
+#define PLL_TEST_CTL_LO_REG(x)	(*(x)->base + (unsigned long) \
+							(x)->test_ctl_lo_reg)
+#define PLL_TEST_CTL_HI_REG(x)	(*(x)->base + (unsigned long) \
+							(x)->test_ctl_hi_reg)
 static DEFINE_SPINLOCK(pll_reg_lock);
 
 #define ENABLE_WAIT_MAX_LOOPS 200
 #define PLL_LOCKED_BIT BIT(16)
-
-static long fixed_pll_clk_round_rate(struct clk *c, unsigned long rate)
-{
-	return c->rate;
-}
 
 static int pll_vote_clk_enable(struct clk *c)
 {
@@ -126,7 +128,6 @@ struct clk_ops clk_ops_pll_vote = {
 	.enable = pll_vote_clk_enable,
 	.disable = pll_vote_clk_disable,
 	.is_enabled = pll_vote_clk_is_enabled,
-	.round_rate = fixed_pll_clk_round_rate,
 	.handoff = pll_vote_clk_handoff,
 	.list_registers = pll_vote_clk_list_registers,
 };
@@ -165,6 +166,7 @@ static int sr2_pll_clk_enable(struct clk *c)
 	struct pll_clk *pll = to_pll_clk(c);
 	int ret = 0, count;
 	u32 mode = readl_relaxed(PLL_MODE_REG(pll));
+	u32 lockmask = pll->masks.lock_mask ?: PLL_LOCKED_BIT;
 
 	spin_lock_irqsave(&pll_reg_lock, flags);
 
@@ -185,12 +187,12 @@ static int sr2_pll_clk_enable(struct clk *c)
 
 	/* Wait for pll to lock. */
 	for (count = ENABLE_WAIT_MAX_LOOPS; count > 0; count--) {
-		if (readl_relaxed(PLL_STATUS_REG(pll)) & PLL_LOCKED_BIT)
+		if (readl_relaxed(PLL_STATUS_REG(pll)) & lockmask)
 			break;
 		udelay(1);
 	}
 
-	if (!(readl_relaxed(PLL_STATUS_REG(pll)) & PLL_LOCKED_BIT))
+	if (!(readl_relaxed(PLL_STATUS_REG(pll)) & lockmask))
 		pr_err("PLL %s didn't lock after enabling it!\n", c->dbg_name);
 
 	/* Enable PLL output. */
@@ -201,6 +203,120 @@ static int sr2_pll_clk_enable(struct clk *c)
 	mb();
 
 	spin_unlock_irqrestore(&pll_reg_lock, flags);
+	return ret;
+}
+
+static void __variable_rate_pll_init(struct clk *c)
+{
+	struct pll_clk *pll = to_pll_clk(c);
+	u32 regval;
+
+	regval = readl_relaxed(PLL_CONFIG_REG(pll));
+
+	if (pll->masks.post_div_mask) {
+		regval &= ~pll->masks.post_div_mask;
+		regval |= pll->vals.post_div_masked;
+	}
+
+	if (pll->masks.pre_div_mask) {
+		regval &= ~pll->masks.pre_div_mask;
+		regval |= pll->vals.pre_div_masked;
+	}
+
+	if (pll->masks.main_output_mask)
+		regval |= pll->masks.main_output_mask;
+
+	if (pll->masks.early_output_mask)
+		regval |= pll->masks.early_output_mask;
+
+	if (pll->vals.enable_mn)
+		regval |= pll->masks.mn_en_mask;
+	else
+		regval &= ~pll->masks.mn_en_mask;
+
+	writel_relaxed(regval, PLL_CONFIG_REG(pll));
+
+	regval = readl_relaxed(PLL_MODE_REG(pll));
+	if (pll->masks.apc_pdn_mask)
+		regval &= ~pll->masks.apc_pdn_mask;
+	writel_relaxed(regval, PLL_MODE_REG(pll));
+
+	writel_relaxed(pll->vals.alpha_val, PLL_ALPHA_REG(pll));
+	writel_relaxed(pll->vals.config_ctl_val, PLL_CFG_CTL_REG(pll));
+	if (pll->init_test_ctl) {
+		writel_relaxed(pll->vals.test_ctl_lo_val,
+				PLL_TEST_CTL_LO_REG(pll));
+		writel_relaxed(pll->vals.test_ctl_hi_val,
+				PLL_TEST_CTL_HI_REG(pll));
+	}
+
+	pll->inited = true;
+}
+
+static int variable_rate_pll_clk_enable(struct clk *c)
+{
+	unsigned long flags;
+	struct pll_clk *pll = to_pll_clk(c);
+	int ret = 0, count;
+	u32 mode;
+	u32 lockmask = pll->masks.lock_mask ?: PLL_LOCKED_BIT;
+
+	spin_lock_irqsave(&pll_reg_lock, flags);
+
+	if (unlikely(!to_pll_clk(c)->inited))
+		__variable_rate_pll_init(c);
+
+	mode = readl_relaxed(PLL_MODE_REG(pll));
+
+	/* Set test control bits as required by HW doc */
+	if (pll->test_ctl_lo_reg && pll->vals.test_ctl_lo_val &&
+		pll->pgm_test_ctl_enable)
+		writel_relaxed(pll->vals.test_ctl_lo_val,
+				PLL_TEST_CTL_LO_REG(pll));
+
+	/* Disable PLL bypass mode. */
+	mode |= PLL_BYPASSNL;
+	writel_relaxed(mode, PLL_MODE_REG(pll));
+
+	/*
+	 * H/W requires a 5us delay between disabling the bypass and
+	 * de-asserting the reset. Use 10us to be sure.
+	 */
+	mb();
+	udelay(10);
+
+	/* De-assert active-low PLL reset. */
+	mode |= PLL_RESET_N;
+	writel_relaxed(mode, PLL_MODE_REG(pll));
+
+	/* 5us delay mandated by HPG. Use 10 to be sure. */
+	mb();
+	udelay(10);
+
+	/* Clear test control bits */
+	if (pll->test_ctl_lo_reg && pll->vals.test_ctl_lo_val &&
+		pll->pgm_test_ctl_enable)
+		writel_relaxed(0x0, PLL_TEST_CTL_LO_REG(pll));
+
+	/* Wait for pll to lock. */
+	for (count = ENABLE_WAIT_MAX_LOOPS; count > 0; count--) {
+		if (readl_relaxed(PLL_STATUS_REG(pll)) & lockmask)
+			break;
+		udelay(1);
+	}
+
+	if (!(readl_relaxed(PLL_STATUS_REG(pll)) & lockmask))
+		pr_err("PLL %s didn't lock after enabling it!\n", c->dbg_name);
+
+	/* Enable PLL output. */
+	mode |= PLL_OUTCTRL;
+	writel_relaxed(mode, PLL_MODE_REG(pll));
+
+	/* Ensure that the write above goes through before returning. */
+	mb();
+
+	spin_unlock_irqrestore(&pll_reg_lock, flags);
+
 	return ret;
 }
 
@@ -349,6 +465,76 @@ static int local_pll_clk_set_rate(struct clk *c, unsigned long rate)
 	return 0;
 }
 
+static enum handoff variable_rate_pll_handoff(struct clk *c)
+{
+	struct pll_clk *pll = to_pll_clk(c);
+	u32 mode = readl_relaxed(PLL_MODE_REG(pll));
+	u32 mask = PLL_BYPASSNL | PLL_RESET_N | PLL_OUTCTRL;
+	u32 lval;
+
+	pll->src_rate = clk_get_rate(c->parent);
+
+	if ((mode & mask) != mask)
+		return HANDOFF_DISABLED_CLK;
+
+	lval = readl_relaxed(PLL_L_REG(pll));
+
+	c->rate = pll->src_rate * lval;
+
+	if (c->rate > pll->max_rate || c->rate < pll->min_rate) {
+		WARN(1, "%s: Out of spec PLL", c->dbg_name);
+		return HANDOFF_DISABLED_CLK;
+	}
+
+	return HANDOFF_ENABLED_CLK;
+}
+
+static long variable_rate_pll_round_rate(struct clk *c, unsigned long rate)
+{
+	struct pll_clk *pll = to_pll_clk(c);
+
+	if (!pll->src_rate)
+		return 0;
+
+	if (rate < pll->min_rate)
+		rate = pll->min_rate;
+	if (rate > pll->max_rate)
+		rate = pll->max_rate;
+
+	return min(pll->max_rate,
+			DIV_ROUND_UP(rate, pll->src_rate) * pll->src_rate);
+}
+
+/*
+ * For optimization reasons, assumes no downstream clocks are actively using
+ * it.
+ */
+static int variable_rate_pll_set_rate(struct clk *c, unsigned long rate)
+{
+	struct pll_clk *pll = to_pll_clk(c);
+	unsigned long flags;
+	u32 l_val;
+
+	if (rate != variable_rate_pll_round_rate(c, rate))
+		return -EINVAL;
+
+	l_val = rate / pll->src_rate;
+
+	spin_lock_irqsave(&c->lock, flags);
+
+	if (c->count)
+		c->ops->disable(c);
+
+	writel_relaxed(l_val, PLL_L_REG(pll));
+
+	if (c->count)
+		c->ops->enable(c);
+
+	spin_unlock_irqrestore(&c->lock, flags);
+
+	return 0;
+}
+
 int sr_pll_clk_enable(struct clk *c)
 {
 	u32 mode;
@@ -426,6 +612,27 @@ out:
 	return ret;
 }
 
+
+static void __iomem *variable_rate_pll_list_registers(struct clk *c, int n,
+				struct clk_register_data **regs, u32 *size)
+{
+	struct pll_clk *pll = to_pll_clk(c);
+	static struct clk_register_data data[] = {
+		{"MODE", 0x0},
+		{"L", 0x4},
+		{"ALPHA", 0x8},
+		{"USER_CTL", 0x10},
+		{"CONFIG_CTL", 0x14},
+		{"STATUS", 0x1C},
+	};
+	if (n)
+		return ERR_PTR(-EINVAL);
+
+	*regs = data;
+	*size = ARRAY_SIZE(data);
+	return PLL_MODE_REG(pll);
+}
+
 static void __iomem *local_pll_clk_list_registers(struct clk *c, int n,
 				struct clk_register_data **regs, u32 *size)
 {
@@ -464,6 +671,15 @@ struct clk_ops clk_ops_sr2_pll = {
 	.round_rate = local_pll_clk_round_rate,
 	.handoff = local_pll_clk_handoff,
 	.list_registers = local_pll_clk_list_registers,
+};
+
+struct clk_ops clk_ops_variable_rate_pll = {
+	.enable = variable_rate_pll_clk_enable,
+	.disable = local_pll_clk_disable,
+	.set_rate = variable_rate_pll_set_rate,
+	.round_rate = variable_rate_pll_round_rate,
+	.handoff = variable_rate_pll_handoff,
+	.list_registers = variable_rate_pll_list_registers,
 };
 
 static DEFINE_SPINLOCK(soft_vote_lock);
@@ -513,7 +729,6 @@ static enum handoff pll_acpu_vote_clk_handoff(struct clk *c)
 struct clk_ops clk_ops_pll_acpu_vote = {
 	.enable = pll_acpu_vote_clk_enable,
 	.disable = pll_acpu_vote_clk_disable,
-	.round_rate = fixed_pll_clk_round_rate,
 	.is_enabled = pll_vote_clk_is_enabled,
 	.handoff = pll_acpu_vote_clk_handoff,
 	.list_registers = pll_vote_clk_list_registers,
@@ -627,3 +842,92 @@ void configure_sr_hpm_lp_pll(struct pll_config *config,
 		__set_fsm_mode(PLL_MODE_REG(regs), 0x1, 0x0);
 }
 
+static void *votable_pll_clk_dt_parser(struct device *dev,
+						struct device_node *np)
+{
+	struct pll_vote_clk *v, *peer;
+	struct clk *c;
+	u32 val, rc;
+	phandle p;
+	struct msmclk_data *drv;
+
+	v = devm_kzalloc(dev, sizeof(*v), GFP_KERNEL);
+	if (!v) {
+		dt_err(np, "memory alloc failure\n");
+		return ERR_PTR(-ENOMEM);
+	}
+
+	drv = msmclk_parse_phandle(dev, np->parent->phandle);
+	if (IS_ERR_OR_NULL(drv))
+		return ERR_CAST(drv);
+	v->base = &drv->base;
+
+	rc = of_property_read_u32(np, "qcom,en-offset", (u32 *)&v->en_reg);
+	if (rc) {
+		dt_err(np, "missing qcom,en-offset dt property\n");
+		return ERR_PTR(-EINVAL);
+	}
+
+	rc = of_property_read_u32(np, "qcom,en-bit", &val);
+	if (rc) {
+		dt_err(np, "missing qcom,en-bit dt property\n");
+		return ERR_PTR(-EINVAL);
+	}
+	v->en_mask = BIT(val);
+
+	rc = of_property_read_u32(np, "qcom,status-offset",
+						(u32 *)&v->status_reg);
+	if (rc) {
+		dt_err(np, "missing qcom,status-offset dt property\n");
+		return ERR_PTR(-EINVAL);
+	}
+
+	rc = of_property_read_u32(np, "qcom,status-bit", &val);
+	if (rc) {
+		dt_err(np, "missing qcom,status-bit dt property\n");
+		return ERR_PTR(-EINVAL);
+	}
+	v->status_mask = BIT(val);
+
+	rc = of_property_read_u32(np, "qcom,pll-config-rate", &val);
+	if (rc) {
+		dt_err(np, "missing qcom,pll-config-rate dt property\n");
+		return ERR_PTR(-EINVAL);
+	}
+	v->c.rate = val;
+
+	if (of_device_is_compatible(np, "qcom,active-only-pll"))
+		v->soft_vote_mask = PLL_SOFT_VOTE_ACPU;
+	else if (of_device_is_compatible(np, "qcom,sleep-active-pll"))
+		v->soft_vote_mask = PLL_SOFT_VOTE_PRIMARY;
+
+	if (of_device_is_compatible(np, "qcom,votable-pll")) {
+		v->c.ops = &clk_ops_pll_vote;
+		return msmclk_generic_clk_init(dev, np, &v->c);
+	}
+
+	rc = of_property_read_phandle_index(np, "qcom,peer", 0, &p);
+	if (rc) {
+		dt_err(np, "missing qcom,peer dt property\n");
+		return ERR_PTR(-EINVAL);
+	}
+
+	c = msmclk_lookup_phandle(dev, p);
+	if (!IS_ERR_OR_NULL(c)) {
+		v->soft_vote = devm_kzalloc(dev, sizeof(*v->soft_vote),
+						GFP_KERNEL);
+		if (!v->soft_vote) {
+			dt_err(np, "memory alloc failure\n");
+			return ERR_PTR(-ENOMEM);
+		}
+
+		peer = to_pll_vote_clk(c);
+		peer->soft_vote = v->soft_vote;
+	}
+
+	v->c.ops = &clk_ops_pll_acpu_vote;
+	return msmclk_generic_clk_init(dev, np, &v->c);
+}
+MSMCLK_PARSER(votable_pll_clk_dt_parser, "qcom,active-only-pll", 0);
+MSMCLK_PARSER(votable_pll_clk_dt_parser, "qcom,sleep-active-pll", 1);
+MSMCLK_PARSER(votable_pll_clk_dt_parser, "qcom,votable-pll", 2);

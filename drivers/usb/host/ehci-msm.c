@@ -82,7 +82,7 @@ static const struct ehci_driver_overrides ehci_msm_overrides __initdata = {
 	.reset = ehci_msm_reset,
 };
 
-static u64 msm_ehci_dma_mask = DMA_BIT_MASK(64);
+static u64 msm_ehci_dma_mask = DMA_BIT_MASK(32);
 static int ehci_msm_probe(struct platform_device *pdev)
 {
 	struct usb_hcd *hcd;
@@ -94,7 +94,7 @@ static int ehci_msm_probe(struct platform_device *pdev)
 	if (!pdev->dev.dma_mask)
 		pdev->dev.dma_mask = &msm_ehci_dma_mask;
 	if (!pdev->dev.coherent_dma_mask)
-		pdev->dev.coherent_dma_mask = DMA_BIT_MASK(64);
+		pdev->dev.coherent_dma_mask = DMA_BIT_MASK(32);
 
 	hcd = usb_create_hcd(&ehci_msm_hc_driver, &pdev->dev,
 			     dev_name(&pdev->dev));
@@ -197,8 +197,21 @@ static int ehci_msm_runtime_suspend(struct device *dev)
 
 static int ehci_msm_runtime_resume(struct device *dev)
 {
+	struct usb_hcd *hcd = dev_get_drvdata(dev);
+	int ret;
+	u32 portsc;
+
 	dev_dbg(dev, "ehci runtime resume\n");
-	return usb_phy_set_suspend(phy, 0);
+	ret = usb_phy_set_suspend(phy, 0);
+	if (ret)
+		return ret;
+
+	portsc = readl_relaxed(USB_PORTSC);
+	portsc &= ~PORT_RWC_BITS;
+	portsc |= PORT_RESUME;
+	writel_relaxed(portsc, USB_PORTSC);
+
+	return ret;
 }
 #endif
 
@@ -219,6 +232,7 @@ static int ehci_msm_pm_resume(struct device *dev)
 {
 	struct usb_hcd *hcd = dev_get_drvdata(dev);
 	int ret;
+	u32 portsc;
 
 	dev_dbg(dev, "ehci-msm PM resume\n");
 	if (!hcd->rh_registered)
@@ -230,6 +244,10 @@ static int ehci_msm_pm_resume(struct device *dev)
 		return ret;
 
 	ehci_resume(hcd, false);
+	portsc = readl_relaxed(USB_PORTSC);
+	portsc &= ~PORT_RWC_BITS;
+	portsc |= PORT_RESUME;
+	writel_relaxed(portsc, USB_PORTSC);
 	/* Resume root-hub to handle USB event if any else initiate LPM again */
 	usb_hcd_resume_root_hub(hcd);
 

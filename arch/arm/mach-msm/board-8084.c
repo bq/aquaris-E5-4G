@@ -37,10 +37,7 @@
 #include "platsmp.h"
 
 static struct of_dev_auxdata apq8084_auxdata_lookup[] __initdata = {
-	OF_DEV_AUXDATA("qcom,sdhci-msm", 0xF9824900, "msm_sdcc.1", NULL),
-	OF_DEV_AUXDATA("qcom,sdhci-msm", 0xF98A4900, "msm_sdcc.2", NULL),
 	OF_DEV_AUXDATA("qca,qca1530", 0x00000000, "qca1530.1", NULL),
-	OF_DEV_AUXDATA("qcom,ufshc", 0xFC594000, "msm_ufs.1", NULL),
 	OF_DEV_AUXDATA("qcom,xhci-msm-hsic", 0xf9c00000, "msm_hsic_host", NULL),
 	OF_DEV_AUXDATA("qcom,msm_pcie", 0xFC520000, "msm_pcie.1", NULL),
 	OF_DEV_AUXDATA("qcom,msm_pcie", 0xFC528000, "msm_pcie.2", NULL),
@@ -66,10 +63,7 @@ void __init apq8084_add_drivers(void)
 	rpm_smd_regulator_driver_init();
 	msm_spm_device_init();
 	krait_power_init();
-	if (of_board_is_rumi())
-		msm_clock_init(&apq8084_rumi_clock_init_data);
-	else
-		msm_clock_init(&apq8084_clock_init_data);
+	msm_gcc_8084_init();
 }
 
 static void __init apq8084_map_io(void)

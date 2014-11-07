@@ -3,6 +3,7 @@ taiko audio CODEC
 Required properties:
 
  - compatible : "qcom,taiko-slim-pgd" or "qcom,tapan-slim-pgd" for Tapan codec
+		or "qcom,tomtom-slim-pgd" for the Tomtom codec
  - elemental-addr: codec slimbus slave PGD enumeration address.(48 bits)
 
  - qcom,cdc-reset-gpio: gpio used for codec SOC reset.
@@ -77,6 +78,14 @@ Optional properties:
 			 values for 9.6MHZ mclk can be 2400000 Hz, 3200000 Hz
 			 and 4800000 Hz.  The values for 12.288MHz mclk can be
 			 3072200 Hz, 4096000 Hz and 6144000 Hz.
+
+ - qcom,cdc-mad-dmic-rate: Specifies the sample rate of digital mic in HZ to be
+			   used by MAD (Microphone Activity Detection) hardware
+			   block on the codec. The valid set of values are same
+			   as that of cdc-dmic-sample-rate, but this rate will
+			   only be used by MAD and all other audio use cases
+			   involving DMIC will use the rate defined by
+			   cdc-dmic-sample-rate.
 
  - qcom,cdc-on-demand-supplies: List of supplies which can be enabled
 				dynamically.
@@ -228,6 +237,10 @@ Optional properties:
  - qcom,cdc-vdd-spkdrv-voltage: spkdrv supply voltage level min and max in mV.
  - qcom,cdc-vdd-spkdrv-current: spkdrv supply max current in mA.
 
+ - cdc-vdd-spkdrv-2-supply: phandle of spkdrv2 supply's regulator device tree node.
+ - qcom,cdc-vdd-spkdrv-2-voltage: spkdrv2 supply voltage level min and max in mV.
+ - qcom,cdc-vdd-spkdrv-2-current: spkdrv2 supply max current in mA.
+
  - qcom,cdc-on-demand-supplies: List of supplies which can be enabled
 				dynamically.
 				Supplies in this list are off by default.
@@ -289,7 +302,16 @@ i2c@f9925000 {
 					   "cdc-vddcx-1",
 					   "cdc-vddcx-2";
 
-		com,cdc-on-demand-supplies = "cdc-vdd-spkdrv";
+		cdc-vdd-spkdrv-supply = <&pmi8994_boost>;
+		qcom,cdc-vdd-spkdrv-voltage = <5000000 5000000>;
+		qcom,cdc-vdd-spkdrv-current = <600000>;
+
+		cdc-vdd-spkdrv-2-supply = <&pmi8994_boost>;
+		qcom,cdc-vdd-spkdrv-2-voltage = <5000000 5000000>;
+		qcom,cdc-vdd-spkdrv-2-current = <600000>;
+
+		qcom,cdc-on-demand-supplies = "cdc-vdd-spkdrv",
+					      "cdc-vdd-spkdrv-2";
 
 		qcom,cdc-micbias-ldoh-v = <0x3>;
 		qcom,cdc-micbias-cfilt1-mv = <1800>;
@@ -360,6 +382,9 @@ Optional properties:
  - qcom,cdc-on-demand-supplies: List of supplies which can be enabled
 				dynamically.
 				Supplies in this list are off by default.
+ - qcom,cdc-micbias-cfilt-mv : MICBIAS voltage value
+ - qcom,cdc-boost-voltage: Specifies the analog boost output voltage value.
+				Value from 4000 to 5550 in mV in steps of 50 mV can be given.
 
 Example:
 msm8x16_wcd_codec@f000{

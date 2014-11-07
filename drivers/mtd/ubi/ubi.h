@@ -54,13 +54,14 @@
 #define UBI_NAME_STR "ubi"
 
 /* Normal UBI messages */
-#define ubi_msg(fmt, ...) pr_notice("UBI: " fmt "\n", ##__VA_ARGS__)
+#define ubi_msg(ubi_num, fmt, ...) pr_notice("UBI-%d: %s:" fmt "\n", ubi_num, \
+				__func__, ##__VA_ARGS__)
 /* UBI warning messages */
-#define ubi_warn(fmt, ...) pr_warn("UBI warning: %s: " fmt "\n",  \
-				   __func__, ##__VA_ARGS__)
+#define ubi_warn(ubi_num, fmt, ...) pr_warn("UBI-%d warning: %s: " fmt "\n",  \
+				   ubi_num, __func__, ##__VA_ARGS__)
 /* UBI error messages */
-#define ubi_err(fmt, ...) pr_err("UBI error: %s: " fmt "\n",      \
-				 __func__, ##__VA_ARGS__)
+#define ubi_err(ubi_num, fmt, ...) pr_err("UBI-%d error: %s: " fmt "\n",      \
+				 ubi_num, __func__, ##__VA_ARGS__)
 
 /* Background thread name pattern */
 #define UBI_BGT_NAME_PATTERN "ubi_bgt%dd"
@@ -492,6 +493,7 @@ struct ubi_debug_info {
  *				for more info
  * @dt_threshold: data retention threshold. See UBI_DT_THRESHOLD
  *				for more info
+ * @scan_in_progress: true if scanning of device PEBs is in progress
  *
  * @flash_size: underlying MTD device size (in bytes)
  * @peb_count: count of physical eraseblocks on the MTD device
@@ -596,6 +598,7 @@ struct ubi_device {
 	char bgt_name[sizeof(UBI_BGT_NAME_PATTERN)+2];
 	int rd_threshold;
 	int dt_threshold;
+	bool scan_in_progress;
 
 
 	/* I/O sub-system's stuff */
@@ -722,6 +725,7 @@ struct ubi_ainf_volume {
  * @mean_ec: mean erase counter value
  * @ec_sum: a temporary variable used when calculating @mean_ec
  * @ec_count: a temporary variable used when calculating @mean_ec
+ * @failed_fm: set to true if fm faound invalid during attach
  * @aeb_slab_cache: slab cache for &struct ubi_ainf_peb objects
  * @mean_last_erase_time: mean late erase timestamp value
  * @last_erase_time_sum: temporary variable, used to calculate
@@ -753,6 +757,7 @@ struct ubi_attach_info {
 	int mean_ec;
 	uint64_t ec_sum;
 	int ec_count;
+	int failed_fm;
 	struct kmem_cache *aeb_slab_cache;
 	long long  mean_last_erase_time;
 	long long last_erase_time_sum;
@@ -874,6 +879,7 @@ int ubi_is_erase_work(struct ubi_work *wrk);
 void ubi_refill_pools(struct ubi_device *ubi);
 int ubi_ensure_anchor_pebs(struct ubi_device *ubi);
 int ubi_in_wl_tree(struct ubi_wl_entry *e, struct rb_root *root);
+int ubi_wl_scan_all(struct ubi_device *ubi);
 
 /* io.c */
 int ubi_io_read(const struct ubi_device *ubi, void *buf, int pnum, int offset,
@@ -1023,7 +1029,7 @@ static inline void ubi_ro_mode(struct ubi_device *ubi)
 {
 	if (!ubi->ro_mode) {
 		ubi->ro_mode = 1;
-		ubi_warn("switch to read-only mode");
+		ubi_warn(ubi->ubi_num, "switch to read-only mode");
 		dump_stack();
 	}
 }

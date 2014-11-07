@@ -66,6 +66,10 @@ static int msm_route_hfp_vol_control;
 static const DECLARE_TLV_DB_LINEAR(hfp_rx_vol_gain, 0,
 				INT_RX_VOL_MAX_STEPS);
 
+static int msm_route_auxpcm_lb_vol_ctrl;
+static const DECLARE_TLV_DB_LINEAR(auxpcm_lb_vol_gain, 0,
+				INT_RX_VOL_MAX_STEPS);
+
 static void msm_qti_pp_send_eq_values_(int eq_idx)
 {
 	int result;
@@ -368,15 +372,9 @@ static int msm_qti_pp_put_rms_value_control(struct snd_kcontrol *kcontrol,
 
 /* VOLUME */
 static int msm_route_fm_vol_control;
+static int msm_afe_lb_vol_ctrl;
 static const DECLARE_TLV_DB_LINEAR(fm_rx_vol_gain, 0, INT_RX_VOL_MAX_STEPS);
-
-static int msm_route_multimedia2_vol_control;
-static const DECLARE_TLV_DB_LINEAR(multimedia2_rx_vol_gain, 0,
-				   INT_RX_VOL_MAX_STEPS);
-
-static int msm_route_multimedia5_vol_control;
-static const DECLARE_TLV_DB_LINEAR(multimedia5_rx_vol_gain, 0,
-				   INT_RX_VOL_MAX_STEPS);
+static const DECLARE_TLV_DB_LINEAR(afe_lb_vol_gain, 0, INT_RX_VOL_MAX_STEPS);
 
 static int msm_qti_pp_get_fm_vol_mixer(struct snd_kcontrol *kcontrol,
 				       struct snd_ctl_elem_value *ucontrol)
@@ -391,6 +389,24 @@ static int msm_qti_pp_set_fm_vol_mixer(struct snd_kcontrol *kcontrol,
 	afe_loopback_gain(INT_FM_TX , ucontrol->value.integer.value[0]);
 
 	msm_route_fm_vol_control = ucontrol->value.integer.value[0];
+
+	return 0;
+}
+
+static int msm_qti_pp_get_pri_mi2s_lb_vol_mixer(struct snd_kcontrol *kcontrol,
+				       struct snd_ctl_elem_value *ucontrol)
+{
+	ucontrol->value.integer.value[0] = msm_afe_lb_vol_ctrl;
+	return 0;
+}
+
+static int msm_qti_pp_set_pri_mi2s_lb_vol_mixer(struct snd_kcontrol *kcontrol,
+			    struct snd_ctl_elem_value *ucontrol)
+{
+	afe_loopback_gain(AFE_PORT_ID_PRIMARY_MI2S_TX,
+			  ucontrol->value.integer.value[0]);
+
+	msm_afe_lb_vol_ctrl = ucontrol->value.integer.value[0];
 
 	return 0;
 }
@@ -430,40 +446,22 @@ static int msm_qti_pp_set_hfp_vol_mixer(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-static int msm_qti_pp_get_multimedia2_vol_mixer(struct snd_kcontrol *kcontrol,
-					    struct snd_ctl_elem_value *ucontrol)
+static int msm_qti_pp_get_auxpcm_lb_vol_mixer(struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_value *ucontrol)
 {
-
-	ucontrol->value.integer.value[0] = msm_route_multimedia2_vol_control;
+	ucontrol->value.integer.value[0] = msm_route_auxpcm_lb_vol_ctrl;
 	return 0;
 }
 
-static int msm_qti_pp_get_multimedia5_vol_mixer(struct snd_kcontrol *kcontrol,
-					    struct snd_ctl_elem_value *ucontrol)
+static int msm_qti_pp_set_auxpcm_lb_vol_mixer(struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_value *ucontrol)
 {
+	struct soc_mixer_control *mc =
+	(struct soc_mixer_control *)kcontrol->private_value;
 
-	ucontrol->value.integer.value[0] = msm_route_multimedia5_vol_control;
-	return 0;
-}
+	afe_loopback_gain(mc->reg, ucontrol->value.integer.value[0]);
 
-static int msm_qti_pp_set_multimedia5_vol_mixer(struct snd_kcontrol *kcontrol,
-					    struct snd_ctl_elem_value *ucontrol)
-{
-
-	if (!multi_ch_pcm_set_volume(ucontrol->value.integer.value[0]))
-		msm_route_multimedia5_vol_control =
-			ucontrol->value.integer.value[0];
-
-	return 0;
-}
-
-static int msm_qti_pp_set_multimedia2_vol_mixer(struct snd_kcontrol *kcontrol,
-					    struct snd_ctl_elem_value *ucontrol)
-{
-
-	if (!multi_ch_pcm_set_volume(ucontrol->value.integer.value[0]))
-		msm_route_multimedia2_vol_control =
-			ucontrol->value.integer.value[0];
+	msm_route_auxpcm_lb_vol_ctrl = ucontrol->value.integer.value[0];
 
 	return 0;
 }
@@ -502,22 +500,23 @@ static const struct snd_kcontrol_new int_fm_vol_mixer_controls[] = {
 	msm_qti_pp_set_quat_mi2s_fm_vol_mixer, fm_rx_vol_gain),
 };
 
+static const struct snd_kcontrol_new pri_mi2s_lb_vol_mixer_controls[] = {
+	SOC_SINGLE_EXT_TLV("PRI MI2S LOOPBACK Volume", SND_SOC_NOPM, 0,
+	INT_RX_VOL_GAIN, 0, msm_qti_pp_get_pri_mi2s_lb_vol_mixer,
+	msm_qti_pp_set_pri_mi2s_lb_vol_mixer, afe_lb_vol_gain),
+};
+
 static const struct snd_kcontrol_new int_hfp_vol_mixer_controls[] = {
 	SOC_SINGLE_EXT_TLV("Internal HFP RX Volume", SND_SOC_NOPM, 0,
 	INT_RX_VOL_GAIN, 0, msm_qti_pp_get_hfp_vol_mixer,
 	msm_qti_pp_set_hfp_vol_mixer, hfp_rx_vol_gain),
 };
 
-static const struct snd_kcontrol_new multimedia2_vol_mixer_controls[] = {
-	SOC_SINGLE_EXT_TLV("HIFI2 RX Volume", SND_SOC_NOPM, 0,
-	INT_RX_VOL_GAIN, 0, msm_qti_pp_get_multimedia2_vol_mixer,
-	msm_qti_pp_set_multimedia2_vol_mixer, multimedia2_rx_vol_gain),
-};
-
-static const struct snd_kcontrol_new multimedia5_vol_mixer_controls[] = {
-	SOC_SINGLE_EXT_TLV("HIFI3 RX Volume", SND_SOC_NOPM, 0,
-	INT_RX_VOL_GAIN, 0, msm_qti_pp_get_multimedia5_vol_mixer,
-	msm_qti_pp_set_multimedia5_vol_mixer, multimedia5_rx_vol_gain),
+static const struct snd_kcontrol_new sec_auxpcm_lb_vol_mixer_controls[] = {
+	SOC_SINGLE_EXT_TLV("SEC AUXPCM LOOPBACK Volume",
+	AFE_PORT_ID_SECONDARY_PCM_TX, 0, INT_RX_VOL_GAIN, 0,
+	msm_qti_pp_get_auxpcm_lb_vol_mixer, msm_qti_pp_set_auxpcm_lb_vol_mixer,
+	auxpcm_lb_vol_gain),
 };
 
 static const struct snd_kcontrol_new multi_ch_channel_map_mixer_controls[] = {
@@ -675,14 +674,15 @@ void msm_qti_pp_add_controls(struct snd_soc_platform *platform)
 	snd_soc_add_platform_controls(platform, int_fm_vol_mixer_controls,
 			ARRAY_SIZE(int_fm_vol_mixer_controls));
 
+	snd_soc_add_platform_controls(platform, pri_mi2s_lb_vol_mixer_controls,
+			ARRAY_SIZE(pri_mi2s_lb_vol_mixer_controls));
+
 	snd_soc_add_platform_controls(platform, int_hfp_vol_mixer_controls,
 			ARRAY_SIZE(int_hfp_vol_mixer_controls));
 
-	snd_soc_add_platform_controls(platform, multimedia2_vol_mixer_controls,
-			ARRAY_SIZE(multimedia2_vol_mixer_controls));
-
-	snd_soc_add_platform_controls(platform, multimedia5_vol_mixer_controls,
-			ARRAY_SIZE(multimedia5_vol_mixer_controls));
+	snd_soc_add_platform_controls(platform,
+				sec_auxpcm_lb_vol_mixer_controls,
+			ARRAY_SIZE(sec_auxpcm_lb_vol_mixer_controls));
 
 	snd_soc_add_platform_controls(platform,
 				multi_ch_channel_map_mixer_controls,

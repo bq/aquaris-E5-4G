@@ -79,6 +79,7 @@
 
 #define QPNP_FAST_AVG_CTL				0x5a
 #define QPNP_FAST_AVG_EN				0x5b
+#define QPNP_FAST_AVG_ENABLED				BIT(7)
 
 #define QPNP_M0_LOW_THR_LSB				0x5c
 #define QPNP_M0_LOW_THR_MSB				0x5d
@@ -207,7 +208,9 @@ struct qpnp_adc_tm_chip {
 	struct qpnp_adc_drv		*adc;
 	struct list_head		list;
 	bool				adc_tm_initialized;
+	bool				adc_tm_recalib_check;
 	int				max_channels_available;
+	atomic_t			wq_cnt;
 	struct qpnp_vadc_chip		*vadc_dev;
 	struct workqueue_struct		*high_thr_wq;
 	struct workqueue_struct		*low_thr_wq;
@@ -288,6 +291,7 @@ static struct qpnp_adc_tm_reverse_scale_fn adc_tm_rscale_fn[] = {
 	[SCALE_RPMIC_THERM] = {qpnp_adc_scale_millidegc_pmic_voltage_thr},
 	[SCALE_R_SMB_BATT_THERM] = {qpnp_adc_smb_btm_rscaler},
 	[SCALE_R_ABSOLUTE] = {qpnp_adc_absolute_rthr},
+	[SCALE_QRD_SKUH_RBATT_THERM] = {qpnp_adc_qrd_skuh_btm_scaler},
 };
 
 static int32_t qpnp_adc_tm_read_reg(struct qpnp_adc_tm_chip *chip,
@@ -315,6 +319,33 @@ static int32_t qpnp_adc_tm_write_reg(struct qpnp_adc_tm_chip *chip,
 		chip->adc->slave, (chip->adc->offset + reg), buf, 1);
 	if (rc < 0)
 		pr_err("adc-tm write reg %d failed with %d\n", reg, rc);
+
+	return rc;
+}
+
+static int32_t qpnp_adc_tm_fast_avg_en(struct qpnp_adc_tm_chip *chip,
+				uint32_t *fast_avg_sample)
+{
+	int rc = 0, version = 0;
+	u8 fast_avg_en = 0;
+
+	version = qpnp_adc_get_revid_version(chip->dev);
+	if (!((version == QPNP_REV_ID_8916_1_0) ||
+		(version == QPNP_REV_ID_8916_1_1) ||
+		(version == QPNP_REV_ID_8916_2_0))) {
+		pr_debug("fast-avg-en not required for this version\n");
+		return rc;
+	}
+
+	fast_avg_en = QPNP_FAST_AVG_ENABLED;
+	rc = qpnp_adc_tm_write_reg(chip, QPNP_FAST_AVG_EN, fast_avg_en);
+	if (rc < 0) {
+		pr_err("adc-tm fast-avg enable err\n");
+		return rc;
+	}
+
+	if (*fast_avg_sample >= 3)
+		*fast_avg_sample = 2;
 
 	return rc;
 }
@@ -420,7 +451,12 @@ static int32_t qpnp_adc_tm_req_sts_check(struct qpnp_adc_tm_chip *chip)
 	}
 
 	/* Disable the bank if a conversion is occuring */
-	while ((status1 & QPNP_STATUS1_REQ_STS) && (count < QPNP_RETRY)) {
+	while (status1 & QPNP_STATUS1_REQ_STS) {
+		if (count > QPNP_RETRY) {
+			pr_err("adc-tm conversion not completed in retry=%d\n",
+							count);
+			break;
+		}
 		/* Wait time is based on the optimum sampling rate
 		 * and adding enough time buffer to account for ADC conversions
 		 * occuring on different peripheral banks */
@@ -677,6 +713,62 @@ static int32_t qpnp_adc_tm_reg_update(struct qpnp_adc_tm_chip *chip,
 	return rc;
 }
 
+static int32_t qpnp_adc_tm_read_thr_value(struct qpnp_adc_tm_chip *chip,
+			uint32_t btm_chan)
+{
+	int rc = 0;
+	u8 data_lsb = 0, data_msb = 0;
+	uint32_t btm_chan_idx = 0;
+	int32_t low_thr = 0, high_thr = 0;
+
+	rc = qpnp_adc_tm_get_btm_idx(btm_chan, &btm_chan_idx);
+	if (rc < 0) {
+		pr_err("Invalid btm channel idx\n");
+		return rc;
+	}
+
+	rc = qpnp_adc_tm_read_reg(chip,
+			adc_tm_data[btm_chan_idx].low_thr_lsb_addr,
+			&data_lsb);
+	if (rc < 0) {
+		pr_err("low threshold lsb setting failed\n");
+		return rc;
+	}
+
+	rc = qpnp_adc_tm_read_reg(chip,
+		adc_tm_data[btm_chan_idx].low_thr_msb_addr,
+		&data_msb);
+	if (rc < 0) {
+		pr_err("low threshold msb setting failed\n");
+		return rc;
+	}
+
+	low_thr = (data_msb << 8) | data_lsb;
+
+	rc = qpnp_adc_tm_read_reg(chip,
+		adc_tm_data[btm_chan_idx].high_thr_lsb_addr,
+		&data_lsb);
+	if (rc < 0) {
+		pr_err("high threshold lsb setting failed\n");
+		return rc;
+	}
+
+	rc = qpnp_adc_tm_read_reg(chip,
+		adc_tm_data[btm_chan_idx].high_thr_msb_addr,
+		&data_msb);
+	if (rc < 0) {
+		pr_err("high threshold msb setting failed\n");
+		return rc;
+	}
+
+	high_thr = (data_msb << 8) | data_lsb;
+
+	pr_debug("configured thresholds high:0x%x and low:0x%x\n",
+		high_thr, low_thr);
+
+	return rc;
+}
+
 static int32_t qpnp_adc_tm_thr_update(struct qpnp_adc_tm_chip *chip,
 			uint32_t btm_chan, int32_t high_thr, int32_t low_thr)
 {
@@ -929,7 +1021,13 @@ static int32_t qpnp_adc_tm_configure(struct qpnp_adc_tm_chip *chip,
 		return rc;
 	}
 
-	/* Fast averaging setup */
+	/* Fast averaging setup/enable */
+	rc = qpnp_adc_tm_fast_avg_en(chip, &chan_prop->fast_avg_setup);
+	if (rc < 0) {
+		pr_err("adc-tm fast-avg enable err\n");
+		return rc;
+	}
+
 	rc = qpnp_adc_tm_write_reg(chip, QPNP_FAST_AVG_CTL,
 					chan_prop->fast_avg_setup);
 	if (rc < 0) {
@@ -1337,6 +1435,7 @@ static void notify_adc_tm_fn(struct work_struct *work)
 {
 	struct qpnp_adc_tm_sensor *adc_tm = container_of(work,
 		struct qpnp_adc_tm_sensor, work);
+	struct qpnp_adc_tm_chip *chip = adc_tm->chip;
 
 	if (adc_tm->thermal_node) {
 		sysfs_notify(&adc_tm->tz_dev->device.kobj,
@@ -1349,6 +1448,7 @@ static void notify_adc_tm_fn(struct work_struct *work)
 			notify_clients(adc_tm);
 	}
 
+	atomic_dec(&chip->wq_cnt);
 	return;
 }
 
@@ -1406,10 +1506,148 @@ static int qpnp_adc_tm_activate_trip_type(struct thermal_zone_device *thermal,
 	return rc;
 }
 
+static int qpnp_adc_tm_recalib_request_check(struct qpnp_adc_tm_chip *chip,
+			int sensor_num, u8 status_high, u8 *notify_check)
+{
+	int rc = 0;
+	u8 sensor_mask = 0, mode_ctl = 0;
+	int32_t old_thr = 0, new_thr = 0;
+	uint32_t channel, btm_chan_num, scale_type;
+	struct qpnp_vadc_result result;
+	struct qpnp_adc_thr_client_info *client_info = NULL;
+	struct list_head *thr_list;
+	bool status = false;
+
+	if (!chip->adc_tm_recalib_check) {
+		*notify_check = 1;
+		return rc;
+	}
+
+	list_for_each(thr_list, &chip->sensor[sensor_num].thr_list) {
+		client_info = list_entry(thr_list,
+				struct qpnp_adc_thr_client_info, list);
+		channel = client_info->btm_param->channel;
+		btm_chan_num = chip->sensor[sensor_num].btm_channel_num;
+		sensor_mask = 1 << sensor_num;
+
+		rc = qpnp_vadc_read(chip->vadc_dev, channel, &result);
+		if (rc < 0) {
+			pr_err("failure to read vadc channel=%d\n",
+					client_info->btm_param->channel);
+			goto fail;
+		}
+		new_thr = result.physical;
+
+		if (status_high)
+			old_thr = client_info->btm_param->high_thr;
+		else
+			old_thr = client_info->btm_param->low_thr;
+
+		if (new_thr > old_thr)
+			status = (status_high) ? true : false;
+		else
+			status = (status_high) ? false : true;
+
+		pr_debug(
+			"recalib:sen=%d, new_thr=%d, new_thr_adc_code=0x%x, old_thr=%d status=%d valid_status=%d\n",
+			sensor_num, new_thr, result.adc_code,
+			old_thr, status_high, status);
+
+		rc = qpnp_adc_tm_read_thr_value(chip, btm_chan_num);
+		if (rc < 0) {
+			pr_err("adc-tm thresholds read failed\n");
+			goto fail;
+		}
+
+		if (status) {
+			*notify_check = 1;
+			pr_debug("Client can be notify\n");
+			return rc;
+		}
+
+		pr_debug("Client can not be notify, restart measurement\n");
+		/* Set measurement in single measurement mode */
+		mode_ctl = ADC_OP_NORMAL_MODE << QPNP_OP_MODE_SHIFT;
+		rc = qpnp_adc_tm_mode_select(chip, mode_ctl);
+		if (rc < 0) {
+			pr_err("adc-tm single mode select failed\n");
+			goto fail;
+		}
+
+		/* Disable bank */
+		rc = qpnp_adc_tm_disable(chip);
+		if (rc < 0) {
+			pr_err("adc-tm disable failed\n");
+			goto fail;
+		}
+
+		/* Check if a conversion is in progress */
+		rc = qpnp_adc_tm_req_sts_check(chip);
+		if (rc < 0) {
+			pr_err("adc-tm req_sts check failed\n");
+			goto fail;
+		}
+
+		rc = qpnp_adc_tm_reg_update(chip, QPNP_ADC_TM_LOW_THR_INT_EN,
+							sensor_mask, false);
+		if (rc < 0) {
+			pr_err("low threshold int write failed\n");
+			goto fail;
+		}
+
+		rc = qpnp_adc_tm_reg_update(chip, QPNP_ADC_TM_HIGH_THR_INT_EN,
+							sensor_mask, false);
+		if (rc < 0) {
+			pr_err("high threshold int enable failed\n");
+			goto fail;
+		}
+
+		rc = qpnp_adc_tm_reg_update(chip, QPNP_ADC_TM_MULTI_MEAS_EN,
+							sensor_mask, false);
+		if (rc < 0) {
+			pr_err("multi measurement en failed\n");
+			goto fail;
+		}
+
+		/* restart measurement */
+		scale_type = chip->sensor[sensor_num].scale_type;
+		chip->adc->amux_prop->amux_channel = channel;
+		chip->adc->amux_prop->decimation =
+			chip->adc->adc_channels[sensor_num].adc_decimation;
+		chip->adc->amux_prop->hw_settle_time =
+			chip->adc->adc_channels[sensor_num].hw_settle_time;
+		chip->adc->amux_prop->fast_avg_setup =
+			chip->adc->adc_channels[sensor_num].fast_avg_setup;
+		chip->adc->amux_prop->mode_sel =
+			ADC_OP_MEASUREMENT_INTERVAL << QPNP_OP_MODE_SHIFT;
+		adc_tm_rscale_fn[scale_type].chan(chip->vadc_dev,
+				client_info->btm_param,
+				&chip->adc->amux_prop->chan_prop->low_thr,
+				&chip->adc->amux_prop->chan_prop->high_thr);
+		qpnp_adc_tm_add_to_list(chip, sensor_num,
+				client_info->btm_param,
+				chip->adc->amux_prop->chan_prop);
+		chip->adc->amux_prop->chan_prop->tm_channel_select =
+				chip->sensor[sensor_num].btm_channel_num;
+		chip->adc->amux_prop->chan_prop->state_request =
+				client_info->btm_param->state_request;
+
+		rc = qpnp_adc_tm_configure(chip, chip->adc->amux_prop);
+		if (rc) {
+			pr_err("adc-tm configure failed with %d\n", rc);
+			goto fail;
+		}
+		*notify_check = 0;
+		pr_debug("BTM channel reconfigured for measuremnt\n");
+	}
+fail:
+	return rc;
+}
+
 static int qpnp_adc_tm_read_status(struct qpnp_adc_tm_chip *chip)
 {
 	u8 status_low = 0, status_high = 0, qpnp_adc_tm_meas_en = 0;
-	u8 adc_tm_low_enable = 0, adc_tm_high_enable = 0;
+	u8 adc_tm_low_enable = 0, adc_tm_high_enable = 0, notify_check = 0;
 	u8 sensor_mask = 0, adc_tm_low_thr_set = 0, adc_tm_high_thr_set = 0;
 	int rc = 0, sensor_notify_num = 0, i = 0, sensor_num = 0;
 	uint32_t btm_chan_num = 0;
@@ -1485,6 +1723,13 @@ static int qpnp_adc_tm_read_status(struct qpnp_adc_tm_chip *chip)
 				such as usb_id, vbatt, pmic_therm */
 			sensor_mask = 1 << sensor_num;
 			pr_debug("non thermal node - mask:%x\n", sensor_mask);
+			rc = qpnp_adc_tm_recalib_request_check(chip,
+					sensor_num, true, &notify_check);
+			if (rc < 0 || !notify_check) {
+				pr_debug("Calib recheck re-armed rc=%d\n", rc);
+				adc_tm_high_enable = 0;
+				goto fail;
+			}
 			rc = qpnp_adc_tm_reg_update(chip,
 				QPNP_ADC_TM_HIGH_THR_INT_EN,
 				sensor_mask, false);
@@ -1541,6 +1786,13 @@ static int qpnp_adc_tm_read_status(struct qpnp_adc_tm_chip *chip)
 			/* For non thermal registered clients
 				such as usb_id, vbatt, pmic_therm */
 			pr_debug("non thermal node - mask:%x\n", sensor_mask);
+			rc = qpnp_adc_tm_recalib_request_check(chip,
+					sensor_num, false, &notify_check);
+			if (rc < 0 || !notify_check) {
+				pr_debug("Calib recheck re-armed rc=%d\n", rc);
+				adc_tm_low_enable = 0;
+				goto fail;
+			}
 			sensor_mask = 1 << sensor_num;
 			rc = qpnp_adc_tm_reg_update(chip,
 				QPNP_ADC_TM_LOW_THR_INT_EN,
@@ -1607,6 +1859,8 @@ fail:
 	if (adc_tm_high_enable || adc_tm_low_enable)
 		queue_work(chip->sensor[sensor_num].req_wq,
 				&chip->sensor[sensor_num].work);
+	if (rc < 0 || (!adc_tm_high_enable && !adc_tm_low_enable))
+		atomic_dec(&chip->wq_cnt);
 
 	return rc;
 }
@@ -1635,6 +1889,7 @@ static irqreturn_t qpnp_adc_tm_high_thr_isr(int irq, void *data)
 
 	qpnp_adc_tm_disable(chip);
 
+	atomic_inc(&chip->wq_cnt);
 	queue_work(chip->high_thr_wq, &chip->trigger_high_thr_work);
 
 	return IRQ_HANDLED;
@@ -1664,6 +1919,7 @@ static irqreturn_t qpnp_adc_tm_low_thr_isr(int irq, void *data)
 
 	qpnp_adc_tm_disable(chip);
 
+	atomic_inc(&chip->wq_cnt);
 	queue_work(chip->low_thr_wq, &chip->trigger_low_thr_work);
 
 	return IRQ_HANDLED;
@@ -1963,6 +2219,8 @@ static int qpnp_adc_tm_probe(struct spmi_device *spmi)
 			pr_err("vadc property missing, rc=%d\n", rc);
 		goto fail;
 	}
+	chip->adc_tm_recalib_check = of_property_read_bool(node,
+				"qcom,adc-tm-recalib-check");
 
 	for_each_child_of_node(node, child) {
 		char name[25];
@@ -1991,9 +2249,12 @@ static int qpnp_adc_tm_probe(struct spmi_device *spmi)
 			if (timer_select == ADC_MEAS_TIMER_SELECT1)
 				chip->sensor[sen_idx].meas_interval =
 						ADC_MEAS1_INTERVAL_3P9MS;
-			if (timer_select == ADC_MEAS_TIMER_SELECT3)
+			else if (timer_select == ADC_MEAS_TIMER_SELECT3)
 				chip->sensor[sen_idx].meas_interval =
 						ADC_MEAS3_INTERVAL_4S;
+			else if (timer_select == ADC_MEAS_TIMER_SELECT2)
+				chip->sensor[sen_idx].meas_interval =
+						ADC_MEAS2_INTERVAL_1S;
 		}
 
 		chip->sensor[sen_idx].btm_channel_num = btm_channel_num;
@@ -2051,6 +2312,7 @@ static int qpnp_adc_tm_probe(struct spmi_device *spmi)
 	}
 	INIT_WORK(&chip->trigger_high_thr_work, qpnp_adc_tm_high_thr_work);
 	INIT_WORK(&chip->trigger_low_thr_work, qpnp_adc_tm_low_thr_work);
+	atomic_set(&chip->wq_cnt, 0);
 
 	rc = qpnp_adc_tm_write_reg(chip, QPNP_ADC_TM_HIGH_THR_INT_EN,
 								thr_init);
@@ -2144,6 +2406,62 @@ static int qpnp_adc_tm_remove(struct spmi_device *spmi)
 	return 0;
 }
 
+static void qpnp_adc_tm_shutdown(struct spmi_device *spmi)
+{
+	struct qpnp_adc_tm_chip *chip = dev_get_drvdata(&spmi->dev);
+	int rc = 0;
+	u8 reg_val = 0, status1 = 0, en_ctl1 = 0;
+
+	/* Set measurement in single measurement mode */
+	reg_val = ADC_OP_NORMAL_MODE << QPNP_OP_MODE_SHIFT;
+	rc = qpnp_adc_tm_mode_select(chip, reg_val);
+	if (rc < 0)
+		pr_err("adc-tm single mode select failed\n");
+
+	/* Disable bank */
+	rc = qpnp_adc_tm_disable(chip);
+	if (rc < 0)
+		pr_err("adc-tm disable failed\n");
+
+	/* Check if a conversion is in progress */
+	rc = qpnp_adc_tm_req_sts_check(chip);
+	if (rc < 0)
+		pr_err("adc-tm req_sts check failed\n");
+
+	/* Disable multimeasurement */
+	reg_val = 0;
+	rc = qpnp_adc_tm_write_reg(chip, QPNP_ADC_TM_MULTI_MEAS_EN, reg_val);
+	if (rc < 0)
+		pr_err("adc-tm multi-measurement mode disable failed\n");
+
+	rc = qpnp_adc_tm_read_reg(chip, QPNP_ADC_TM_STATUS1, &status1);
+	if (rc < 0)
+		pr_err("adc-tm status1 read failed\n");
+
+	rc = qpnp_adc_tm_read_reg(chip, QPNP_EN_CTL1, &en_ctl1);
+	if (rc < 0)
+		pr_err("adc-tm en_ctl1 read failed\n");
+
+	pr_debug("adc-tm status1=0%x, en_ctl1=0x%x\n", status1, en_ctl1);
+	pr_debug("stopping all recurring measurements on adc-tm\n");
+}
+
+static int qpnp_adc_tm_suspend_noirq(struct device *dev)
+{
+	struct qpnp_adc_tm_chip *chip = dev_get_drvdata(dev);
+
+	if (0 != atomic_read(&chip->wq_cnt)) {
+		pr_err(
+			"Aborting suspend, adc_tm notification running while suspending\n");
+		return -EBUSY;
+	}
+	return 0;
+}
+
+static const struct dev_pm_ops qpnp_adc_tm_pm_ops = {
+	.suspend_noirq	= qpnp_adc_tm_suspend_noirq,
+};
+
 static const struct of_device_id qpnp_adc_tm_match_table[] = {
 	{	.compatible = "qcom,qpnp-adc-tm" },
 	{}
@@ -2153,9 +2471,11 @@ static struct spmi_driver qpnp_adc_tm_driver = {
 	.driver		= {
 		.name	= "qcom,qpnp-adc-tm",
 		.of_match_table = qpnp_adc_tm_match_table,
+		.pm	= &qpnp_adc_tm_pm_ops,
 	},
 	.probe		= qpnp_adc_tm_probe,
 	.remove		= qpnp_adc_tm_remove,
+	.shutdown	= qpnp_adc_tm_shutdown,
 };
 
 static int __init qpnp_adc_tm_init(void)

@@ -216,7 +216,7 @@ config MSM_SMP2P_TEST
 	  are used to verify the local and remote
 	  implementations.
 
-config MSM_SPM_V2
+config MSM_SPM
 	bool "Driver support for SPM Version 2"
 	help
 	  Enables the support for Version 2 of the SPM driver. SPM hardware is
@@ -226,7 +226,7 @@ config MSM_SPM_V2
 
 config MSM_L2_SPM
 	bool "SPM support for L2 cache"
-	depends on MSM_SPM_V2
+	depends on MSM_SPM
 	help
 	  Enable SPM driver support for L2 cache. Some MSM chipsets allow
 	  control of L2 cache low power mode with a Subsystem Power manager.
@@ -277,6 +277,23 @@ config MSM_MEMORY_DUMP_V2
 	  of deadlocks or cpu hangs these dump regions are captured to
 	  give a snapshot of the system at the time of the crash.
 
+config MSM_DEBUG_LAR_UNLOCK
+	bool "MSM Debug LAR Unlock Support"
+	depends on MSM_MEMORY_DUMP_V2
+	help
+	  This allows unlocking Core Debug lock to allow capture
+	  of upper 32 bits of program counter at the time of
+	  system crash. This is useful in getting correct crash
+	  location.
+
+config MSM_DDR_HEALTH
+	bool "MSM DDR Health Driver"
+	default n
+	help
+	  This option enables a driver which allocates DDR buffer of requested
+	  size and sends it's locatoin to RPM sub system. RPM subsystem can
+	  make use of this buffer to monitor DDR health.
+
 config MSM_COMMON_LOG
 	bool "MSM Common Log Support"
 	help
@@ -292,6 +309,31 @@ config MSM_WATCHDOG_V2
 	  watchdog times out. It allows for detection of cpu hangs and
 	  deadlocks. It does not run during the bootup process, so it will
 	  not catch any early lockups.
+
+config MSM_FORCE_WDOG_BITE_ON_PANIC
+	bool "MSM force watchdog bite"
+	depends on MSM_WATCHDOG_V2
+	help
+	  This forces a watchdog bite when the device restarts due to a
+	  kernel panic. On certain MSM SoCs, this provides us
+	  additional debugging information.
+
+config MSM_HVC
+	bool "MSM Hypervisor Call Support"
+	help
+	  This enables the Hypervisor Call module. It provides apis to call
+	  into the hypervisor thereby allowing access to services exposed by
+	  the hypervisor. It is primarily intended to be used for Silicon
+	  Partner/Manufacturer function identifier subrange but supports other
+	  service call subranges as well.
+
+config MSM_HYP_DEBUG
+	bool "MSM Hypervisor Debug Driver"
+	help
+	  This enables the Hypervisor Debug driver. It allows the mapping and
+	  and unmapping of user defined memory range from stage 2. It also
+	  supports mapping and unmapping PIL image load memory range from
+	  stage 2 depending upon the PIL image state.
 
 config MSM_SUBSYSTEM_RESTART
 	bool "MSM Subsystem Restart"
@@ -342,11 +384,11 @@ config MSM_PIL_MSS_QDSP6V5
 	  If unsure, say N.
 
 config MSM_PIL_FEMTO
-	tristate "FSM99XX Boot Support"
-	depends on MSM_PIL && ARCH_FSM9900
+	tristate "FSM9900 and FSM9010 Boot Support"
+	depends on MSM_PIL && (ARCH_FSM9900 || ARCH_FSM9010)
 	help
 	  Support for loading and booting firmware images for multiple
-	  modems on the FSM9900 family targets.
+	  modems on the FSM9900 and FSM9010 family targets.
 	  Select Y if you want the modems to boot.
 	  If unsure, select N.
 
@@ -413,6 +455,14 @@ config MSM_OCMEM_POWER_DISABLE
           Enable this configuration if OCMEM is being exclusively
           used as GMEM or OCIMEM.
 
+config MSM_BOOT_STATS
+	bool "Use MSM boot stats reporting"
+	help
+	 Use this to report msm boot stats such as bootloader throughput,
+	 display init, total boot time.
+	 This figures are reported in mpm sleep clock cycles and have a
+	 resolution of 31 bits as 1 bit is used as an overflow check.
+
 config MSM_SCM
 	bool "Secure Channel Manager (SCM) support"
 	default n
@@ -424,6 +474,84 @@ config MAXIMUM_CURRENT_THROTTLING
 	  The maximum current throttling driver enables application to
 	  turn on/off CPU based current throttling by setting the
 	  credit/upper limit in the CPU registers.
+
+config MSM_CPU_PWR_CTL
+	bool "Cpu subsystem power control"
+	depends on SMP && (ARM || ARM64)
+	default y
+	help
+	  Provides routines to power on cpu rails and l2 cache
+	  controller during coldboot.
+
+config MSM_XPU_ERR_FATAL
+	bool "Configure XPU violations as fatal errors"
+	help
+	 Select if XPU violations have to be configured as fatal errors.
+
+config MSM_CACHE_DUMP
+	bool "Cache dumping support"
+	help
+	  Add infrastructure to dump the L1 and L2 caches to an allocated buffer.
+	  This allows for analysis of the caches in case cache corruption is
+	  suspected.
+	  If unsure, say N
+
+config MSM_CACHE_DUMP_ON_PANIC
+	bool "Dump caches on panic"
+	depends on MSM_CACHE_DUMP
+	help
+	  By default, the caches are flushed on panic. This means that trying to
+	  look at them in a RAM dump will give useless data. Select this if you
+	  want to dump the L1 and L2 caches on panic before any flush occurs.
+	  If unsure, say N
+
+config MSM_CPUSS_DUMP
+	bool "CPU Subsystem Dumping support"
+	help
+	 Add support to dump various hardware entities such as the instruction
+	 and data tlb's as well as the unified tlb, which are a part of the
+	 cpu subsystem to an allocated buffer. This allows for analysis of the
+	 the entities if corruption is suspected.
+	 If unsure, say N
+
+config MSM_SHARED_HEAP_ACCESS
+	bool "Shared Heap access"
+	help
+	 Enable support to provide access to clients to certain HLOS regions
+	 which are protected by the secure environment.
+
+config MSM_SYSTEM_HEALTH_MONITOR
+	bool "System Health Monitor"
+	depends on MSM_QMI_INTERFACE && MSM_SUBSYSTEM_RESTART
+	help
+	  System Health Monitor (SHM) passively monitors the health of the
+	  peripherals connected to the application processor. Software
+	  components in the application processor that experience
+	  communication failure can request the SHM to perform a system-wide
+	  health check. If any failures are detected during the health-check,
+	  then a subsystem restart will be triggered for the failed subsystem.
+
+config QCOM_EARLY_RANDOM
+	bool "Initialize random pool very early"
+	help
+	  The standard random pool may not initialize until late in the boot
+	  process which means that any calls to get random numbers before then
+	  may not be truly random. Select this option to make an early call
+	  to get some random data to put in the pool. If unsure, say N.
+
+config MSM_PACMAN
+	bool "Enable the Peripheral Access Control Manager (PACMan)"
+	help
+	  Add support for the Peripheral Access Control Manager (PACMan)
+	  This driver allows reconfiguration of the Bus Access Manager
+	  Low Speed Peripheral (BLSP) ownership.
+
+config MSM_PERFORMANCE
+	tristate "Core control driver to support userspace hotplug requests"
+	help
+	  This driver is used to provide CPU hotplug support to userspace.
+	  It ensures that no more than a user specified number of CPUs stay
+	  online at any given point in time.
 
 source "drivers/soc/qcom/memshare/Kconfig"
 

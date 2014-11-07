@@ -1171,6 +1171,22 @@ static int armv7pmu_set_event_filter(struct hw_perf_event *event,
 	return 0;
 }
 
+#ifdef CONFIG_PERF_EVENTS_USERMODE
+static void armv7pmu_init_usermode(void)
+{
+	u32 val;
+
+	/* Set PMUSERENR[UEN] */
+	asm volatile("mrc p15, 0, %0, c9, c14, 0" : "=r" (val));
+	val |= 1;
+	asm volatile("mcr p15, 0, %0, c9, c14, 0" : : "r" (val));
+}
+#else
+static inline void armv7pmu_init_usermode(void)
+{
+}
+#endif
+
 static void armv7pmu_reset(void *info)
 {
 	struct arm_pmu *cpu_pmu = (struct arm_pmu *)info;
@@ -1184,7 +1200,21 @@ static void armv7pmu_reset(void *info)
 
 	/* Initialize & Reset PMNC: C and P bits */
 	armv7_pmnc_write(ARMV7_PMNC_P | ARMV7_PMNC_C);
+
+	armv7pmu_init_usermode();
 }
+
+#ifdef CONFIG_PERF_EVENTS_RESET_PMU_DEBUGFS
+static void armv7_force_pmu_reset(void *info)
+{
+	/* simply use armv7 reset, nothing else to do here */
+	armv7pmu_reset(info);
+}
+#else
+static inline void armv7_force_pmu_reset(void *info)
+{
+}
+#endif
 
 static int armv7_a8_map_event(struct perf_event *event)
 {
@@ -1250,6 +1280,7 @@ static void armv7pmu_init(struct arm_pmu *cpu_pmu)
 	cpu_pmu->start		= armv7pmu_start;
 	cpu_pmu->stop		= armv7pmu_stop;
 	cpu_pmu->reset		= armv7pmu_reset;
+	cpu_pmu->force_reset			= armv7_force_pmu_reset;
 	cpu_pmu->max_period	= (1LLU << 32) - 1;
 	cpu_pmu->save_pm_registers	= armv7pmu_save_pm_registers;
 	cpu_pmu->restore_pm_registers	= armv7pmu_restore_pm_registers;

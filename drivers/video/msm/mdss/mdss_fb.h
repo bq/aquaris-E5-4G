@@ -21,6 +21,7 @@
 #include <linux/notifier.h>
 
 #include "mdss_panel.h"
+#include "mdss_mdp_splash_logo.h"
 
 #define MDSS_LPAE_CHECK(phys)	\
 	((sizeof(phys) > sizeof(unsigned long)) ? ((phys >> 32) & 0xFF) : (0))
@@ -31,12 +32,12 @@
 
 #define MSM_FB_ENABLE_DBGFS
 #define WAIT_FENCE_FIRST_TIMEOUT (3 * MSEC_PER_SEC)
-#define WAIT_FENCE_FINAL_TIMEOUT (10 * MSEC_PER_SEC)
-/* Display op timeout should be greater than total timeout */
-#define WAIT_DISP_OP_TIMEOUT ((WAIT_FENCE_FIRST_TIMEOUT + \
-		WAIT_FENCE_FINAL_TIMEOUT) * MDP_MAX_FENCE_FD)
-
-#define SPLASH_THREAD_WAIT_TIMEOUT 3
+#define WAIT_FENCE_FINAL_TIMEOUT (7 * MSEC_PER_SEC)
+/* Display op timeout should be greater than the total timeout but not
+ * unreasonably large. Set to 1s more than first wait + final wait which
+ * are already quite long and proceed without any further waits. */
+#define WAIT_DISP_OP_TIMEOUT (WAIT_FENCE_FIRST_TIMEOUT + \
+		WAIT_FENCE_FINAL_TIMEOUT + 1)
 
 #ifndef MAX
 #define  MAX(x, y) (((x) > (y)) ? (x) : (y))
@@ -46,13 +47,19 @@
 #define  MIN(x, y) (((x) < (y)) ? (x) : (y))
 #endif
 
+#define MDP_PP_AD_BL_LINEAR	0x0
+#define MDP_PP_AD_BL_LINEAR_INV	0x1
+
 /**
  * enum mdp_notify_event - Different frame events to indicate frame update state
  *
  * @MDP_NOTIFY_FRAME_BEGIN:	Frame update has started, the frame is about to
  *				be programmed into hardware.
+ * @MDP_NOTIFY_FRAME_CFG_DONE:	Frame configuration is done.
+ * @MDP_NOTIFY_FRAME_CTX_DONE:	Frame has finished accessing sw context.
+ *				Next frame can start preparing.
  * @MDP_NOTIFY_FRAME_READY:	Frame ready to be kicked off, this can be used
- *				as the last point in time to synchronized with
+ *				as the last point in time to synchronize with
  *				source buffers before kickoff.
  * @MDP_NOTIFY_FRAME_FLUSHED:	Configuration of frame has been flushed and
  *				DMA transfer has started.
@@ -66,20 +73,31 @@
  */
 enum mdp_notify_event {
 	MDP_NOTIFY_FRAME_BEGIN = 1,
+	MDP_NOTIFY_FRAME_CFG_DONE,
+	MDP_NOTIFY_FRAME_CTX_DONE,
 	MDP_NOTIFY_FRAME_READY,
 	MDP_NOTIFY_FRAME_FLUSHED,
 	MDP_NOTIFY_FRAME_DONE,
 	MDP_NOTIFY_FRAME_TIMEOUT,
 };
 
-enum mdp_splash_event {
-	MDP_CREATE_SPLASH_OV = 0,
-	MDP_REMOVE_SPLASH_OV,
+/**
+ * enum mdp_split_mode - Lists the possible split modes in the device
+ *
+ * @MDP_SPLIT_MODE_NONE: Not a Dual display, no panel split.
+ * @MDP_SPLIT_MODE_LM:   Dual Display is true, Split across layer mixers
+ * @MDP_SPLIT_MODE_DST:  Dual Display is true, Split is in the Destination
+ *                      i.e ping pong split.
+ */
+enum mdp_split_mode {
+	MDP_SPLIT_MODE_NONE,
+	MDP_SPLIT_MODE_LM,
+	MDP_SPLIT_MODE_DST,
 };
 
 struct disp_info_type_suspend {
 	int op_enable;
-	int panel_power_on;
+	int panel_power_state;
 };
 
 struct disp_info_notify {
@@ -96,6 +114,8 @@ struct msm_sync_pt_data {
 	char *fence_name;
 	u32 acq_fen_cnt;
 	struct sync_fence *acq_fen[MDP_MAX_FENCE_FD];
+	u32 temp_fen_cnt;
+	struct sync_fence *temp_fen[MDP_MAX_FENCE_FD];
 
 	struct sw_sync_timeline *timeline;
 	int timeline_value;
@@ -121,23 +141,27 @@ struct msm_mdp_interface {
 	int (*on_fnc)(struct msm_fb_data_type *mfd);
 	int (*off_fnc)(struct msm_fb_data_type *mfd);
 	/* called to release resources associated to the process */
-	int (*release_fnc)(struct msm_fb_data_type *mfd, bool release_all);
+	int (*release_fnc)(struct msm_fb_data_type *mfd, bool release_all,
+				uint32_t pid);
 	int (*kickoff_fnc)(struct msm_fb_data_type *mfd,
 					struct mdp_display_commit *data);
 	int (*ioctl_handler)(struct msm_fb_data_type *mfd, u32 cmd, void *arg);
-	void (*dma_fnc)(struct msm_fb_data_type *mfd, struct mdp_overlay *req,
-				int image_len, int *pipe_ndx);
+	void (*dma_fnc)(struct msm_fb_data_type *mfd);
 	int (*cursor_update)(struct msm_fb_data_type *mfd,
 				struct fb_cursor *cursor);
 	int (*lut_update)(struct msm_fb_data_type *mfd, struct fb_cmap *cmap);
 	int (*do_histogram)(struct msm_fb_data_type *mfd,
 				struct mdp_histogram *hist);
-	int (*update_ad_input)(struct msm_fb_data_type *mfd);
+	int (*ad_invalidate_input)(struct msm_fb_data_type *mfd);
+	int (*ad_calc_bl)(struct msm_fb_data_type *mfd, int bl_in,
+		int *bl_out, int *ad_bl_out);
 	int (*panel_register_done)(struct mdss_panel_data *pdata);
 	u32 (*fb_stride)(u32 fb_index, u32 xres, int bpp);
-	int (*splash_fnc) (struct msm_fb_data_type *mfd, int *index, int req);
+	int (*splash_init_fnc)(struct msm_fb_data_type *mfd);
 	struct msm_sync_pt_data *(*get_sync_fnc)(struct msm_fb_data_type *mfd,
 				const struct mdp_buf_sync *buf_sync);
+	void (*check_dsi_status)(struct work_struct *work, uint32_t interval);
+	int (*configure_panel)(struct msm_fb_data_type *mfd, int mode);
 	void *private1;
 };
 
@@ -147,9 +171,15 @@ struct msm_mdp_interface {
 					/ (2 * max_bright);\
 					} while (0)
 
+struct mdss_fb_file_info {
+	struct file *file;
+	struct list_head list;
+};
+
 struct mdss_fb_proc_info {
 	int pid;
 	u32 ref_cnt;
+	struct list_head file_list;
 	struct list_head list;
 };
 
@@ -166,7 +196,7 @@ struct msm_fb_data_type {
 
 	struct panel_id panel;
 	struct mdss_panel_info *panel_info;
-	int split_display;
+	int split_mode;
 	int split_fb_left;
 	int split_fb_right;
 
@@ -179,9 +209,10 @@ struct msm_fb_data_type {
 	int op_enable;
 	u32 fb_imgType;
 	int panel_reconfig;
+	u32 panel_orientation;
 
 	u32 dst_format;
-	int panel_power_on;
+	int panel_power_state;
 	struct disp_info_type_suspend suspend;
 
 	struct ion_handle *ihdl;
@@ -193,12 +224,13 @@ struct msm_fb_data_type {
 	int ext_ad_ctrl;
 	u32 ext_bl_ctrl;
 	u32 calib_mode;
+	u32 ad_bl_level;
 	u32 bl_level;
 	u32 bl_scale;
 	u32 bl_min_lvl;
 	u32 unset_bl_level;
 	u32 bl_updated;
-	u32 bl_level_old;
+	u32 bl_level_scaled;
 	struct mutex bl_lock;
 
 	struct platform_device *pdev;
@@ -216,12 +248,13 @@ struct msm_fb_data_type {
 	/* for non-blocking */
 	struct task_struct *disp_thread;
 	atomic_t commits_pending;
+	atomic_t kickoff_pending;
 	wait_queue_head_t commit_wait_q;
 	wait_queue_head_t idle_wait_q;
+	wait_queue_head_t kickoff_wait_q;
 	bool shutdown_pending;
 
-	struct task_struct *splash_thread;
-	bool splash_logo_enabled;
+	struct msm_fb_splash_info splash_info;
 
 	wait_queue_head_t ioctl_q;
 	atomic_t ioctl_ref_cnt;
@@ -234,8 +267,13 @@ struct msm_fb_data_type {
 	struct list_head proc_list;
 	struct ion_client *fb_ion_client;
 	struct ion_handle *fb_ion_handle;
+	struct dma_buf *fbmem_buf;
 
 	bool mdss_fb_split_stored;
+
+	u32 wait_for_kickoff;
+	u32 thermal_level;
+	int doze_mode;
 };
 
 static inline void mdss_fb_update_notify_update(struct msm_fb_data_type *mfd)
@@ -257,6 +295,49 @@ static inline void mdss_fb_update_notify_update(struct msm_fb_data_type *mfd)
 	}
 }
 
+/* Function returns true for either Layer Mixer split or Ping pong split */
+static inline bool is_panel_split(struct msm_fb_data_type *mfd)
+{
+	return (mfd && (!(mfd->split_mode == MDP_SPLIT_MODE_NONE)));
+}
+/* Function returns true, if Layer Mixer split is Set*/
+static inline bool is_split_lm(struct msm_fb_data_type *mfd)
+{
+	return (mfd && (mfd->split_mode == MDP_SPLIT_MODE_LM));
+}
+/* Function returns true, if Ping pong split is Set*/
+static inline bool is_split_dst(struct msm_fb_data_type *mfd)
+{
+	return (mfd && (mfd->split_mode == MDP_SPLIT_MODE_DST));
+}
+
+static inline bool mdss_fb_is_power_off(struct msm_fb_data_type *mfd)
+{
+	return mdss_panel_is_power_off(mfd->panel_power_state);
+}
+
+static inline bool mdss_fb_is_power_on_interactive(
+	struct msm_fb_data_type *mfd)
+{
+	return mdss_panel_is_power_on_interactive(mfd->panel_power_state);
+}
+
+static inline bool mdss_fb_is_power_on(struct msm_fb_data_type *mfd)
+{
+	return mdss_panel_is_power_on(mfd->panel_power_state);
+}
+
+static inline bool mdss_fb_is_power_on_lp(struct msm_fb_data_type *mfd)
+{
+	return mdss_panel_is_power_on_lp(mfd->panel_power_state);
+}
+
+static inline bool mdss_fb_is_hdmi_primary(struct msm_fb_data_type *mfd)
+{
+	return (mfd && (mfd->index == 0) &&
+		(mfd->panel_info->type == DTV_PANEL));
+}
+
 int mdss_fb_get_phys_info(dma_addr_t *start, unsigned long *len, int fb_num);
 void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl);
 void mdss_fb_update_backlight(struct msm_fb_data_type *mfd);
@@ -265,7 +346,6 @@ void mdss_fb_signal_timeline(struct msm_sync_pt_data *sync_pt_data);
 struct sync_fence *mdss_fb_sync_get_fence(struct sw_sync_timeline *timeline,
 				const char *fence_name, int val);
 int mdss_fb_register_mdp_instance(struct msm_mdp_interface *mdp);
-int mdss_fb_alloc_fb_ion_memory(struct msm_fb_data_type *mfd);
 int mdss_fb_dcm(struct msm_fb_data_type *mfd, int req_state);
 int mdss_fb_suspres_panel(struct device *dev, void *data);
 int mdss_fb_do_ioctl(struct fb_info *info, unsigned int cmd,

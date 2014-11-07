@@ -18,8 +18,11 @@
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <soc/qcom/memory_dump.h>
+#include <soc/qcom/scm.h>
 
 #define MSM_DUMP_TABLE_VERSION		MSM_DUMP_MAKE_VERSION(2, 0)
+
+#define SCM_CMD_DEBUG_LAR_UNLOCK	0x4
 
 struct msm_dump_table {
 	uint32_t version;
@@ -171,3 +174,26 @@ err0:
 	return ret;
 }
 early_initcall(init_memory_dump);
+
+#ifdef CONFIG_MSM_DEBUG_LAR_UNLOCK
+static int __init init_debug_lar_unlock(void)
+{
+	int ret;
+	uint32_t argument = 0;
+	struct scm_desc desc = {0};
+
+	if (!is_scm_armv8())
+		ret = scm_call(SCM_SVC_TZ, SCM_CMD_DEBUG_LAR_UNLOCK, &argument,
+			       sizeof(argument), NULL, 0);
+	else
+		ret = scm_call2(SCM_SIP_FNID(SCM_SVC_TZ,
+				SCM_CMD_DEBUG_LAR_UNLOCK), &desc);
+	if (ret)
+		pr_err("Core Debug Lock unlock failed, ret: %d\n", ret);
+	else
+		pr_info("Core Debug Lock unlocked\n");
+
+	return ret;
+}
+early_initcall(init_debug_lar_unlock);
+#endif

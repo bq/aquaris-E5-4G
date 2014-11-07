@@ -57,6 +57,11 @@ qcom,qos-off:		Parameter that represents the delta between QoS register address
 			space for different devices.
 			Typically these optional properties are used for
 			devices that represent fabric devices.
+qcom,util-fact:		Parameter that represents the DDR utilization factor. It is
+			represented as actual util-factor * 100.
+qcom,vrail-comp:	Parameter that represents the voltage rail compensation to push
+			the bus to the next level if needed. It is represented as actual
+			vrail-comp * 100.
 qcom,bus-type:		Parameter that represents the bus type such as BIMC or NOC.
 			Typically these optional properties are used for
 			devices that represent fabric devices.
@@ -81,11 +86,16 @@ qcom,prio-wr:		Write priority for a BIMC bus master (Can be 0/1/2)
 qcom,prio0:		Priority low signal for a NoC bus master
 			(Can be 0/1/2).
 qcom,prio1:		Priority high signal for a NoC bus master
+qcom,bw_buffer:		Optional parameter in KBytes used to specify a buffer value that should be added to
+			the voted bandwidth value to figure out the limiting bandwidth for a master port.
 qcom,buswidth:		The buswidth at the device, default is 8 bytes.
 qcom,mas-rpm-id:	For non-AP owned device this is the RPM id for devices that are bus masters.
 			This is the id that is used when sending a message to RPM for this device.
 qcom,slv-rpm-id:	For non-AP owned device this is the RPM id for devices that are bus slaves.
 			This is the id that is used when sending a message to RPM for this device.
+qcom,blacklist:         An array of phandles that represent devices that this device
+			cannot connect to either directly or via any number of
+			intermediate nodes.
 
 
 The following properties are optional as collecting data via coresight might

@@ -40,23 +40,67 @@
 		regulator-min-microvolt = <1>;
 		regulator-max-microvolt = <7>;
 	};
+
+	/* eMMC SMPS4*/
+	pma8084_s4: regulator@1d00 {
+		compatible = "qcom,stub-regulator";
+		regulator-name = "8084_s4";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-always-on;
+		qcom,system-load = <100000>;
+		status = "okay";
+	};
+
+	/* PMIC: HKADC */
+	pma8084_l8: regulator@4700 {
+		compatible = "qcom,stub-regulator";
+		regulator-name = "8084_l8";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-always-on;
+		status = "okay";
+	};
+
+	/* VDDPX_5 (UIM) */
+	pma8084_l9: regulator@4800 {
+		compatible = "qcom,stub-regulator";
+		regulator-name = "8084_l9";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-always-on;
+		status = "okay";
+	};
+	/* eMMC LDO20 */
+	pma8084_l20: regulator@5300 {
+		compatible = "qcom,stub-regulator";
+		regulator-name = "8084_l20";
+		regulator-min-microvolt = <2950000>;
+		regulator-max-microvolt = <2950000>;
+		regulator-always-on;
+		status = "okay";
+	};
+	/* SDC2 VDD LDO21 */
+	pma8084_l21: regulator@5400 {
+		compatible = "qcom,stub-regulator";
+		regulator-name = "8084_l21";
+		regulator-min-microvolt = <2950000>;
+		regulator-max-microvolt = <2950000>;
+		regulator-always-on;
+		status = "okay";
+	};
+	/* QFPROM_BLOW_VDD */
+	pma8084_lvs1: regulator@8000 {
+		compatible = "qcom,stub-regulator";
+		regulator-name = "8084_lvs1";
+		status = "okay";
+	};
 };
 
 /* QPNP controlled regulators: */
 
 &spmi_bus {
 	qcom,pma8084@1 {
-		/* eMMC SMPS4*/
-		pma8084_s4: regulator@1d00 {
-			regulator-min-microvolt = <1800000>;
-			regulator-max-microvolt = <1800000>;
-			qcom,enable-time = <500>;
-			qcom,pull-down-enable = <1>;
-			regulator-always-on;
-			qcom,system-load = <100000>;
-			status = "okay";
-		};
-
 		pma8084_s8: regulator@2900 {
 			regulator-min-microvolt = <500000>;
 			regulator-max-microvolt = <1100000>;
@@ -104,26 +148,6 @@
 			regulator-max-microvolt = <1800000>;
 			qcom,enable-time = <500>;
 			qcom,pull-down-enable = <1>;
-			status = "okay";
-		};
-
-		/* PMIC: HKADC */
-		pma8084_l8: regulator@4700 {
-			regulator-min-microvolt = <1800000>;
-			regulator-max-microvolt = <1800000>;
-			qcom,enable-time = <500>;
-			qcom,pull-down-enable = <1>;
-			regulator-always-on;
-			status = "okay";
-		};
-
-		/* VDDPX_5 (UIM) */
-		pma8084_l9: regulator@4800 {
-			regulator-min-microvolt = <1800000>;
-			regulator-max-microvolt = <1800000>;
-			qcom,enable-time = <500>;
-			qcom,pull-down-enable = <1>;
-			regulator-always-on;
 			status = "okay";
 		};
 
@@ -184,26 +208,6 @@
 			status = "okay";
 		};
 
-		/* eMMC LDO20 */
-		pma8084_l20: regulator@5300 {
-			regulator-min-microvolt = <2950000>;
-			regulator-max-microvolt = <2950000>;
-			qcom,enable-time = <200>;
-			qcom,pull-down-enable = <1>;
-			regulator-always-on;
-			status = "okay";
-		};
-
-		/* SDC2 VDD LDO21 */
-		pma8084_l21: regulator@5400 {
-			regulator-min-microvolt = <2950000>;
-			regulator-max-microvolt = <2950000>;
-			qcom,enable-time = <200>;
-			qcom,pull-down-enable = <1>;
-			regulator-always-on;
-			status = "okay";
-		};
-
 		/* FTR1 LDO23*/
 		pma8084_l23: regulator@5600 {
 			regulator-min-microvolt = <2200000>;
@@ -240,14 +244,6 @@
 			qcom,pull-down-enable = <1>;
 			status = "okay";
 		};
-
-		/* QFPROM_BLOW_VDD */
-		pma8084_lvs1: regulator@8000 {
-			qcom,enable-time = <200>;
-			qcom,pull-down-enable = <1>;
-			status = "okay";
-		};
-
 	};
 };
 
@@ -255,21 +251,3 @@
 
 };
 
-&soc {
-	pcie0_power_en_vreg: pcie0_power_en_vreg {
-		compatible = "regulator-fixed";
-		regulator-name = "pcie0_power_en_vreg";
-		startup-delay-us = <4000>;
-		enable-active-high;
-		gpio = <&pma8084_gpios 16 0>;
-		regulator-boot-on;
-	};
-	pcie1_power_en_vreg: pcie1_power_en_vreg {
-		compatible = "regulator-fixed";
-		regulator-name = "pcie1_power_en_vreg";
-		startup-delay-us = <4000>;
-		enable-active-high;
-		gpio = <&pma8084_gpios 22 0>;
-		regulator-boot-on;
-	};
-};

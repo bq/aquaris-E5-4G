@@ -57,6 +57,7 @@ struct msm_pinctrl_info {
 	struct pinctrl *pinctrl;
 	struct pinctrl_state *gpio_state_active;
 	struct pinctrl_state *gpio_state_suspend;
+	bool use_pinctrl;
 };
 
 struct msm_cam_clk_setting {
@@ -73,8 +74,8 @@ struct v4l2_subdev_info {
 };
 
 struct msm_camera_gpio_num_info {
-	uint16_t gpio_num[10];
-	uint8_t valid[10];
+	uint16_t gpio_num[SENSOR_GPIO_MAX];
+	uint8_t valid[SENSOR_GPIO_MAX];
 };
 
 struct msm_camera_gpio_conf {
@@ -145,6 +146,7 @@ struct msm_camera_sensor_board_info {
 	const char *sensor_name;
 	const char *eeprom_name;
 	const char *actuator_name;
+	const char *ois_name;
 	struct msm_camera_slave_info *slave_info;
 	struct msm_camera_csi_lane_params *csi_lane_params;
 	struct msm_camera_sensor_strobe_flash_data *strobe_flash_data;
@@ -215,6 +217,7 @@ struct msm_eeprom_board_info {
 	uint16_t i2c_slaveaddr;
 	struct msm_camera_power_ctrl_t power_info;
 	struct msm_eeprom_cmm_t cmm_data;
+	enum i2c_freq_mode_t i2c_freq_mode;
 };
 
 #endif

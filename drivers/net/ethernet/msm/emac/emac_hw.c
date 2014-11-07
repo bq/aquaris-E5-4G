@@ -572,7 +572,18 @@ static int emac_hw_setup_phy_link(struct emac_hw *hw, u32 speed, bool autoneg,
 	int retval = 0;
 
 	if (autoneg) {
-		adv = ADVERTISE_PAUSE_CAP | ADVERTISE_PAUSE_ASYM;
+		switch (hw->req_fc_mode) {
+		case emac_fc_full:
+		case emac_fc_rx_pause:
+			adv = ADVERTISE_PAUSE_CAP | ADVERTISE_PAUSE_ASYM;
+			break;
+		case emac_fc_tx_pause:
+			adv = ADVERTISE_PAUSE_ASYM;
+			break;
+		default:
+			adv = 0;
+			break;
+		}
 		if (!fc)
 			adv &= ~(ADVERTISE_PAUSE_CAP | ADVERTISE_PAUSE_ASYM);
 
@@ -887,6 +898,10 @@ void emac_hw_enable_intr(struct emac_hw *hw)
 		emac_reg_w32(hw, EMAC_SGMII_PHY, irq_info->mask_reg,
 			     irq_info->mask);
 	}
+
+	if (adpt->tstamp_en)
+		emac_reg_w32(hw, EMAC_1588, EMAC_P1588_PTP_EXPANDED_INT_MASK,
+			     hw->ptp_intr_mask);
 	wmb();
 }
 
@@ -1282,7 +1297,8 @@ static int emac_get_fc_mode(struct emac_hw *hw, enum emac_fc_mode *mode)
 
 			if ((pssr & PSSR_FC_TXEN) &&
 			    (pssr & PSSR_FC_RXEN)) {
-				*mode = emac_fc_full;
+				*mode = (hw->req_fc_mode == emac_fc_full) ?
+					emac_fc_full : emac_fc_rx_pause;
 			} else if (pssr & PSSR_FC_TXEN) {
 				*mode = emac_fc_tx_pause;
 			} else if (pssr & PSSR_FC_RXEN) {
@@ -1308,7 +1324,7 @@ int emac_hw_config_fc(struct emac_hw *hw)
 	u32 mac;
 	int retval;
 
-	if (hw->disable_fc_autoneg) {
+	if (hw->disable_fc_autoneg || hw->adpt->no_ephy) {
 		hw->cur_fc_mode = hw->req_fc_mode;
 	} else {
 		retval = emac_get_fc_mode(hw, &hw->cur_fc_mode);
@@ -1411,7 +1427,21 @@ void emac_hw_start_mac(struct emac_hw *hw)
 	csr1 = emac_reg_r32(hw, EMAC_CSR, EMAC_EMAC_WRAPPER_CSR1);
 
 	mac |= TXEN | RXEN;     /* enable RX/TX */
-	mac |= (TXFC | RXFC);   /* enable RX/TX Flow Control */
+
+	/* enable RX/TX Flow Control */
+	switch (hw->cur_fc_mode) {
+	case emac_fc_full:
+		mac |= (TXFC | RXFC);
+		break;
+	case emac_fc_rx_pause:
+		mac |= RXFC;
+		break;
+	case emac_fc_tx_pause:
+		mac |= TXFC;
+		break;
+	default:
+		break;
+	}
 
 	/* setup link speed */
 	mac &= ~SPEED_BMSK;
@@ -1455,12 +1485,8 @@ void emac_hw_start_mac(struct emac_hw *hw)
 		     (INT_RD_CLR_EN | LPW_MODE |
 		      IRQ_MODERATOR_EN | IRQ_MODERATOR2_EN));
 
-	if (CHK_HW_FLAG(PTP_CAP)) {
-		if (hw->link_speed == EMAC_LINK_SPEED_1GB_FULL)
-			emac_ptp_set_linkspeed(hw, emac_mac_speed_1000);
-		else
-			emac_ptp_set_linkspeed(hw, emac_mac_speed_10_100);
-	}
+	if (CHK_HW_FLAG(PTP_CAP))
+		emac_ptp_set_linkspeed(hw, hw->link_speed);
 
 	emac_hw_config_mac_ctrl(hw);
 
@@ -1499,4 +1525,21 @@ void emac_hw_set_mac_addr(struct emac_hw *hw, u8 *addr)
 	sta = (((u32)addr[0]) << 8) | (((u32)addr[1]));
 	emac_reg_w32(hw, EMAC, EMAC_MAC_STA_ADDR1, sta);
 	wmb();
+}
+
+/* Read one entry from the HW tx timestamp FIFO */
+bool emac_hw_read_tx_tstamp(struct emac_hw *hw, struct emac_hwtxtstamp *ts)
+{
+	u32 ts_idx;
+
+	ts_idx = emac_reg_r32(hw, EMAC_CSR, EMAC_EMAC_WRAPPER_TX_TS_INX);
+
+	if (ts_idx & EMAC_WRAPPER_TX_TS_EMPTY)
+		return false;
+
+	ts->ns = emac_reg_r32(hw, EMAC_CSR, EMAC_EMAC_WRAPPER_TX_TS_LO);
+	ts->sec = emac_reg_r32(hw, EMAC_CSR, EMAC_EMAC_WRAPPER_TX_TS_HI);
+	ts->ts_idx = ts_idx & EMAC_WRAPPER_TX_TS_INX_BMSK;
+
+	return true;
 }

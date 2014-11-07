@@ -34,8 +34,36 @@ struct handle_type {
 };
 
 static struct handle_type handle_list;
+struct list_head input_list;
+struct list_head apply_list;
 
 DEFINE_MUTEX(msm_bus_adhoc_lock);
+
+static bool chk_bl_list(struct list_head *black_list, unsigned int id)
+{
+	struct msm_bus_node_device_type *bus_node = NULL;
+
+	list_for_each_entry(bus_node, black_list, link) {
+		if (bus_node->node_info->id == id)
+			return true;
+	}
+	return false;
+}
+
+static void copy_remaining_nodes(struct list_head *edge_list, struct list_head
+	*traverse_list, struct list_head *route_list)
+{
+	struct bus_search_type *search_node;
+
+	if (list_empty(edge_list) && list_empty(traverse_list))
+		return;
+
+	search_node = kzalloc(sizeof(struct bus_search_type), GFP_KERNEL);
+	INIT_LIST_HEAD(&search_node->node_list);
+	list_splice_init(edge_list, traverse_list);
+	list_splice_init(traverse_list, &search_node->node_list);
+	list_add_tail(&search_node->link, route_list);
+}
 
 /*
  * Duplicate instantiaion from msm_bus_arb.c. Todo there needs to be a
@@ -84,6 +112,9 @@ static int gen_lnode(struct device *dev,
 	struct msm_bus_node_device_type *cur_dev = NULL;
 	int lnode_idx = -1;
 
+	if (!dev)
+		goto exit_gen_lnode;
+
 	cur_dev = dev->platform_data;
 	if (!cur_dev) {
 		MSM_BUS_ERR("%s: Null device ptr", __func__);
@@ -94,6 +125,9 @@ static int gen_lnode(struct device *dev,
 		cur_dev->lnode_list = devm_kzalloc(dev,
 				sizeof(struct link_node) * NUM_LNODES,
 								GFP_KERNEL);
+		if (!cur_dev->lnode_list)
+			goto exit_gen_lnode;
+
 		lnode = cur_dev->lnode_list;
 		cur_dev->num_lnodes = NUM_LNODES;
 		lnode_idx = 0;
@@ -176,15 +210,21 @@ exit_remove_lnode:
 	return ret;
 }
 
-static int prune_path(struct list_head *route_list, int dest, int src)
+static int prune_path(struct list_head *route_list, int dest, int src,
+				struct list_head *black_list, int found)
 {
-	struct bus_search_type *search_node;
+	struct bus_search_type *search_node, *temp_search_node;
 	struct msm_bus_node_device_type *bus_node;
+	struct list_head *bl_list;
+	struct list_head *temp_bl_list;
 	int search_dev_id = dest;
 	struct device *dest_dev = bus_find_device(&msm_bus_type, NULL,
 					(void *) &dest,
 					msm_bus_device_match_adhoc);
 	int lnode_hop = -1;
+
+	if (!found)
+		goto reset_links;
 
 	if (!dest_dev) {
 		MSM_BUS_ERR("%s: Can't find dest dev %d", __func__, dest);
@@ -192,6 +232,7 @@ static int prune_path(struct list_head *route_list, int dest, int src)
 	}
 
 	lnode_hop = gen_lnode(dest_dev, search_dev_id, lnode_hop);
+
 	list_for_each_entry_reverse(search_node, route_list, link) {
 		list_for_each_entry(bus_node, &search_node->node_list, link) {
 			unsigned int i;
@@ -199,39 +240,57 @@ static int prune_path(struct list_head *route_list, int dest, int src)
 									i++) {
 				if (bus_node->node_info->connections[i] ==
 								search_dev_id) {
-						dest_dev = bus_find_device(
-							&msm_bus_type,
-							NULL,
-							(void *)
-							&bus_node->node_info->
-								id,
+					dest_dev = bus_find_device(
+						&msm_bus_type,
+						NULL,
+						(void *)
+						&bus_node->node_info->
+						id,
 						msm_bus_device_match_adhoc);
-						lnode_hop = gen_lnode(dest_dev,
-								search_dev_id,
-								lnode_hop);
-						search_dev_id =
-							bus_node->node_info->id;
-						break;
+
+					if (!dest_dev) {
+						lnode_hop = -1;
+						goto reset_links;
+					}
+
+					lnode_hop = gen_lnode(dest_dev,
+							search_dev_id,
+							lnode_hop);
+					search_dev_id =
+						bus_node->node_info->id;
+					break;
 				}
 			}
 		}
 	}
+reset_links:
+	list_for_each_entry_safe(search_node, temp_search_node, route_list,
+									link) {
+			list_for_each_entry(bus_node, &search_node->node_list,
+									link)
+				bus_node->node_info->is_traversed = false;
 
-	list_for_each_entry_reverse(search_node, route_list, link) {
-		if (search_node->link.next != route_list) {
-			struct bus_search_type *del_node;
-			struct list_head *del_link;
-
-			del_link = search_node->link.next;
-			del_node = list_entry(del_link,
-					struct bus_search_type, link);
-			list_del(del_link);
-			kfree(del_node);
-		}
+			list_del(&search_node->link);
+			kfree(search_node);
 	}
+
+	list_for_each_safe(bl_list, temp_bl_list, black_list)
+		list_del(bl_list);
 
 exit_prune_path:
 	return lnode_hop;
+}
+
+static void setup_bl_list(struct msm_bus_node_device_type *node,
+				struct list_head *black_list)
+{
+	unsigned int i;
+
+	for (i = 0; i < node->node_info->num_blist; i++) {
+		struct msm_bus_node_device_type *bdev;
+		bdev = node->node_info->black_connections[i]->platform_data;
+		list_add_tail(&bdev->link, black_list);
+	}
 }
 
 static int getpath(int src, int dest)
@@ -239,6 +298,7 @@ static int getpath(int src, int dest)
 	struct list_head traverse_list;
 	struct list_head edge_list;
 	struct list_head route_list;
+	struct list_head black_list;
 	struct device *src_dev = bus_find_device(&msm_bus_type, NULL,
 					(void *) &src,
 					msm_bus_device_match_adhoc);
@@ -251,6 +311,7 @@ static int getpath(int src, int dest)
 	INIT_LIST_HEAD(&traverse_list);
 	INIT_LIST_HEAD(&edge_list);
 	INIT_LIST_HEAD(&route_list);
+	INIT_LIST_HEAD(&black_list);
 
 	if (!src_dev) {
 		MSM_BUS_ERR("%s: Cannot locate src dev %d", __func__, src);
@@ -262,7 +323,6 @@ static int getpath(int src, int dest)
 		MSM_BUS_ERR("%s:Fatal, Source dev %d not found", __func__, src);
 		goto exit_getpath;
 	}
-
 	list_add_tail(&src_node->link, &traverse_list);
 
 	while ((!found && !list_empty(&traverse_list))) {
@@ -270,35 +330,50 @@ static int getpath(int src, int dest)
 		/* Locate dest_id in the traverse list */
 		list_for_each_entry(bus_node, &traverse_list, link) {
 			if (bus_node->node_info->id == dest) {
-				MSM_BUS_DBG("%s: Dest found", __func__);
 				found = 1;
 				break;
 			}
 		}
 
 		if (!found) {
+			unsigned int i;
 			/* Setup the new edge list */
 			list_for_each_entry(bus_node, &traverse_list, link) {
-				unsigned int i;
-				for (i = 0;
-				i < bus_node->node_info->num_connections; i++) {
-					struct msm_bus_node_device_type
-								*node_conn;
+				/* Setup list of black-listed nodes */
+				setup_bl_list(bus_node, &black_list);
 
-					node_conn =
-					bus_node->node_info->dev_connections[i]
-								->platform_data;
-					list_add_tail(&node_conn->link,
-								&edge_list);
+				for (i = 0; i < bus_node->node_info->
+						num_connections; i++) {
+					bool skip;
+					struct msm_bus_node_device_type
+							*node_conn;
+					node_conn = bus_node->node_info->
+						dev_connections[i]->
+						platform_data;
+					if (node_conn->node_info->
+							is_traversed) {
+						MSM_BUS_ERR("Circ Path %d\n",
+						node_conn->node_info->id);
+						goto reset_traversed;
+					}
+					skip = chk_bl_list(&black_list,
+							bus_node->node_info->
+							connections[i]);
+					if (!skip) {
+						list_add_tail(&node_conn->link,
+							&edge_list);
+						node_conn->node_info->
+							is_traversed = true;
+					}
 				}
 			}
 
 			/* Keep tabs of the previous search list */
 			search_node = kzalloc(sizeof(struct bus_search_type),
-								GFP_KERNEL);
+					 GFP_KERNEL);
 			INIT_LIST_HEAD(&search_node->node_list);
 			list_splice_init(&traverse_list,
-						&search_node->node_list);
+					 &search_node->node_list);
 			/* Add the previous search list to a route list */
 			list_add_tail(&search_node->link, &route_list);
 			/* Advancing the list depth */
@@ -306,9 +381,9 @@ static int getpath(int src, int dest)
 			list_splice_init(&edge_list, &traverse_list);
 		}
 	}
-
-	if (found)
-		first_hop = prune_path(&route_list, dest, src);
+reset_traversed:
+	copy_remaining_nodes(&edge_list, &traverse_list, &route_list);
+	first_hop = prune_path(&route_list, dest, src, &black_list, found);
 
 exit_getpath:
 	return first_hop;
@@ -321,11 +396,29 @@ static uint64_t arbitrate_bus_req(struct msm_bus_node_device_type *bus_dev,
 	uint64_t max_ib = 0;
 	uint64_t sum_ab = 0;
 	uint64_t bw_max_hz;
+	struct msm_bus_node_device_type *fab_dev = NULL;
 
 	/* Find max ib */
 	for (i = 0; i < bus_dev->num_lnodes; i++) {
 		max_ib = max(max_ib, bus_dev->lnode_list[i].lnode_ib[ctx]);
 		sum_ab += bus_dev->lnode_list[i].lnode_ab[ctx];
+	}
+	/*
+	 *  Account for Util factor and vrail comp. The new aggregation
+	 *  formula is:
+	 *  Freq_hz = max((sum(ab) * util_fact)/num_chan, max(ib)/vrail_comp)
+	 *				/ bus-width
+	 *  util_fact and vrail comp are obtained from fabric's dts properties.
+	 *  They default to 100 if absent.
+	 */
+	fab_dev = bus_dev->node_info->bus_device->platform_data;
+
+	/* Don't do this for virtual fabrics */
+	if (fab_dev && fab_dev->fabdev) {
+		sum_ab *= fab_dev->fabdev->util_fact;
+		sum_ab = msm_bus_div64(100, sum_ab);
+		max_ib *= 100;
+		max_ib = msm_bus_div64(fab_dev->fabdev->vrail_comp, max_ib);
 	}
 
 	/* Account for multiple channels if any */
@@ -346,6 +439,94 @@ static uint64_t arbitrate_bus_req(struct msm_bus_node_device_type *bus_dev,
 	return bw_max_hz;
 }
 
+static void del_inp_list(struct list_head *list)
+{
+	struct rule_update_path_info *rule_node;
+	struct rule_update_path_info *rule_node_tmp;
+
+	list_for_each_entry_safe(rule_node, rule_node_tmp, list, link)
+		list_del(&rule_node->link);
+}
+
+static void del_op_list(struct list_head *list)
+{
+	struct rule_apply_rcm_info *rule;
+	struct rule_apply_rcm_info *rule_tmp;
+
+	list_for_each_entry_safe(rule, rule_tmp, list, link)
+		list_del(&rule->link);
+}
+
+static int msm_bus_apply_rules(struct list_head *list, bool after_clk_commit)
+{
+	struct rule_apply_rcm_info *rule;
+	struct device *dev = NULL;
+	struct msm_bus_node_device_type *dev_info = NULL;
+	int ret = 0;
+	bool throttle_en = false;
+
+	list_for_each_entry(rule, list, link) {
+		if (!rule)
+			continue;
+
+		if (rule && (rule->after_clk_commit != after_clk_commit))
+			continue;
+
+		dev = bus_find_device(&msm_bus_type, NULL,
+				(void *) &rule->id,
+				msm_bus_device_match_adhoc);
+
+		if (!dev) {
+			MSM_BUS_ERR("Can't find dev node for %d", rule->id);
+			continue;
+		}
+		dev_info = dev->platform_data;
+
+		throttle_en = ((rule->throttle == THROTTLE_ON) ? true : false);
+		ret = msm_bus_enable_limiter(dev_info, throttle_en,
+							rule->lim_bw);
+		if (ret)
+			MSM_BUS_ERR("Failed to set limiter for %d", rule->id);
+	}
+
+	return ret;
+}
+
+static uint64_t get_node_aggab(struct msm_bus_node_device_type *bus_dev)
+{
+	int i;
+	int ctx;
+	uint64_t max_agg_ab = 0;
+	uint64_t agg_ab = 0;
+
+	for (ctx = 0; ctx < NUM_CTX; ctx++) {
+		for (i = 0; i < bus_dev->num_lnodes; i++)
+			agg_ab += bus_dev->lnode_list[i].lnode_ab[ctx];
+
+		if (bus_dev->node_info->num_qports > 1)
+			agg_ab = msm_bus_div64(bus_dev->node_info->num_qports,
+							agg_ab);
+
+		max_agg_ab = max(max_agg_ab, agg_ab);
+	}
+
+	return max_agg_ab;
+}
+
+static uint64_t get_node_ib(struct msm_bus_node_device_type *bus_dev)
+{
+	int i;
+	int ctx;
+	uint64_t max_ib = 0;
+
+	for (ctx = 0; ctx < NUM_CTX; ctx++) {
+		for (i = 0; i < bus_dev->num_lnodes; i++)
+			max_ib = max(max_ib,
+				bus_dev->lnode_list[i].lnode_ib[ctx]);
+	}
+	return max_ib;
+}
+
 static int update_path(int src, int dest, uint64_t req_ib, uint64_t req_bw,
 			uint64_t cur_ib, uint64_t cur_bw, int src_idx, int ctx)
 {
@@ -357,6 +538,8 @@ static int update_path(int src, int dest, uint64_t req_ib, uint64_t req_bw,
 	int ret = 0;
 	int *dirty_nodes = NULL;
 	int num_dirty = 0;
+	struct rule_update_path_info *rule_node;
+	bool rules_registered = msm_rule_are_rules_registered();
 
 	src_dev = bus_find_device(&msm_bus_type, NULL,
 				(void *) &src,
@@ -376,6 +559,9 @@ static int update_path(int src, int dest, uint64_t req_ib, uint64_t req_bw,
 		goto exit_update_path;
 	}
 	curr_idx = src_idx;
+
+	INIT_LIST_HEAD(&input_list);
+	INIT_LIST_HEAD(&apply_list);
 
 	while (next_dev) {
 		dev_info = next_dev->platform_data;
@@ -415,11 +601,32 @@ static int update_path(int src, int dest, uint64_t req_ib, uint64_t req_bw,
 			goto exit_update_path;
 		}
 
+		if (rules_registered) {
+			rule_node = &dev_info->node_info->rule;
+			rule_node->id = dev_info->node_info->id;
+			rule_node->ib = get_node_ib(dev_info);
+			rule_node->ab = get_node_aggab(dev_info);
+			rule_node->clk = max(dev_info->cur_clk_hz[ACTIVE_CTX],
+						dev_info->cur_clk_hz[DUAL_CTX]);
+			list_add_tail(&rule_node->link, &input_list);
+		}
+
 		next_dev = lnode->next_dev;
 		curr_idx = lnode->next;
 	}
 
+	if (rules_registered) {
+		msm_rules_update_path(&input_list, &apply_list);
+		msm_bus_apply_rules(&apply_list, false);
+	}
+
 	msm_bus_commit_data(dirty_nodes, ctx, num_dirty);
+
+	if (rules_registered) {
+		msm_bus_apply_rules(&apply_list, true);
+		del_inp_list(&input_list);
+		del_op_list(&apply_list);
+	}
 exit_update_path:
 	return ret;
 }
@@ -537,12 +744,17 @@ static void unregister_client_adhoc(uint32_t cl)
 		goto exit_unregister_client;
 	}
 	client = handle_list.cl_list[cl];
-	curr = client->curr;
 	pdata = client->pdata;
 	if (!pdata) {
 		MSM_BUS_ERR("%s: Null pdata passed to unregister\n",
 				__func__);
 		goto exit_unregister_client;
+	}
+
+	curr = client->curr;
+	if (curr >= pdata->num_usecases) {
+		MSM_BUS_ERR("Invalid index Defaulting curr to 0");
+		curr = 0;
 	}
 
 	MSM_BUS_DBG("%s: Unregistering client %p", __func__, client);
@@ -554,10 +766,6 @@ static void unregister_client_adhoc(uint32_t cl)
 		lnode = client->src_pnode[i];
 		cur_clk = client->pdata->usecase[curr].vectors[i].ib;
 		cur_bw = client->pdata->usecase[curr].vectors[i].ab;
-		if (curr < 0) {
-			cur_clk = 0;
-			cur_bw = 0;
-		}
 		remove_path(src, dest, cur_clk, cur_bw, lnode,
 						pdata->active_only);
 	}
@@ -693,7 +901,7 @@ static int update_request_adhoc(uint32_t cl, unsigned int index)
 	int lnode, src, curr, dest;
 	uint64_t req_clk, req_bw, curr_clk, curr_bw;
 	struct msm_bus_client *client;
-	const char *test_cl = "test-client";
+	const char *test_cl = "Null";
 	bool log_transaction = false;
 
 	mutex_lock(&msm_bus_adhoc_lock);

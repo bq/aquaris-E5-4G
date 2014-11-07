@@ -60,6 +60,9 @@ static char *xport_to_str(enum transport_type t)
 
 static enum transport_type str_to_xport(const char *name)
 {
+	if (!name)
+		return USB_GADGET_XPORT_UNDEF;
+
 	if (!strncasecmp("TTY", name, XPORT_STR_LEN))
 		return USB_GADGET_XPORT_TTY;
 	if (!strncasecmp("SMD", name, XPORT_STR_LEN))
@@ -88,6 +91,7 @@ enum gadget_type {
 	USB_GADGET_SERIAL,
 	USB_GADGET_RMNET,
 	USB_GADGET_QDSS,
+	USB_GADGET_DPL,
 };
 #define NUM_QDSS_HSIC_PORTS 1
 #define NUM_RMNET_HSIC_PORTS 2
@@ -100,6 +104,9 @@ enum gadget_type {
 #define NUM_DUN_HSUART_PORTS 1
 #define NUM_HSUART_PORTS (NUM_RMNET_HSUART_PORTS \
 	+ NUM_DUN_HSUART_PORTS)
+#define DPL_QTI_CTRL_PORT_NO 4
+
+#define DPL_QTI_CTRL_PORT_NO 4
 
 int ghsic_ctrl_connect(void *, int);
 void ghsic_ctrl_disconnect(void *, int);
@@ -116,4 +123,10 @@ int ghsuart_ctrl_setup(unsigned int, enum gadget_type);
 int ghsuart_data_connect(void *, int);
 void ghsuart_data_disconnect(void *, int);
 int ghsuart_data_setup(unsigned int, enum gadget_type);
+
+int gqti_ctrl_connect(void *gr, u8 port_num, unsigned intf,
+		enum transport_type dxport, enum gadget_type gtype);
+void gqti_ctrl_disconnect(void *gr, u8 port_num);
+void gqti_ctrl_update_ipa_pipes(void *, u8 port_num, u32 ipa_prod,
+					u32 ipa_cons);
 #endif

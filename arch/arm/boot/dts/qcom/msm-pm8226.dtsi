@@ -96,7 +96,7 @@
 			qcom,cool-bat-mv = <4100>;
 			qcom,ibatmax-cool-ma = <350>;
 
-			qcom,chgr@1000 {
+			pm8226_chg_chgr: qcom,chgr@1000 {
 				status = "disabled";
 				reg = <0x1000 0x100>;
 				interrupts =	<0x0 0x10 0x0>,
@@ -440,20 +440,12 @@
 				label = "internal_rsense";
 				reg = <0>;
 				qcom,decimation = <0>;
-				qcom,pre-div-channel-scaling = <1>;
-				qcom,calibration-type = "absolute";
-				qcom,scale-function = <0>;
-				qcom,hw-settle-time = <0>;
 				qcom,fast-avg-setup = <0>;
 			};
 			chan@1 {
 				label = "external_rsense";
 				reg = <1>;
 				qcom,decimation = <0>;
-				qcom,pre-div-channel-scaling = <1>;
-				qcom,calibration-type = "absolute";
-				qcom,scale-function = <0>;
-				qcom,hw-settle-time = <0>;
 				qcom,fast-avg-setup = <0>;
 			};
 		};
@@ -484,7 +476,7 @@
 			qcom,temp_alarm-vadc = <&pm8226_vadc>;
 		};
 
-		qcom,pm8226_rtc {
+	        pm8x26_rtc: qcom,pm8226_rtc {
 			spmi-dev-container;
 			compatible = "qcom,qpnp-rtc";
 			#address-cells = <1>;
@@ -789,7 +781,7 @@
 			label = "wled";
 		};
 
-		pwm@b100 {
+		pm8226_pwm_1: pwm@b100 {
 			compatible = "qcom,qpnp-pwm";
 			reg = <0xb100 0x100>,
 			      <0xb042 0x7e>;
@@ -797,6 +789,7 @@
 			qcom,channel-id = <0>;
 			qcom,supported-sizes = <6>, <7>, <9>;
 			qcom,ramp-index = <0>;
+			#pwm-cells = <2>;
 		};
 
 		pwm@b200 {
@@ -807,6 +800,7 @@
 			qcom,channel-id = <1>;
 			qcom,supported-sizes = <6>, <7>, <9>;
 			qcom,ramp-index = <1>;
+			#pwm-cells = <2>;
 		};
 
 		pwm@b300 {
@@ -817,6 +811,7 @@
 			qcom,channel-id = <2>;
 			qcom,supported-sizes = <6>, <7>, <9>;
 			qcom,ramp-index = <2>;
+			#pwm-cells = <2>;
 		};
 
 		pwm@b400 {
@@ -827,6 +822,7 @@
 			qcom,channel-id = <3>;
 			qcom,supported-sizes = <6>, <7>, <9>;
 			qcom,ramp-index = <3>;
+			#pwm-cells = <2>;
 		};
 
 		pwm@b500 {
@@ -837,9 +833,10 @@
 			qcom,channel-id = <4>;
 			qcom,supported-sizes = <6>, <7>, <9>;
 			qcom,ramp-index = <4>;
+			#pwm-cells = <2>;
 		};
 
-		pwm@b600 {
+		pm8226_pwm_6: pwm@b600 {
 			compatible = "qcom,qpnp-pwm";
 			reg = <0xb600 0x100>,
 			      <0xb042 0x7e>;
@@ -847,6 +844,7 @@
 			qcom,channel-id = <5>;
 			qcom,supported-sizes = <6>, <7>, <9>;
 			qcom,ramp-index = <5>;
+			#pwm-cells = <2>;
 		};
 
 		regulator@8000 {
@@ -869,6 +867,7 @@
 			reg = <0xd300 0x100>;
 			label = "flash";
 			flash-boost-supply = <&pm8226_chg_boost>;
+			flash-wa-supply = <&pm8226_chg_chgr>;
 			pm8226_flash0: qcom,flash_0 {
 				qcom,max-current = <1000>;
 				qcom,default-state = "off";

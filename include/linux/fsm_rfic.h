@@ -20,6 +20,8 @@ void fsm9900_gluon_init(void);
 void fsm9900_rfic_init(void);
 void fsm9900_mtr_init(void);
 
+void mpll10_326_clk_init(void);
+void mpll10_345_clk_init(void);
 
 /*
  * Device interface
@@ -119,6 +121,12 @@ struct rfic_wfm_param {
 #define RFIC_IOCTL_WRITE_REGISTER_WITH_MASK \
 	_IOC(_IOC_WRITE, RFIC_IOCTL_MAGIC, 0x03, \
 		sizeof(struct rfic_write_register_mask_param *))
+#define RFIC_IOCTL_WRITE_PVC_REGISTER \
+	_IOC(_IOC_WRITE, RFIC_IOCTL_MAGIC, 0x04, \
+		sizeof(struct rfic_write_register_param *))
+#define RFIC_IOCTL_WRITE_PVC_REGISTER_WITH_BUS \
+	_IOC(_IOC_WRITE, RFIC_IOCTL_MAGIC, 0x05, \
+		sizeof(struct rfic_write_register_param *))
 #define RFIC_IOCTL_GET_GRFC \
 	_IOC(_IOC_WRITE, RFIC_IOCTL_MAGIC, 0x10, \
 		sizeof(struct rfic_grfc_param *))
@@ -149,6 +157,9 @@ struct rfic_wfm_param {
 #define BBIF_IOCTL_SET_ADC_BW \
 	_IOC(_IOC_WRITE, RFIC_IOCTL_MAGIC, 0x43, \
 		sizeof(struct bbif_bw_param *))
+#define BBIF_IOCTL_SET_ADC_CLK \
+	_IOC(_IOC_WRITE, RFIC_IOCTL_MAGIC, 0x44, \
+		sizeof(unsigned int *))
 #define RFIC_IOCTL_SET_LDO \
 	_IOC(_IOC_WRITE, RFIC_IOCTL_MAGIC, 0x50, \
 		sizeof(unsigned int *))

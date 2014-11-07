@@ -130,7 +130,7 @@ config KLM
 
 config MSM_AVTIMER
 	tristate "Avtimer Driver"
-	depends on MSM_QDSP6_APRV2
+	depends on MSM_QDSP6_APRV2 || MSM_QDSP6_APRV3
 	help
 		This driver gets the Q6 out of power collapsed state and
 		exposes ioctl control to read avtimer tick.
@@ -145,6 +145,25 @@ config SSM
 	  This driver uses Secure Channel Manager interface for trustzone
 	  communication and communicates with modem over SMD channel.
 
+config MSM_MHI
+	tristate "Modem Host Interface Driver"
+	help
+	  This kernel module is used to interact with PCIe endpoints
+	  supporting MHI protocol. MHI is a data transmission protocol
+	  involving communication between a host and a device over shared
+	  memory. The MHI driver manages the shared memory by use of logical
+	  unidirectional channels.
+
+config MSM_MHI_UCI
+	 tristate "MHI Usperspace Control Interface Driver"
+	 depends on MSM_MHI
+	 help
+	  This modules enables userspace software clients to communicate
+	  with devices supporting the MHI protocol. Userspace clients
+	  may open the device nodes exposed by MHI UCI and perform
+	  read, write and ioctl operations to communicate with the
+	  attached device.
+
 config QCA1530
 	tristate "QCA1530 SoC GNSS Driver"
 	depends on REGULATOR && OF
@@ -158,6 +177,17 @@ config QCA1530
 
 	  To compile this driver as a module, choose M here: the module
 	  will be called qca1530.
+
+config PFT
+	bool "Per-File-Tagger driver"
+	depends on SECURITY
+	default n
+	help
+		This driver is used for tagging enterprise files.
+		It is part of the Per-File-Encryption (PFE) feature.
+		The driver is tagging files when created by
+		registered application.
+		Tagged files are encrypted using the dm-req-crypt driver.
 
 config MSM_SPSS
 	tristate "MSM SPSS driver"
@@ -174,6 +204,16 @@ config MSM_BUS_SCALING
 		for the active devices needs without keeping the clocks at max
 		frequency when a slower speed is sufficient.
 
+config MSM_BUSPM_DEV
+	tristate "MSM Bus Performance Monitor Kernel Module"
+	depends on MSM_BUS_SCALING
+	default n
+	help
+	  This kernel module is used to mmap() hardware registers for the
+	  performance monitors, counters, etc. The module can also be used to
+	  allocate physical memory which is used by bus performance hardware to
+	  dump performance data
+
 config BUS_TOPOLOGY_ADHOC
 	bool "ad-hoc bus scaling topology"
 	default n
@@ -189,4 +229,17 @@ config MSM_UIM_HSL
 	  If you say yes to this option, support will be included for the
 	  built-in UIM interface on Qualcomm MSM family processors.
 
+config QPNP_HAPTIC
+	tristate "Haptic support for QPNP PMIC"
+	depends on OF_SPMI
+	help
+	  This option enables device driver support for the Haptic
+	  on the Qualcomm Technologies' QPNP PMICs. It uses the android
+	  timed-output framework.
+
+config QMP_CORE
+	tristate "QMP Core"
+	help
+		This option enables Qualcomm Malware Protection Sphinx component
+		to log on-device software API activity.
 endmenu

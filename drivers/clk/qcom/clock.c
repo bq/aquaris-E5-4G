@@ -42,6 +42,7 @@ struct handoff_vdd {
 static LIST_HEAD(handoff_vdd_list);
 
 static DEFINE_MUTEX(msm_clock_init_lock);
+LIST_HEAD(orphan_clk_list);
 
 /* Find the voltage level required for a given rate. */
 int find_vdd_level(struct clk *clk, unsigned long rate)
@@ -86,7 +87,7 @@ static int update_vdd(struct clk_vdd_class *vdd_class)
 	new_base = level * n_reg;
 	for (i = 0; i < vdd_class->num_regulators; i++) {
 		rc = regulator_set_voltage(r[i], uv[new_base + i],
-					   uv[max_lvl + i]);
+			vdd_class->use_max_uV ? INT_MAX : uv[max_lvl + i]);
 		if (rc)
 			goto set_voltage_fail;
 
@@ -117,16 +118,19 @@ enable_disable_fail:
 	 * previous voltage setting for r[i] first.
 	 */
 	if (ua) {
-		regulator_set_voltage(r[i], uv[cur_base + i], uv[max_lvl + i]);
+		regulator_set_voltage(r[i], uv[cur_base + i],
+			vdd_class->use_max_uV ? INT_MAX : uv[max_lvl + i]);
 		regulator_set_optimum_mode(r[i], ua[cur_base + i]);
 	}
 
 set_mode_fail:
-	regulator_set_voltage(r[i], uv[cur_base + i], uv[max_lvl + i]);
+	regulator_set_voltage(r[i], uv[cur_base + i],
+			vdd_class->use_max_uV ? INT_MAX : uv[max_lvl + i]);
 
 set_voltage_fail:
 	for (i--; i >= 0; i--) {
-		regulator_set_voltage(r[i], uv[cur_base + i], uv[max_lvl + i]);
+		regulator_set_voltage(r[i], uv[cur_base + i],
+			vdd_class->use_max_uV ? INT_MAX : uv[max_lvl + i]);
 		if (ua)
 			regulator_set_optimum_mode(r[i], ua[cur_base + i]);
 		if (cur_lvl == 0 || cur_lvl == vdd_class->num_levels)
@@ -557,17 +561,19 @@ long clk_round_rate(struct clk *clk, unsigned long rate)
 	if (IS_ERR_OR_NULL(clk))
 		return -EINVAL;
 
-	if (!clk->ops->round_rate)
-		return -ENOSYS;
-
 	for (i = 0; i < clk->num_fmax; i++)
 		fmax = max(fmax, clk->fmax[i]);
-
 	if (!fmax)
 		fmax = ULONG_MAX;
-
 	rate = min(rate, fmax);
-	rrate = clk->ops->round_rate(clk, rate);
+
+	if (clk->ops->round_rate)
+		rrate = clk->ops->round_rate(clk, rate);
+	else if (clk->rate)
+		rrate = clk->rate;
+	else
+		return -ENOSYS;
+
 	if (rrate > fmax)
 		return -EINVAL;
 	return rrate;
@@ -586,9 +592,30 @@ int clk_set_max_rate(struct clk *clk, unsigned long rate)
 }
 EXPORT_SYMBOL(clk_set_max_rate);
 
+int parent_to_src_sel(struct clk_src *parents, int num_parents, struct clk *p)
+{
+	int i;
+
+	for (i = 0; i < num_parents; i++) {
+		if (parents[i].src == p)
+			return parents[i].sel;
+	}
+
+	return -EINVAL;
+}
+EXPORT_SYMBOL(parent_to_src_sel);
+
+int clk_get_parent_sel(struct clk *c, struct clk *parent)
+{
+	return parent_to_src_sel(c->parents, c->num_parents, parent);
+}
+EXPORT_SYMBOL(clk_get_parent_sel);
+
 int clk_set_parent(struct clk *clk, struct clk *parent)
 {
 	int rc = 0;
+	if (IS_ERR_OR_NULL(clk))
+		return -EINVAL;
 
 	if (!clk->ops->set_parent && clk->parent == parent)
 		return 0;
@@ -649,6 +676,9 @@ static void vdd_class_init(struct clk_vdd_class *vdd)
 	if (!vdd)
 		return;
 
+	if (vdd->skip_handoff)
+		return;
+
 	list_for_each_entry(v, &handoff_vdd_list, list) {
 		if (v->vdd_class == vdd)
 			return;
@@ -673,7 +703,7 @@ static int __handoff_clk(struct clk *clk)
 {
 	enum handoff state = HANDOFF_DISABLED_CLK;
 	struct handoff_clk *h = NULL;
-	int rc;
+	int rc, i;
 
 	if (clk == NULL || clk->flags & CLKFLAG_INIT_DONE ||
 	    clk->flags & CLKFLAG_SKIP_HANDOFF)
@@ -681,6 +711,9 @@ static int __handoff_clk(struct clk *clk)
 
 	if (clk->flags & CLKFLAG_INIT_ERR)
 		return -ENXIO;
+
+	if (clk->flags & CLKFLAG_EPROBE_DEFER)
+		return -EPROBE_DEFER;
 
 	/* Handoff any 'depends' clock first. */
 	rc = __handoff_clk(clk->depends);
@@ -704,6 +737,12 @@ static int __handoff_clk(struct clk *clk)
 	rc = __handoff_clk(clk->parent);
 	if (rc)
 		goto err;
+
+	for (i = 0; i < clk->num_parents; i++) {
+		rc = __handoff_clk(clk->parents[i].src);
+		if (rc)
+			goto err;
+	}
 
 	if (clk->ops->handoff)
 		state = clk->ops->handoff(clk);
@@ -735,7 +774,17 @@ static int __handoff_clk(struct clk *clk)
 		pr_debug("Handed off %s rate=%lu\n", clk->dbg_name, clk->rate);
 	}
 
+	if (clk->init_rate && clk_set_rate(clk, clk->init_rate))
+		pr_err("failed to set an init rate of %lu on %s\n",
+			clk->init_rate, clk->dbg_name);
+	if (clk->always_on && clk->init_rate && clk_prepare_enable(clk))
+		pr_err("failed to enable always-on clock %s\n",
+			clk->dbg_name);
+
 	clk->flags |= CLKFLAG_INIT_DONE;
+	/* if the clk is on orphan list, remove it */
+	list_del_init(&clk->list);
+	clock_debug_register(clk);
 
 	return 0;
 
@@ -743,8 +792,14 @@ err_depends:
 	clk_disable_unprepare(clk->parent);
 err:
 	kfree(h);
-	clk->flags |= CLKFLAG_INIT_ERR;
-	pr_err("%s handoff failed (%d)\n", clk->dbg_name, rc);
+	if (rc == -EPROBE_DEFER) {
+		clk->flags |= CLKFLAG_EPROBE_DEFER;
+		if (list_empty(&clk->list))
+			list_add_tail(&clk->list, &orphan_clk_list);
+	} else {
+		pr_err("%s handoff failed (%d)\n", clk->dbg_name, rc);
+		clk->flags |= CLKFLAG_INIT_ERR;
+	}
 	return rc;
 }
 
@@ -758,7 +813,9 @@ err:
  */
 int msm_clock_register(struct clk_lookup *table, size_t size)
 {
-	int n = 0;
+	int n = 0, rc;
+	struct clk *c, *safe;
+	bool found_more_clks;
 
 	mutex_lock(&msm_clock_init_lock);
 
@@ -778,12 +835,26 @@ int msm_clock_register(struct clk_lookup *table, size_t size)
 	 * Detect and preserve initial clock state until clock_late_init() or
 	 * a driver explicitly changes it, whichever is first.
 	 */
+
 	for (n = 0; n < size; n++)
 		__handoff_clk(table[n].clk);
 
-	clkdev_add_table(table, size);
+	/* maintain backwards compatibility */
+	if (table[0].con_id || table[0].dev_id)
+		clkdev_add_table(table, size);
 
-	clock_debug_register(table, size);
+	do {
+		found_more_clks = false;
+		/* clear cached __handoff_clk return values */
+		list_for_each_entry_safe(c, safe, &orphan_clk_list, list)
+			c->flags &= ~CLKFLAG_EPROBE_DEFER;
+
+		list_for_each_entry_safe(c, safe, &orphan_clk_list, list) {
+			rc = __handoff_clk(c);
+			if (!rc)
+				found_more_clks = true;
+		}
+	} while (found_more_clks);
 
 	mutex_unlock(&msm_clock_init_lock);
 

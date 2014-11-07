@@ -197,17 +197,8 @@ static int msm_iommu_parse_dt(struct platform_device *pdev,
 	if (ret)
 		goto fail;
 
-	for_each_child_of_node(pdev->dev.of_node, child)
+	for_each_available_child_of_node(pdev->dev.of_node, child)
 		drvdata->ncb++;
-
-	drvdata->asid = devm_kzalloc(&pdev->dev, drvdata->ncb * sizeof(int),
-				     GFP_KERNEL);
-
-	if (!drvdata->asid) {
-		pr_err("Unable to get memory for asid array\n");
-		ret = -ENOMEM;
-		goto fail;
-	}
 
 	ret = of_property_read_string(pdev->dev.of_node, "label",
 				      &drvdata->name);
@@ -491,6 +482,7 @@ static int msm_iommu_ctx_parse_dt(struct platform_device *pdev,
 	int irq = 0, ret = 0;
 	struct msm_iommu_drvdata *drvdata;
 	u32 nsid;
+	u32 n_sid_mask;
 	unsigned long cb_offset;
 
 	drvdata = dev_get_drvdata(pdev->dev.parent);
@@ -566,6 +558,26 @@ static int msm_iommu_ctx_parse_dt(struct platform_device *pdev,
 	ctx_drvdata->nsid = nsid;
 
 	ctx_drvdata->asid = -1;
+
+	if (!of_get_property(pdev->dev.of_node, "qcom,iommu-sid-mask",
+						&n_sid_mask)) {
+		memset(ctx_drvdata->sid_mask, 0, MAX_NUM_SMR);
+		goto out;
+	}
+
+	if (n_sid_mask != nsid) {
+		ret = -EINVAL;
+		goto out;
+	}
+
+	if (of_property_read_u32_array(pdev->dev.of_node, "qcom,iommu-sid-mask",
+				ctx_drvdata->sid_mask,
+				n_sid_mask / sizeof(*ctx_drvdata->sid_mask))) {
+		ret = -EINVAL;
+		goto out;
+	}
+	ctx_drvdata->n_sid_mask = n_sid_mask;
+
 out:
 	return ret;
 }

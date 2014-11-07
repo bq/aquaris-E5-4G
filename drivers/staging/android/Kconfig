@@ -19,6 +19,13 @@ config ANDROID_BINDER_IPC
 	  Android process, using Binder to identify, invoke and pass arguments
 	  between said processes.
 
+config ANDROID_BINDER_IPC_32BIT
+	bool "Use old 32-bit binder api"
+	default y if !64BIT
+	---help---
+	  Enable to support an old 32-bit Android user-space. Breaks the new
+	  Android user-space.
+
 config ASHMEM
 	bool "Enable the Anonymous Shared Memory Subsystem"
 	default n
@@ -125,7 +132,15 @@ config ONESHOT_SYNC
 	  sync objects created by this driver may be signaled in any order
 	  without changing the state of other sync objects on the timeline.
 
+config ONESHOT_SYNC_USER
+	bool "Userspace API for ONESHOT_SYNC"
+	depends on SYNC
+	help
+	  Provide a userspace API for creating oneshot sync objects.
+
 source "drivers/staging/android/ion/Kconfig"
+
+source "drivers/staging/android/fiq_debugger/Kconfig"
 
 endif # if ANDROID
 

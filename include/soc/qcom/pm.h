@@ -20,6 +20,7 @@
 #include <linux/types.h>
 #include <linux/cpuidle.h>
 #include <asm/smp_plat.h>
+#include <asm/barrier.h>
 
 #if !defined(CONFIG_SMP)
 #define msm_secondary_startup NULL
@@ -61,7 +62,15 @@ struct msm_pm_sleep_status_data {
 	uint32_t mask;
 };
 
-int msm_pm_mode_sysfs_add(const char *);
+/**
+ * lpm_cpu_pre_pc_cb(): API to get the L2 flag to pass to TZ
+ *
+ * @cpu: cpuid of the CPU going down.
+ *
+ * Returns the l2 flush flag enum that is passed down to TZ during power
+ * collaps
+ */
+enum msm_pm_l2_scm_flag lpm_cpu_pre_pc_cb(unsigned int cpu);
 
 /**
  * msm_pm_sleep_mode_allow() - API to determine if sleep mode is allowed.
@@ -98,13 +107,17 @@ struct msm_pm_cpr_ops {
 void __init msm_pm_set_tz_retention_flag(unsigned int flag);
 void msm_pm_enable_retention(bool enable);
 bool msm_pm_retention_enabled(void);
-void msm_cpu_pm_enter_sleep(enum msm_pm_sleep_mode mode, bool from_idle);
+bool msm_cpu_pm_enter_sleep(enum msm_pm_sleep_mode mode, bool from_idle);
+static inline void msm_arch_idle(void)
+{
+	mb();
+	wfi();
+}
 
 #ifdef CONFIG_MSM_PM
 void msm_pm_set_rpm_wakeup_irq(unsigned int irq);
 int msm_pm_wait_cpu_shutdown(unsigned int cpu);
 int __init msm_pm_sleep_status_init(void);
-void msm_pm_set_l2_flush_flag(enum msm_pm_l2_scm_flag flag);
 void lpm_cpu_hotplug_enter(unsigned int cpu);
 s32 msm_cpuidle_get_deep_idle_latency(void);
 int msm_pm_collapse(unsigned long unused);
@@ -112,8 +125,12 @@ int msm_pm_collapse(unsigned long unused);
 static inline void msm_pm_set_rpm_wakeup_irq(unsigned int irq) {}
 static inline int msm_pm_wait_cpu_shutdown(unsigned int cpu) { return 0; }
 static inline int msm_pm_sleep_status_init(void) { return 0; };
-static inline void msm_pm_set_l2_flush_flag(unsigned int flag) { }
-static inline void lpm_cpu_hotplug_enter(unsigned int cpu) {};
+
+static inline void lpm_cpu_hotplug_enter(unsigned int cpu)
+{
+	msm_arch_idle();
+};
+
 static inline s32 msm_cpuidle_get_deep_idle_latency(void) { return 0; }
 #define msm_pm_collapse NULL
 #endif
@@ -151,5 +168,5 @@ static inline void msm_pm_l2_add_stat(uint32_t id, int64_t t) {}
 #endif
 
 void msm_pm_set_cpr_ops(struct msm_pm_cpr_ops *ops);
-extern unsigned long msm_pc_debug_counters_phys;
+extern dma_addr_t msm_pc_debug_counters_phys;
 #endif  /* __ARCH_ARM_MACH_MSM_PM_H */

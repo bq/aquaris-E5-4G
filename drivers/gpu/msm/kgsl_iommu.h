@@ -14,13 +14,9 @@
 #define __KGSL_IOMMU_H
 
 #include <linux/qcom_iommu.h>
+#include "kgsl.h"
 
 /* Pagetable virtual base */
-#define KGSL_PAGETABLE_BASE     0x10000000
-#define KGSL_PER_PROCESS_PT_BASE	0xC0000000
-#define KGSL_PER_PROCESS_PT_SIZE	(KGSL_IOMMU_GLOBAL_MEM_BASE -	\
-					 KGSL_PER_PROCESS_PT_BASE - SZ_1M)
-
 #define KGSL_IOMMU_CTX_OFFSET_V0	0
 #define KGSL_IOMMU_CTX_OFFSET_V1	0x8000
 #define KGSL_IOMMU_CTX_OFFSET_V2	0x9000
@@ -28,6 +24,7 @@
 
 /* IOMMU V2 AHB base is fixed */
 #define KGSL_IOMMU_V2_AHB_BASE		0xA000
+#define KGSL_IOMMU_V2_AHB_BASE_A405  0x48000
 /* IOMMU_V2 AHB base points to ContextBank1 */
 #define KGSL_IOMMU_CTX_AHB_OFFSET_V2   0
 
@@ -82,6 +79,7 @@ enum kgsl_iommu_reg_map {
 	KGSL_IOMMU_CTX_TTBR0,
 	KGSL_IOMMU_CTX_TTBR1,
 	KGSL_IOMMU_CTX_FSR,
+	KGSL_IOMMU_CTX_FAR,
 	KGSL_IOMMU_CTX_TLBIALL,
 	KGSL_IOMMU_CTX_RESUME,
 	KGSL_IOMMU_CTX_TLBLKCR,
@@ -103,14 +101,20 @@ struct kgsl_iommu_register_list {
  * Max number of iommu units that the gpu core can have
  * On APQ8064, KGSL can control a maximum of 2 IOMMU units.
  */
-#define KGSL_IOMMU_MAX_UNITS 2
+enum kgsl_iommu_units {
+	KGSL_IOMMU_UNIT_0 = 0,
+	KGSL_IOMMU_UNIT_1 = 1,
+	KGSL_IOMMU_MAX_UNITS = 2,
+};
 
-/* Max number of iommu contexts per IOMMU unit */
-#define KGSL_IOMMU_MAX_DEVS_PER_UNIT 2
+/* Max number of iommu clks per IOMMU unit */
+#define KGSL_IOMMU_MAX_CLKS 4
 
 enum kgsl_iommu_context_id {
 	KGSL_IOMMU_CONTEXT_USER = 0,
 	KGSL_IOMMU_CONTEXT_PRIV = 1,
+	KGSL_IOMMU_CONTEXT_SECURE = 2,
+	KGSL_IOMMU_CONTEXT_MAX = 3,
 };
 
 /**
@@ -128,14 +132,12 @@ struct kgsl_iommu_ctx {
  * from dtsi file
  * @iommu_ctxs:         Pointer to array of struct holding context name and id
  * @iommu_ctx_count:    Number of contexts defined in the dtsi file
- * @iommu_halt_enable:  Indicates if smmu halt h/w feature is supported
  * @physstart:          Start of iommu registers physical address
  * @physend:            End of iommu registers physical address
  */
 struct kgsl_device_iommu_data {
 	const struct kgsl_iommu_ctx *iommu_ctxs;
 	int iommu_ctx_count;
-	int iommu_halt_enable;
 	unsigned int physstart;
 	unsigned int physend;
 };
@@ -169,18 +171,6 @@ struct kgsl_device_iommu_data {
 		(ctx << KGSL_IOMMU_CTX_SHIFT) +				\
 		iommu->ctx_offset)
 
-#ifdef CONFIG_IOMMU_LPAE
-#define KGSL_IOMMU_GET_CTX_REG_TTBR0(iommu, iommu_unit, ctx)		\
-		KGSL_IOMMU_GET_CTX_REG_Q(iommu, iommu_unit, ctx, TTBR0)
-#define KGSL_IOMMU_SET_CTX_REG_TTBR0(iommu, iommu_unit, ctx, val)	\
-		KGSL_IOMMU_SET_CTX_REG_Q(iommu, iommu_unit, ctx, TTBR0, val)
-#else
-#define KGSL_IOMMU_GET_CTX_REG_TTBR0(iommu, iommu_unit, ctx)		\
-		KGSL_IOMMU_GET_CTX_REG(iommu, iommu_unit, ctx, TTBR0)
-#define KGSL_IOMMU_SET_CTX_REG_TTBR0(iommu, iommu_unit, ctx, val)	\
-		KGSL_IOMMU_SET_CTX_REG(iommu, iommu_unit, ctx, TTBR0, val)
-#endif
-
 /* Gets the lsb value of pagetable */
 #define KGSL_IOMMMU_PT_LSB(iommu, pt_val)				\
 	(pt_val & ~(KGSL_IOMMU_CTX_TTBR0_ADDR_MASK))
@@ -199,7 +189,6 @@ struct kgsl_device_iommu_data {
  * are on, else the clocks are off
  * fault: Flag when set indicates that this iommu device has caused a page
  * fault
- * @clk_enable_count: The ref count of clock enable calls
  */
 struct kgsl_iommu_device {
 	struct device *dev;
@@ -209,7 +198,6 @@ struct kgsl_iommu_device {
 	bool clk_enabled;
 	struct kgsl_device *kgsldev;
 	int fault;
-	atomic_t clk_enable_count;
 };
 
 /*
@@ -225,13 +213,17 @@ struct kgsl_iommu_device {
  * @iommu_halt_enable: Valid only on IOMMU-v1, when set indicates that the iommu
  * unit supports halting of the IOMMU, which can be enabled while programming
  * the IOMMU registers for synchronization
+ * @clk_enable_count: The ref count of clock enable calls
+ * @clks: iommu unit clks
  */
 struct kgsl_iommu_unit {
-	struct kgsl_iommu_device dev[KGSL_IOMMU_MAX_DEVS_PER_UNIT];
+	struct kgsl_iommu_device dev[KGSL_IOMMU_CONTEXT_MAX];
 	unsigned int dev_count;
 	struct kgsl_memdesc reg_map;
 	unsigned int ahb_base;
 	int iommu_halt_enable;
+	atomic_t clk_enable_count;
+	struct clk *clks[KGSL_IOMMU_MAX_CLKS];
 };
 
 /*
@@ -254,6 +246,7 @@ struct kgsl_iommu_unit {
  * variables are located
  * @sync_lock_initialized: True if the sync_lock feature is enabled
  * @gtcu_iface_clk: The gTCU AHB Clock connected to SMMU
+ * @events: The event group for iommu events
  */
 struct kgsl_iommu {
 	struct kgsl_iommu_unit iommu_units[KGSL_IOMMU_MAX_UNITS];
@@ -277,20 +270,6 @@ struct kgsl_iommu {
 struct kgsl_iommu_pt {
 	struct iommu_domain *domain;
 	struct kgsl_iommu *iommu;
-};
-
-/*
- * struct kgsl_iommu_disable_clk_param - Parameter struct for disble clk event
- * @mmu: The mmu pointer
- * @rb_level: the rb level in which the timestamp of the event belongs to
- * @ctx_id: The IOMMU context whose clock is to be turned off
- * @ts: Timestamp on which clock is to be disabled
- */
-struct kgsl_iommu_disable_clk_param {
-	struct kgsl_mmu *mmu;
-	int rb_level;
-	int ctx_id;
-	unsigned int ts;
 };
 
 /*

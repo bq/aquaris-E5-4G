@@ -12,6 +12,7 @@
 #ifndef __Q6AFE_V2_H__
 #define __Q6AFE_V2_H__
 #include <sound/apr_audio-v2.h>
+#include <linux/qdsp6v2/rtac.h>
 
 #define IN			0x000
 #define OUT			0x001
@@ -89,7 +90,7 @@ enum {
 	IDX_SPDIF_RX = 47,
 	IDX_GLOBAL_CFG,
 	IDX_AUDIO_PORT_ID_I2S_RX,
-	IDX_AFE_PORT_ID_SECONDARY_MI2S_RX_VIBRA,
+	IDX_AFE_PORT_ID_SECONDARY_MI2S_RX_SD1,
 	AFE_MAX_PORTS
 };
 
@@ -222,4 +223,6 @@ bool afe_has_config(enum afe_config_type config);
 void afe_set_aanc_info(struct aanc_data *aanc_info);
 int afe_port_group_set_param(u16 *port_id, int channel_count);
 int afe_port_group_enable(u16 enable);
+int afe_unmap_rtac_block(uint32_t *mem_map_handle);
+int afe_map_rtac_block(struct rtac_cal_block_data *cal_block);
 #endif /* __Q6AFE_V2_H__ */

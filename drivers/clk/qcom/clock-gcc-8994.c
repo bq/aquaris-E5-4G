@@ -83,8 +83,9 @@ static DEFINE_VDD_REGULATORS(vdd_dig, VDD_DIG_NUM, 1, vdd_corner, NULL);
 #define USB_HS_SYSTEM_CBCR                               (0x0484)
 #define USB_HS_AHB_CBCR                                  (0x0488)
 #define USB_HS_SYSTEM_CMD_RCGR                           (0x0490)
-#define USB2_HS_PHY_BCR                                  (0x04A8)
 #define USB2_HS_PHY_SLEEP_CBCR                           (0x04AC)
+#define USB2_HS_PHY_ONLY_BCR                             (0x04B0)
+#define QUSB2_PHY_BCR                                    (0x04B8)
 #define USB_PHY_CFG_AHB2PHY_CBCR                         (0x1A84)
 #define SDCC1_APPS_CMD_RCGR                              (0x04D0)
 #define SDCC1_APPS_CBCR                                  (0x04C4)
@@ -196,7 +197,6 @@ static DEFINE_VDD_REGULATORS(vdd_dig, VDD_DIG_NUM, 1, vdd_corner, NULL);
 #define GP3_CBCR                                         (0x1980)
 #define GP3_CMD_RCGR                                     (0x1984)
 #define GPLL4_MODE                                       (0x1DC0)
-#define PCIE_0_BCR                                       (0x1AC0)
 #define PCIE_0_SLV_AXI_CBCR                              (0x1AC8)
 #define PCIE_0_MSTR_AXI_CBCR                             (0x1ACC)
 #define PCIE_0_CFG_AHB_CBCR                              (0x1AD0)
@@ -204,7 +204,8 @@ static DEFINE_VDD_REGULATORS(vdd_dig, VDD_DIG_NUM, 1, vdd_corner, NULL);
 #define PCIE_0_PIPE_CBCR                                 (0x1AD8)
 #define PCIE_0_PIPE_CMD_RCGR                             (0x1ADC)
 #define PCIE_0_AUX_CMD_RCGR                              (0x1B00)
-#define PCIE_1_BCR                                       (0x1B40)
+#define PCIE_PHY_0_PHY_BCR                               (0x1B14)
+#define PCIE_PHY_0_BCR                                   (0x1B18)
 #define PCIE_1_SLV_AXI_CBCR                              (0x1B48)
 #define PCIE_1_MSTR_AXI_CBCR                             (0x1B4C)
 #define PCIE_1_CFG_AHB_CBCR                              (0x1B50)
@@ -212,6 +213,8 @@ static DEFINE_VDD_REGULATORS(vdd_dig, VDD_DIG_NUM, 1, vdd_corner, NULL);
 #define PCIE_1_PIPE_CBCR                                 (0x1B58)
 #define PCIE_1_PIPE_CMD_RCGR                             (0x1B5C)
 #define PCIE_1_AUX_CMD_RCGR                              (0x1B80)
+#define PCIE_PHY_1_PHY_BCR                               (0x1B94)
+#define PCIE_PHY_1_BCR                                   (0x1B98)
 #define UFS_AXI_CBCR                                     (0x1D48)
 #define UFS_AHB_CBCR                                     (0x1D4C)
 #define UFS_TX_CFG_CBCR                                  (0x1D50)
@@ -231,6 +234,7 @@ DEFINE_EXT_CLK(gcc_xo, NULL);
 DEFINE_EXT_CLK(gcc_xo_a_clk, NULL);
 DEFINE_EXT_CLK(debug_mmss_clk, NULL);
 DEFINE_EXT_CLK(debug_rpm_clk, NULL);
+DEFINE_EXT_CLK(debug_cpu_clk, NULL);
 
 static unsigned int soft_vote_gpll0;
 
@@ -286,10 +290,21 @@ static struct pll_vote_clk gpll4 = {
 		CLK_INIT(gpll4.c),
 	},
 };
-DEFINE_EXT_CLK(gpll4_out_main, &gpll4.c);
+DEFINE_FIXED_SLAVE_DIV_CLK(gpll4_out_main, 4, &gpll4.c);
 
 static struct clk_freq_tbl ftbl_ufs_axi_clk_src[] = {
+	F(  50000000, gpll0_out_main,   12,    0,     0),
 	F( 100000000, gpll0_out_main,    6,    0,     0),
+	F( 150000000, gpll0_out_main,    4,    0,     0),
+	F( 171430000, gpll0_out_main,  3.5,    0,     0),
+	F_END
+};
+
+static struct clk_freq_tbl ftbl_ufs_axi_clk_src_v2[] = {
+	F(  50000000, gpll0_out_main,   12,    0,     0),
+	F( 100000000, gpll0_out_main,    6,    0,     0),
+	F( 150000000, gpll0_out_main,    4,    0,     0),
+	F( 171430000, gpll0_out_main,  3.5,    0,     0),
 	F( 200000000, gpll0_out_main,    3,    0,     0),
 	F( 240000000, gpll0_out_main,  2.5,    0,     0),
 	F_END
@@ -305,12 +320,13 @@ static struct rcg_clk ufs_axi_clk_src = {
 		.dbg_name = "ufs_axi_clk_src",
 		.ops = &clk_ops_rcg_mnd,
 		VDD_DIG_FMAX_MAP4(LOWER, 50000000, LOW, 100000000,
-				  NOMINAL, 200000000, HIGH, 240000000),
+				  NOMINAL, 150000000, HIGH, 171430000),
 		CLK_INIT(ufs_axi_clk_src.c),
 	},
 };
 
 static struct clk_freq_tbl ftbl_usb30_master_clk_src[] = {
+	F(  19200000,         gcc_xo,    1,    0,     0),
 	F( 125000000, gpll0_out_main,    1,    5,    24),
 	F_END
 };
@@ -349,13 +365,28 @@ static struct rcg_clk blsp1_qup1_i2c_apps_clk_src = {
 	},
 };
 
-static struct clk_freq_tbl ftbl_blsp_spi_apps_clk_src[] = {
+static struct clk_freq_tbl ftbl_blspqup_spi_apps_clk_src_v2[] = {
 	F(    960000,         gcc_xo,   10,    1,     2),
 	F(   4800000,         gcc_xo,    4,    0,     0),
 	F(   9600000,         gcc_xo,    2,    0,     0),
 	F(  15000000, gpll0_out_main,   10,    1,     4),
 	F(  19200000,         gcc_xo,    1,    0,     0),
+	F(  24000000, gpll0_out_main, 12.5,    1,     2),
 	F(  25000000, gpll0_out_main,   12,    1,     2),
+	F(  48000000, gpll0_out_main, 12.5,    0,     0),
+	F(  50000000, gpll0_out_main,   12,    0,     0),
+	F_END
+};
+
+static struct clk_freq_tbl ftbl_blsp1_qup1_spi_apps_clk_src[] = {
+	F(    960000,         gcc_xo,   10,    1,     2),
+	F(   4800000,         gcc_xo,    4,    0,     0),
+	F(   9600000,         gcc_xo,    2,    0,     0),
+	F(  15000000, gpll0_out_main,   10,    1,     4),
+	F(  19200000,         gcc_xo,    1,    0,     0),
+	F(  24000000, gpll0_out_main, 12.5,    1,     2),
+	F(  25000000, gpll0_out_main,   12,    1,     2),
+	F(  48000000, gpll0_out_main, 12.5,    0,     0),
 	F(  50000000, gpll0_out_main,   12,    0,     0),
 	F_END
 };
@@ -363,14 +394,14 @@ static struct clk_freq_tbl ftbl_blsp_spi_apps_clk_src[] = {
 static struct rcg_clk blsp1_qup1_spi_apps_clk_src = {
 	.cmd_rcgr_reg = BLSP1_QUP1_SPI_APPS_CMD_RCGR,
 	.set_rate = set_rate_mnd,
-	.freq_tbl = ftbl_blsp_spi_apps_clk_src,
+	.freq_tbl = ftbl_blsp1_qup1_spi_apps_clk_src,
 	.current_freq = &rcg_dummy_freq,
 	.base = &virt_base,
 	.c = {
 		.dbg_name = "blsp1_qup1_spi_apps_clk_src",
 		.ops = &clk_ops_rcg_mnd,
-		VDD_DIG_FMAX_MAP3(LOWER, 12500000, LOW, 25000000,
-				  NOMINAL, 50000000),
+		VDD_DIG_FMAX_MAP4(LOWER, 12500000, LOW, 25000000,
+				  NOMINAL, 48000000, HIGH, 50000000),
 		CLK_INIT(blsp1_qup1_spi_apps_clk_src.c),
 	},
 };
@@ -389,17 +420,30 @@ static struct rcg_clk blsp1_qup2_i2c_apps_clk_src = {
 	},
 };
 
+static struct clk_freq_tbl ftbl_blsp1_qup2_spi_apps_clk_src[] = {
+	F(    960000,         gcc_xo,   10,    1,     2),
+	F(   4800000,         gcc_xo,    4,    0,     0),
+	F(   9600000,         gcc_xo,    2,    0,     0),
+	F(  15000000, gpll0_out_main,   10,    1,     4),
+	F(  19200000,         gcc_xo,    1,    0,     0),
+	F(  24000000, gpll0_out_main, 12.5,    1,     2),
+	F(  25000000, gpll0_out_main,   12,    1,     2),
+	F(  42860000, gpll0_out_main,   14,    0,     0),
+	F(  46150000, gpll0_out_main,   13,    0,     0),
+	F_END
+};
+
 static struct rcg_clk blsp1_qup2_spi_apps_clk_src = {
 	.cmd_rcgr_reg = BLSP1_QUP2_SPI_APPS_CMD_RCGR,
 	.set_rate = set_rate_mnd,
-	.freq_tbl = ftbl_blsp_spi_apps_clk_src,
+	.freq_tbl = ftbl_blsp1_qup2_spi_apps_clk_src,
 	.current_freq = &rcg_dummy_freq,
 	.base = &virt_base,
 	.c = {
 		.dbg_name = "blsp1_qup2_spi_apps_clk_src",
 		.ops = &clk_ops_rcg_mnd,
-		VDD_DIG_FMAX_MAP3(LOWER, 12500000, LOW, 25000000,
-				  NOMINAL, 50000000),
+		VDD_DIG_FMAX_MAP4(LOWER, 12500000, LOW, 25000000,
+				  NOMINAL, 42860000, HIGH, 46150000),
 		CLK_INIT(blsp1_qup2_spi_apps_clk_src.c),
 	},
 };
@@ -418,17 +462,30 @@ static struct rcg_clk blsp1_qup3_i2c_apps_clk_src = {
 	},
 };
 
+static struct clk_freq_tbl ftbl_blsp1_qup3_spi_apps_clk_src[] = {
+	F(    960000,         gcc_xo,   10,    1,     2),
+	F(   4800000,         gcc_xo,    4,    0,     0),
+	F(   9600000,         gcc_xo,    2,    0,     0),
+	F(  15000000, gpll0_out_main,   10,    1,     4),
+	F(  19200000,         gcc_xo,    1,    0,     0),
+	F(  24000000, gpll0_out_main, 12.5,    1,     2),
+	F(  25000000, gpll0_out_main,   12,    1,     2),
+	F(  42860000, gpll0_out_main,   14,    0,     0),
+	F(  44440000, gpll0_out_main, 13.5,    0,     0),
+	F_END
+};
+
 static struct rcg_clk blsp1_qup3_spi_apps_clk_src = {
 	.cmd_rcgr_reg = BLSP1_QUP3_SPI_APPS_CMD_RCGR,
 	.set_rate = set_rate_mnd,
-	.freq_tbl = ftbl_blsp_spi_apps_clk_src,
+	.freq_tbl = ftbl_blsp1_qup3_spi_apps_clk_src,
 	.current_freq = &rcg_dummy_freq,
 	.base = &virt_base,
 	.c = {
 		.dbg_name = "blsp1_qup3_spi_apps_clk_src",
 		.ops = &clk_ops_rcg_mnd,
-		VDD_DIG_FMAX_MAP3(LOWER, 12500000, LOW, 25000000,
-				  NOMINAL, 50000000),
+		VDD_DIG_FMAX_MAP4(LOWER, 12500000, LOW, 25000000,
+				  NOMINAL, 42860000, HIGH, 44440000),
 		CLK_INIT(blsp1_qup3_spi_apps_clk_src.c),
 	},
 };
@@ -447,17 +504,30 @@ static struct rcg_clk blsp1_qup4_i2c_apps_clk_src = {
 	},
 };
 
+static struct clk_freq_tbl ftbl_blsp1_qup4_spi_apps_clk_src[] = {
+	F(    960000,         gcc_xo,   10,    1,     2),
+	F(   4800000,         gcc_xo,    4,    0,     0),
+	F(   9600000,         gcc_xo,    2,    0,     0),
+	F(  15000000, gpll0_out_main,   10,    1,     4),
+	F(  19200000,         gcc_xo,    1,    0,     0),
+	F(  24000000, gpll0_out_main, 12.5,    1,     2),
+	F(  25000000, gpll0_out_main,   12,    1,     2),
+	F(  42860000, gpll0_out_main,   14,    0,     0),
+	F(  44440000, gpll0_out_main, 13.5,    0,     0),
+	F_END
+};
+
 static struct rcg_clk blsp1_qup4_spi_apps_clk_src = {
 	.cmd_rcgr_reg = BLSP1_QUP4_SPI_APPS_CMD_RCGR,
 	.set_rate = set_rate_mnd,
-	.freq_tbl = ftbl_blsp_spi_apps_clk_src,
+	.freq_tbl = ftbl_blsp1_qup4_spi_apps_clk_src,
 	.current_freq = &rcg_dummy_freq,
 	.base = &virt_base,
 	.c = {
 		.dbg_name = "blsp1_qup4_spi_apps_clk_src",
 		.ops = &clk_ops_rcg_mnd,
-		VDD_DIG_FMAX_MAP3(LOWER, 12500000, LOW, 25000000,
-				  NOMINAL, 50000000),
+		VDD_DIG_FMAX_MAP4(LOWER, 12500000, LOW, 25000000,
+				  NOMINAL, 42860000, HIGH, 44440000),
 		CLK_INIT(blsp1_qup4_spi_apps_clk_src.c),
 	},
 };
@@ -476,17 +546,30 @@ static struct rcg_clk blsp1_qup5_i2c_apps_clk_src = {
 	},
 };
 
+static struct clk_freq_tbl ftbl_blsp1_qup5_spi_apps_clk_src[] = {
+	F(    960000,         gcc_xo,   10,    1,     2),
+	F(   4800000,         gcc_xo,    4,    0,     0),
+	F(   9600000,         gcc_xo,    2,    0,     0),
+	F(  15000000, gpll0_out_main,   10,    1,     4),
+	F(  19200000,         gcc_xo,    1,    0,     0),
+	F(  24000000, gpll0_out_main, 12.5,    1,     2),
+	F(  25000000, gpll0_out_main,   12,    1,     2),
+	F(  40000000, gpll0_out_main,   15,    0,     0),
+	F(  42860000, gpll0_out_main,   14,    0,     0),
+	F_END
+};
+
 static struct rcg_clk blsp1_qup5_spi_apps_clk_src = {
 	.cmd_rcgr_reg = BLSP1_QUP5_SPI_APPS_CMD_RCGR,
 	.set_rate = set_rate_mnd,
-	.freq_tbl = ftbl_blsp_spi_apps_clk_src,
+	.freq_tbl = ftbl_blsp1_qup5_spi_apps_clk_src,
 	.current_freq = &rcg_dummy_freq,
 	.base = &virt_base,
 	.c = {
 		.dbg_name = "blsp1_qup5_spi_apps_clk_src",
 		.ops = &clk_ops_rcg_mnd,
-		VDD_DIG_FMAX_MAP3(LOWER, 12500000, LOW, 25000000,
-				  NOMINAL, 50000000),
+		VDD_DIG_FMAX_MAP4(LOWER, 12500000, LOW, 25000000,
+				  NOMINAL, 40000000, HIGH, 42860000),
 		CLK_INIT(blsp1_qup5_spi_apps_clk_src.c),
 	},
 };
@@ -505,17 +588,30 @@ static struct rcg_clk blsp1_qup6_i2c_apps_clk_src = {
 	},
 };
 
+static struct clk_freq_tbl ftbl_blsp1_qup6_spi_apps_clk_src[] = {
+	F(    960000,         gcc_xo,   10,    1,     2),
+	F(   4800000,         gcc_xo,    4,    0,     0),
+	F(   9600000,         gcc_xo,    2,    0,     0),
+	F(  15000000, gpll0_out_main,   10,    1,     4),
+	F(  19200000,         gcc_xo,    1,    0,     0),
+	F(  24000000, gpll0_out_main, 12.5,    1,     2),
+	F(  25000000, gpll0_out_main,   12,    1,     2),
+	F(  41380000, gpll0_out_main, 14.5,    0,     0),
+	F(  42860000, gpll0_out_main,   14,    0,     0),
+	F_END
+};
+
 static struct rcg_clk blsp1_qup6_spi_apps_clk_src = {
 	.cmd_rcgr_reg = BLSP1_QUP6_SPI_APPS_CMD_RCGR,
 	.set_rate = set_rate_mnd,
-	.freq_tbl = ftbl_blsp_spi_apps_clk_src,
+	.freq_tbl = ftbl_blsp1_qup6_spi_apps_clk_src,
 	.current_freq = &rcg_dummy_freq,
 	.base = &virt_base,
 	.c = {
 		.dbg_name = "blsp1_qup6_spi_apps_clk_src",
 		.ops = &clk_ops_rcg_mnd,
-		VDD_DIG_FMAX_MAP3(LOWER, 12500000, LOW, 25000000,
-				  NOMINAL, 50000000),
+		VDD_DIG_FMAX_MAP4(LOWER, 12500000, LOW, 25000000,
+				  NOMINAL, 41380000, HIGH, 42860000),
 		CLK_INIT(blsp1_qup6_spi_apps_clk_src.c),
 	},
 };
@@ -643,17 +739,30 @@ static struct rcg_clk blsp2_qup1_i2c_apps_clk_src = {
 	},
 };
 
+static struct clk_freq_tbl ftbl_blsp2_qup1_spi_apps_clk_src[] = {
+	F(    960000,         gcc_xo,   10,    1,     2),
+	F(   4800000,         gcc_xo,    4,    0,     0),
+	F(   9600000,         gcc_xo,    2,    0,     0),
+	F(  15000000, gpll0_out_main,   10,    1,     4),
+	F(  19200000,         gcc_xo,    1,    0,     0),
+	F(  24000000, gpll0_out_main, 12.5,    1,     2),
+	F(  25000000, gpll0_out_main,   12,    1,     2),
+	F(  42860000, gpll0_out_main,   14,    0,     0),
+	F(  44440000, gpll0_out_main, 13.5,    0,     0),
+	F_END
+};
+
 static struct rcg_clk blsp2_qup1_spi_apps_clk_src = {
 	.cmd_rcgr_reg = BLSP2_QUP1_SPI_APPS_CMD_RCGR,
 	.set_rate = set_rate_mnd,
-	.freq_tbl = ftbl_blsp_spi_apps_clk_src,
+	.freq_tbl = ftbl_blsp2_qup1_spi_apps_clk_src,
 	.current_freq = &rcg_dummy_freq,
 	.base = &virt_base,
 	.c = {
 		.dbg_name = "blsp2_qup1_spi_apps_clk_src",
 		.ops = &clk_ops_rcg_mnd,
-		VDD_DIG_FMAX_MAP3(LOWER, 12500000, LOW, 25000000,
-				  NOMINAL, 50000000),
+		VDD_DIG_FMAX_MAP4(LOWER, 12500000, LOW, 25000000,
+				  NOMINAL, 42860000, HIGH, 44440000),
 		CLK_INIT(blsp2_qup1_spi_apps_clk_src.c),
 	},
 };
@@ -672,17 +781,30 @@ static struct rcg_clk blsp2_qup2_i2c_apps_clk_src = {
 	},
 };
 
+static struct clk_freq_tbl ftbl_blsp2_qup2_spi_apps_clk_src[] = {
+	F(    960000,         gcc_xo,   10,    1,     2),
+	F(   4800000,         gcc_xo,    4,    0,     0),
+	F(   9600000,         gcc_xo,    2,    0,     0),
+	F(  15000000, gpll0_out_main,   10,    1,     4),
+	F(  19200000,         gcc_xo,    1,    0,     0),
+	F(  24000000, gpll0_out_main, 12.5,    1,     2),
+	F(  25000000, gpll0_out_main,   12,    1,     2),
+	F(  42860000, gpll0_out_main,   14,    0,     0),
+	F(  44440000, gpll0_out_main, 13.5,    0,     0),
+	F_END
+};
+
 static struct rcg_clk blsp2_qup2_spi_apps_clk_src = {
 	.cmd_rcgr_reg = BLSP2_QUP2_SPI_APPS_CMD_RCGR,
 	.set_rate = set_rate_mnd,
-	.freq_tbl = ftbl_blsp_spi_apps_clk_src,
+	.freq_tbl = ftbl_blsp2_qup2_spi_apps_clk_src,
 	.current_freq = &rcg_dummy_freq,
 	.base = &virt_base,
 	.c = {
 		.dbg_name = "blsp2_qup2_spi_apps_clk_src",
 		.ops = &clk_ops_rcg_mnd,
-		VDD_DIG_FMAX_MAP3(LOWER, 12500000, LOW, 25000000,
-				  NOMINAL, 50000000),
+		VDD_DIG_FMAX_MAP4(LOWER, 12500000, LOW, 25000000,
+				  NOMINAL, 42860000, HIGH, 44440000),
 		CLK_INIT(blsp2_qup2_spi_apps_clk_src.c),
 	},
 };
@@ -701,17 +823,30 @@ static struct rcg_clk blsp2_qup3_i2c_apps_clk_src = {
 	},
 };
 
+static struct clk_freq_tbl ftbl_blsp2_qup3_spi_apps_clk_src[] = {
+	F(    960000,         gcc_xo,   10,    1,     2),
+	F(   4800000,         gcc_xo,    4,    0,     0),
+	F(   9600000,         gcc_xo,    2,    0,     0),
+	F(  15000000, gpll0_out_main,   10,    1,     4),
+	F(  19200000,         gcc_xo,    1,    0,     0),
+	F(  24000000, gpll0_out_main, 12.5,    1,     2),
+	F(  25000000, gpll0_out_main,   12,    1,     2),
+	F(  42860000, gpll0_out_main,   14,    0,     0),
+	F(  48000000, gpll0_out_main, 12.5,    0,     0),
+	F_END
+};
+
 static struct rcg_clk blsp2_qup3_spi_apps_clk_src = {
 	.cmd_rcgr_reg = BLSP2_QUP3_SPI_APPS_CMD_RCGR,
 	.set_rate = set_rate_mnd,
-	.freq_tbl = ftbl_blsp_spi_apps_clk_src,
+	.freq_tbl = ftbl_blsp2_qup3_spi_apps_clk_src,
 	.current_freq = &rcg_dummy_freq,
 	.base = &virt_base,
 	.c = {
 		.dbg_name = "blsp2_qup3_spi_apps_clk_src",
 		.ops = &clk_ops_rcg_mnd,
-		VDD_DIG_FMAX_MAP3(LOWER, 12500000, LOW, 25000000,
-				  NOMINAL, 50000000),
+		VDD_DIG_FMAX_MAP4(LOWER, 12500000, LOW, 25000000,
+				  NOMINAL, 42860000, HIGH, 48000000),
 		CLK_INIT(blsp2_qup3_spi_apps_clk_src.c),
 	},
 };
@@ -730,17 +865,30 @@ static struct rcg_clk blsp2_qup4_i2c_apps_clk_src = {
 	},
 };
 
+static struct clk_freq_tbl ftbl_blsp2_qup4_spi_apps_clk_src[] = {
+	F(    960000,         gcc_xo,   10,    1,     2),
+	F(   4800000,         gcc_xo,    4,    0,     0),
+	F(   9600000,         gcc_xo,    2,    0,     0),
+	F(  15000000, gpll0_out_main,   10,    1,     4),
+	F(  19200000,         gcc_xo,    1,    0,     0),
+	F(  24000000, gpll0_out_main, 12.5,    1,     2),
+	F(  25000000, gpll0_out_main,   12,    1,     2),
+	F(  42860000, gpll0_out_main,   14,    0,     0),
+	F(  48000000, gpll0_out_main, 12.5,    0,     0),
+	F_END
+};
+
 static struct rcg_clk blsp2_qup4_spi_apps_clk_src = {
 	.cmd_rcgr_reg = BLSP2_QUP4_SPI_APPS_CMD_RCGR,
 	.set_rate = set_rate_mnd,
-	.freq_tbl = ftbl_blsp_spi_apps_clk_src,
+	.freq_tbl = ftbl_blsp2_qup4_spi_apps_clk_src,
 	.current_freq = &rcg_dummy_freq,
 	.base = &virt_base,
 	.c = {
 		.dbg_name = "blsp2_qup4_spi_apps_clk_src",
 		.ops = &clk_ops_rcg_mnd,
-		VDD_DIG_FMAX_MAP3(LOWER, 12500000, LOW, 25000000,
-				  NOMINAL, 50000000),
+		VDD_DIG_FMAX_MAP4(LOWER, 12500000, LOW, 25000000,
+				  NOMINAL, 42860000, HIGH, 48000000),
 		CLK_INIT(blsp2_qup4_spi_apps_clk_src.c),
 	},
 };
@@ -759,17 +907,30 @@ static struct rcg_clk blsp2_qup5_i2c_apps_clk_src = {
 	},
 };
 
+static struct clk_freq_tbl ftbl_blsp2_qup5_spi_apps_clk_src[] = {
+	F(    960000,         gcc_xo,   10,    1,     2),
+	F(   4800000,         gcc_xo,    4,    0,     0),
+	F(   9600000,         gcc_xo,    2,    0,     0),
+	F(  15000000, gpll0_out_main,   10,    1,     4),
+	F(  19200000,         gcc_xo,    1,    0,     0),
+	F(  24000000, gpll0_out_main, 12.5,    1,     2),
+	F(  25000000, gpll0_out_main,   12,    1,     2),
+	F(  48000000, gpll0_out_main, 12.5,    0,     0),
+	F(  50000000, gpll0_out_main,   12,    0,     0),
+	F_END
+};
+
 static struct rcg_clk blsp2_qup5_spi_apps_clk_src = {
 	.cmd_rcgr_reg = BLSP2_QUP5_SPI_APPS_CMD_RCGR,
 	.set_rate = set_rate_mnd,
-	.freq_tbl = ftbl_blsp_spi_apps_clk_src,
+	.freq_tbl = ftbl_blsp2_qup5_spi_apps_clk_src,
 	.current_freq = &rcg_dummy_freq,
 	.base = &virt_base,
 	.c = {
 		.dbg_name = "blsp2_qup5_spi_apps_clk_src",
 		.ops = &clk_ops_rcg_mnd,
-		VDD_DIG_FMAX_MAP3(LOWER, 12500000, LOW, 25000000,
-				  NOMINAL, 50000000),
+		VDD_DIG_FMAX_MAP4(LOWER, 12500000, LOW, 25000000,
+				  NOMINAL, 48000000, HIGH, 50000000),
 		CLK_INIT(blsp2_qup5_spi_apps_clk_src.c),
 	},
 };
@@ -788,17 +949,30 @@ static struct rcg_clk blsp2_qup6_i2c_apps_clk_src = {
 	},
 };
 
+static struct clk_freq_tbl ftbl_blsp2_qup6_spi_apps_clk_src[] = {
+	F(    960000,         gcc_xo,   10,    1,     2),
+	F(   4800000,         gcc_xo,    4,    0,     0),
+	F(   9600000,         gcc_xo,    2,    0,     0),
+	F(  15000000, gpll0_out_main,   10,    1,     4),
+	F(  19200000,         gcc_xo,    1,    0,     0),
+	F(  24000000, gpll0_out_main, 12.5,    1,     2),
+	F(  25000000, gpll0_out_main,   12,    1,     2),
+	F(  44440000, gpll0_out_main, 13.5,    0,     0),
+	F(  48000000, gpll0_out_main, 12.5,    0,     0),
+	F_END
+};
+
 static struct rcg_clk blsp2_qup6_spi_apps_clk_src = {
 	.cmd_rcgr_reg = BLSP2_QUP6_SPI_APPS_CMD_RCGR,
 	.set_rate = set_rate_mnd,
-	.freq_tbl = ftbl_blsp_spi_apps_clk_src,
+	.freq_tbl = ftbl_blsp2_qup6_spi_apps_clk_src,
 	.current_freq = &rcg_dummy_freq,
 	.base = &virt_base,
 	.c = {
 		.dbg_name = "blsp2_qup6_spi_apps_clk_src",
 		.ops = &clk_ops_rcg_mnd,
-		VDD_DIG_FMAX_MAP3(LOWER, 12500000, LOW, 25000000,
-				  NOMINAL, 50000000),
+		VDD_DIG_FMAX_MAP4(LOWER, 12500000, LOW, 25000000,
+				  NOMINAL, 44440000, HIGH, 48000000),
 		CLK_INIT(blsp2_qup6_spi_apps_clk_src.c),
 	},
 };
@@ -1055,9 +1229,9 @@ static struct clk_freq_tbl ftbl_sdcc1_apps_clk_src[] = {
 	F(  20000000, gpll0_out_main,   15,    1,     2),
 	F(  25000000, gpll0_out_main,   12,    1,     2),
 	F(  50000000, gpll0_out_main,   12,    0,     0),
-	F(  96000000, gpll4_out_main,   16,    0,     0),
-	F( 192000000, gpll4_out_main,    8,    0,     0),
-	F( 384000000, gpll4_out_main,    4,    0,     0),
+	F( 100000000, gpll0_out_main,    6,    0,     0),
+	F( 192000000, gpll4_out_main,    2,    0,     0),
+	F( 384000000, gpll4_out_main,    1,    0,     0),
 	F_END
 };
 
@@ -1151,11 +1325,8 @@ static struct rcg_clk tsif_ref_clk_src = {
 	},
 };
 
-DEFINE_FIXED_DIV_CLK(ufs_rx_cfg_postdiv_clk_src, 2, &ufs_axi_clk_src.c);
-
-DEFINE_FIXED_DIV_CLK(ufs_tx_cfg_postdiv_clk_src, 2, &ufs_axi_clk_src.c);
-
 static struct clk_freq_tbl ftbl_usb30_mock_utmi_clk_src[] = {
+	F(  19200000,         gcc_xo,    1,    0,     0),
 	F(  60000000, gpll0_out_main,   10,    0,     0),
 	F_END
 };
@@ -1213,6 +1384,36 @@ static struct rcg_clk usb_hs_system_clk_src = {
 	},
 };
 
+static struct reset_clk gcc_pcie_phy_0_reset = {
+	.reset_reg = PCIE_PHY_0_BCR,
+	.base = &virt_base,
+	.c = {
+		.dbg_name = "gcc_pcie_phy_0_reset",
+		.ops = &clk_ops_rst,
+		CLK_INIT(gcc_pcie_phy_0_reset.c),
+	},
+};
+
+static struct reset_clk gcc_pcie_phy_1_reset = {
+	.reset_reg = PCIE_PHY_1_BCR,
+	.base = &virt_base,
+	.c = {
+		.dbg_name = "gcc_pcie_phy_1_reset",
+		.ops = &clk_ops_rst,
+		CLK_INIT(gcc_pcie_phy_1_reset.c),
+	},
+};
+
+static struct reset_clk gcc_qusb2_phy_reset = {
+	.reset_reg = QUSB2_PHY_BCR,
+	.base = &virt_base,
+	.c = {
+		.dbg_name = "gcc_qusb2_phy_reset",
+		.ops = &clk_ops_rst,
+		CLK_INIT(gcc_qusb2_phy_reset.c),
+	},
+};
+
 static struct reset_clk gcc_usb3_phy_reset = {
 	.reset_reg = USB3_PHY_BCR,
 	.base = &virt_base,
@@ -1220,16 +1421,6 @@ static struct reset_clk gcc_usb3_phy_reset = {
 		.dbg_name = "gcc_usb3_phy_reset",
 		.ops = &clk_ops_rst,
 		CLK_INIT(gcc_usb3_phy_reset.c),
-	},
-};
-
-static struct reset_clk gcc_usb3phy_phy_reset = {
-	.reset_reg = USB3PHY_PHY_BCR,
-	.base = &virt_base,
-	.c = {
-		.dbg_name = "gcc_usb3phy_phy_reset",
-		.ops = &clk_ops_rst,
-		CLK_INIT(gcc_usb3phy_phy_reset.c),
 	},
 };
 
@@ -1243,6 +1434,18 @@ static struct gate_clk gpll0_out_mmsscc = {
 		.dbg_name = "gpll0_out_mmsscc",
 		.ops = &clk_ops_gate,
 		CLK_INIT(gpll0_out_mmsscc.c),
+	},
+};
+
+static struct gate_clk gpll0_out_msscc = {
+	.en_reg = APCS_CLOCK_BRANCH_ENA_VOTE,
+	.en_mask = BIT(27),
+	.delay_us = 1,
+	.base = &virt_base,
+	.c = {
+		.dbg_name = "gpll0_out_msscc",
+		.ops = &clk_ops_gate,
+		CLK_INIT(gpll0_out_msscc.c),
 	},
 };
 
@@ -1810,21 +2013,11 @@ static struct branch_clk gcc_lpass_q6_axi_clk = {
 	.cbcr_reg = LPASS_Q6_AXI_CBCR,
 	.has_sibling = 1,
 	.base = &virt_base,
+	.halt_check = DELAY,
 	.c = {
 		.dbg_name = "gcc_lpass_q6_axi_clk",
 		.ops = &clk_ops_branch,
 		CLK_INIT(gcc_lpass_q6_axi_clk.c),
-	},
-};
-
-static struct branch_clk gcc_mss_cfg_ahb_clk = {
-	.cbcr_reg = MSS_CFG_AHB_CBCR,
-	.has_sibling = 1,
-	.base = &virt_base,
-	.c = {
-		.dbg_name = "gcc_mss_cfg_ahb_clk",
-		.ops = &clk_ops_branch,
-		CLK_INIT(gcc_mss_cfg_ahb_clk.c),
 	},
 };
 
@@ -1875,9 +2068,10 @@ static struct branch_clk gcc_pcie_0_mstr_axi_clk = {
 
 static struct branch_clk gcc_pcie_0_pipe_clk = {
 	.cbcr_reg = PCIE_0_PIPE_CBCR,
-	.bcr_reg = PCIE_0_BCR,
+	.bcr_reg = PCIE_PHY_0_PHY_BCR,
 	.has_sibling = 0,
 	.base = &virt_base,
+	.halt_check = DELAY,
 	.c = {
 		.dbg_name = "gcc_pcie_0_pipe_clk",
 		.parent = &pcie_0_pipe_clk_src.c,
@@ -1933,9 +2127,10 @@ static struct branch_clk gcc_pcie_1_mstr_axi_clk = {
 
 static struct branch_clk gcc_pcie_1_pipe_clk = {
 	.cbcr_reg = PCIE_1_PIPE_CBCR,
-	.bcr_reg = PCIE_1_BCR,
+	.bcr_reg = PCIE_PHY_1_PHY_BCR,
 	.has_sibling = 0,
 	.base = &virt_base,
+	.halt_check = DELAY,
 	.c = {
 		.dbg_name = "gcc_pcie_1_pipe_clk",
 		.parent = &pcie_1_pipe_clk_src.c,
@@ -2159,7 +2354,7 @@ static struct branch_clk gcc_ufs_rx_cfg_clk = {
 	.base = &virt_base,
 	.c = {
 		.dbg_name = "gcc_ufs_rx_cfg_clk",
-		.parent = &ufs_rx_cfg_postdiv_clk_src.c,
+		.parent = &ufs_axi_clk_src.c,
 		.ops = &clk_ops_branch,
 		.rate = 1,
 		CLK_INIT(gcc_ufs_rx_cfg_clk.c),
@@ -2170,6 +2365,7 @@ static struct branch_clk gcc_ufs_rx_symbol_0_clk = {
 	.cbcr_reg = UFS_RX_SYMBOL_0_CBCR,
 	.has_sibling = 1,
 	.base = &virt_base,
+	.halt_check = DELAY,
 	.c = {
 		.dbg_name = "gcc_ufs_rx_symbol_0_clk",
 		.ops = &clk_ops_branch,
@@ -2181,6 +2377,7 @@ static struct branch_clk gcc_ufs_rx_symbol_1_clk = {
 	.cbcr_reg = UFS_RX_SYMBOL_1_CBCR,
 	.has_sibling = 1,
 	.base = &virt_base,
+	.halt_check = DELAY,
 	.c = {
 		.dbg_name = "gcc_ufs_rx_symbol_1_clk",
 		.ops = &clk_ops_branch,
@@ -2195,7 +2392,7 @@ static struct branch_clk gcc_ufs_tx_cfg_clk = {
 	.base = &virt_base,
 	.c = {
 		.dbg_name = "gcc_ufs_tx_cfg_clk",
-		.parent = &ufs_tx_cfg_postdiv_clk_src.c,
+		.parent = &ufs_axi_clk_src.c,
 		.ops = &clk_ops_branch,
 		.rate = 1,
 		CLK_INIT(gcc_ufs_tx_cfg_clk.c),
@@ -2206,6 +2403,7 @@ static struct branch_clk gcc_ufs_tx_symbol_0_clk = {
 	.cbcr_reg = UFS_TX_SYMBOL_0_CBCR,
 	.has_sibling = 1,
 	.base = &virt_base,
+	.halt_check = DELAY,
 	.c = {
 		.dbg_name = "gcc_ufs_tx_symbol_0_clk",
 		.ops = &clk_ops_branch,
@@ -2217,6 +2415,7 @@ static struct branch_clk gcc_ufs_tx_symbol_1_clk = {
 	.cbcr_reg = UFS_TX_SYMBOL_1_CBCR,
 	.has_sibling = 1,
 	.base = &virt_base,
+	.halt_check = DELAY,
 	.c = {
 		.dbg_name = "gcc_ufs_tx_symbol_1_clk",
 		.ops = &clk_ops_branch,
@@ -2226,7 +2425,7 @@ static struct branch_clk gcc_ufs_tx_symbol_1_clk = {
 
 static struct branch_clk gcc_usb2_hs_phy_sleep_clk = {
 	.cbcr_reg = USB2_HS_PHY_SLEEP_CBCR,
-	.bcr_reg = USB2_HS_PHY_BCR,
+	.bcr_reg = USB2_HS_PHY_ONLY_BCR,
 	.has_sibling = 1,
 	.base = &virt_base,
 	.c = {
@@ -2285,14 +2484,25 @@ static struct branch_clk gcc_usb3_phy_aux_clk = {
 	},
 };
 
-static struct branch_clk gcc_usb3_phy_pipe_clk = {
-	.cbcr_reg = USB3_PHY_PIPE_CBCR,
-	.has_sibling = 1,
+static struct gate_clk gcc_usb3_phy_pipe_clk = {
+	.en_reg = USB3_PHY_PIPE_CBCR,
+	.en_mask = BIT(0),
+	.delay_us = 50,
 	.base = &virt_base,
 	.c = {
 		.dbg_name = "gcc_usb3_phy_pipe_clk",
-		.ops = &clk_ops_branch,
+		.ops = &clk_ops_gate,
 		CLK_INIT(gcc_usb3_phy_pipe_clk.c),
+	},
+};
+
+static struct reset_clk gcc_usb3phy_phy_reset = {
+	.reset_reg = USB3PHY_PHY_BCR,
+	.base = &virt_base,
+	.c = {
+		.dbg_name = "gcc_usb3phy_phy_reset",
+		.ops = &clk_ops_rst,
+		CLK_INIT(gcc_usb3phy_phy_reset.c),
 	},
 };
 
@@ -2374,12 +2584,13 @@ static struct mux_clk gcc_debug_mux = {
 	MUX_REC_SRC_LIST(
 		&debug_mmss_clk.c,
 		&debug_rpm_clk.c,
+		&debug_cpu_clk.c,
 	),
 	MUX_SRC_LIST(
+		{ &debug_cpu_clk.c, 0x016A },
 		{ &debug_mmss_clk.c, 0x002b },
 		{ &debug_rpm_clk.c, 0xffff },
 		{ &gcc_sys_noc_usb3_axi_clk.c, 0x0006 },
-		{ &gcc_mss_cfg_ahb_clk.c, 0x0030 },
 		{ &gcc_mss_q6_bimc_axi_clk.c, 0x0031 },
 		{ &gcc_usb30_master_clk.c, 0x0050 },
 		{ &gcc_usb30_sleep_clk.c, 0x0051 },
@@ -2472,11 +2683,13 @@ static struct mux_clk gcc_debug_mux = {
 	},
 };
 
-static struct clk_lookup msm_clocks_gcc_8994[] = {
+static struct clk_lookup gcc_clocks_8994_v1[] = {
+	CLK_LIST(gcc_bam_dma_ahb_clk),
+};
+
+static struct clk_lookup gcc_clocks_8994_common[] = {
 	CLK_LIST(gcc_xo),
 	CLK_LIST(gcc_xo_a_clk),
-	CLK_LIST(debug_mmss_clk),
-	CLK_LIST(debug_rpm_clk),
 	CLK_LIST(gpll0),
 	CLK_LIST(gpll0_ao),
 	CLK_LIST(gpll0_out_main),
@@ -2536,14 +2749,16 @@ static struct clk_lookup msm_clocks_gcc_8994[] = {
 	CLK_LIST(usb30_mock_utmi_clk_src),
 	CLK_LIST(usb3_phy_aux_clk_src),
 	CLK_LIST(usb_hs_system_clk_src),
+	CLK_LIST(gcc_pcie_phy_0_reset),
+	CLK_LIST(gcc_pcie_phy_1_reset),
+	CLK_LIST(gcc_qusb2_phy_reset),
 	CLK_LIST(gcc_usb3_phy_reset),
-	CLK_LIST(gcc_usb3phy_phy_reset),
 	CLK_LIST(gpll0_out_mmsscc),
+	CLK_LIST(gpll0_out_msscc),
 	CLK_LIST(pcie_0_phy_ldo),
 	CLK_LIST(pcie_1_phy_ldo),
 	CLK_LIST(ufs_phy_ldo),
 	CLK_LIST(usb_ss_phy_ldo),
-	CLK_LIST(gcc_bam_dma_ahb_clk),
 	CLK_LIST(gcc_blsp1_ahb_clk),
 	CLK_LIST(gcc_blsp1_qup1_i2c_apps_clk),
 	CLK_LIST(gcc_blsp1_qup1_spi_apps_clk),
@@ -2587,7 +2802,6 @@ static struct clk_lookup msm_clocks_gcc_8994[] = {
 	CLK_LIST(gcc_gp2_clk),
 	CLK_LIST(gcc_gp3_clk),
 	CLK_LIST(gcc_lpass_q6_axi_clk),
-	CLK_LIST(gcc_mss_cfg_ahb_clk),
 	CLK_LIST(gcc_mss_q6_bimc_axi_clk),
 	CLK_LIST(gcc_pcie_0_aux_clk),
 	CLK_LIST(gcc_pcie_0_cfg_ahb_clk),
@@ -2628,16 +2842,66 @@ static struct clk_lookup msm_clocks_gcc_8994[] = {
 	CLK_LIST(gcc_usb30_sleep_clk),
 	CLK_LIST(gcc_usb3_phy_aux_clk),
 	CLK_LIST(gcc_usb3_phy_pipe_clk),
+	CLK_LIST(gcc_usb3phy_phy_reset),
 	CLK_LIST(gcc_usb_hs_ahb_clk),
 	CLK_LIST(gcc_usb_hs_system_clk),
 	CLK_LIST(gcc_usb_phy_cfg_ahb2phy_clk),
 };
+
+static void msm_gcc_8994v2_fixup(void)
+{
+	ufs_axi_clk_src.freq_tbl = ftbl_ufs_axi_clk_src_v2;
+	ufs_axi_clk_src.c.fmax[VDD_DIG_NOMINAL] = 200000000;
+	ufs_axi_clk_src.c.fmax[VDD_DIG_HIGH] = 240000000;
+
+	blsp1_qup1_spi_apps_clk_src.freq_tbl = ftbl_blspqup_spi_apps_clk_src_v2;
+	blsp1_qup2_spi_apps_clk_src.freq_tbl = ftbl_blspqup_spi_apps_clk_src_v2;
+	blsp1_qup3_spi_apps_clk_src.freq_tbl = ftbl_blspqup_spi_apps_clk_src_v2;
+	blsp1_qup4_spi_apps_clk_src.freq_tbl = ftbl_blspqup_spi_apps_clk_src_v2;
+	blsp1_qup5_spi_apps_clk_src.freq_tbl = ftbl_blspqup_spi_apps_clk_src_v2;
+	blsp1_qup6_spi_apps_clk_src.freq_tbl = ftbl_blspqup_spi_apps_clk_src_v2;
+	blsp2_qup1_spi_apps_clk_src.freq_tbl = ftbl_blspqup_spi_apps_clk_src_v2;
+	blsp2_qup2_spi_apps_clk_src.freq_tbl = ftbl_blspqup_spi_apps_clk_src_v2;
+	blsp2_qup3_spi_apps_clk_src.freq_tbl = ftbl_blspqup_spi_apps_clk_src_v2;
+	blsp2_qup4_spi_apps_clk_src.freq_tbl = ftbl_blspqup_spi_apps_clk_src_v2;
+	blsp2_qup5_spi_apps_clk_src.freq_tbl = ftbl_blspqup_spi_apps_clk_src_v2;
+	blsp2_qup6_spi_apps_clk_src.freq_tbl = ftbl_blspqup_spi_apps_clk_src_v2;
+
+	blsp1_qup1_spi_apps_clk_src.c.fmax[VDD_DIG_NOMINAL] = 50000000;
+	blsp1_qup2_spi_apps_clk_src.c.fmax[VDD_DIG_NOMINAL] = 50000000;
+	blsp1_qup3_spi_apps_clk_src.c.fmax[VDD_DIG_NOMINAL] = 50000000;
+	blsp1_qup4_spi_apps_clk_src.c.fmax[VDD_DIG_NOMINAL] = 50000000;
+	blsp1_qup5_spi_apps_clk_src.c.fmax[VDD_DIG_NOMINAL] = 50000000;
+	blsp1_qup6_spi_apps_clk_src.c.fmax[VDD_DIG_NOMINAL] = 50000000;
+	blsp2_qup1_spi_apps_clk_src.c.fmax[VDD_DIG_NOMINAL] = 50000000;
+	blsp2_qup2_spi_apps_clk_src.c.fmax[VDD_DIG_NOMINAL] = 50000000;
+	blsp2_qup3_spi_apps_clk_src.c.fmax[VDD_DIG_NOMINAL] = 50000000;
+	blsp2_qup4_spi_apps_clk_src.c.fmax[VDD_DIG_NOMINAL] = 50000000;
+	blsp2_qup5_spi_apps_clk_src.c.fmax[VDD_DIG_NOMINAL] = 50000000;
+	blsp2_qup6_spi_apps_clk_src.c.fmax[VDD_DIG_NOMINAL] = 50000000;
+
+	blsp1_qup1_spi_apps_clk_src.c.fmax[VDD_DIG_HIGH] = 0;
+	blsp1_qup2_spi_apps_clk_src.c.fmax[VDD_DIG_HIGH] = 0;
+	blsp1_qup3_spi_apps_clk_src.c.fmax[VDD_DIG_HIGH] = 0;
+	blsp1_qup4_spi_apps_clk_src.c.fmax[VDD_DIG_HIGH] = 0;
+	blsp1_qup5_spi_apps_clk_src.c.fmax[VDD_DIG_HIGH] = 0;
+	blsp1_qup6_spi_apps_clk_src.c.fmax[VDD_DIG_HIGH] = 0;
+	blsp2_qup1_spi_apps_clk_src.c.fmax[VDD_DIG_HIGH] = 0;
+	blsp2_qup2_spi_apps_clk_src.c.fmax[VDD_DIG_HIGH] = 0;
+	blsp2_qup3_spi_apps_clk_src.c.fmax[VDD_DIG_HIGH] = 0;
+	blsp2_qup4_spi_apps_clk_src.c.fmax[VDD_DIG_HIGH] = 0;
+	blsp2_qup5_spi_apps_clk_src.c.fmax[VDD_DIG_HIGH] = 0;
+	blsp2_qup6_spi_apps_clk_src.c.fmax[VDD_DIG_HIGH] = 0;
+}
 
 static int msm_gcc_8994_probe(struct platform_device *pdev)
 {
 	struct resource *res;
 	struct clk *tmp_clk;
 	int ret;
+	const char *compat = NULL;
+	int compatlen = 0;
+	bool is_v2 = false;
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "cc_base");
 	if (!res) {
@@ -2671,10 +2935,27 @@ static int msm_gcc_8994_probe(struct platform_device *pdev)
 		return PTR_ERR(tmp_clk);
 	}
 
-	ret = of_msm_clock_register(pdev->dev.of_node, msm_clocks_gcc_8994,
-				    ARRAY_SIZE(msm_clocks_gcc_8994));
+	/* Perform revision specific fixes */
+	compat = of_get_property(pdev->dev.of_node, "compatible", &compatlen);
+	if (!compat || (compatlen <= 0))
+		return -EINVAL;
+	is_v2 = !strcmp(compat, "qcom,gcc-8994v2");
+	if (is_v2)
+		msm_gcc_8994v2_fixup();
+
+	/* register common clock table */
+	ret = of_msm_clock_register(pdev->dev.of_node, gcc_clocks_8994_common,
+				    ARRAY_SIZE(gcc_clocks_8994_common));
 	if (ret)
 		return ret;
+
+	if (!is_v2) {
+		/* register v1 specific clocks */
+		ret = of_msm_clock_register(pdev->dev.of_node,
+			gcc_clocks_8994_v1, ARRAY_SIZE(gcc_clocks_8994_v1));
+		if (ret)
+			return ret;
+	}
 
 	dev_info(&pdev->dev, "Registered GCC clocks.\n");
 	return 0;
@@ -2682,6 +2963,7 @@ static int msm_gcc_8994_probe(struct platform_device *pdev)
 
 static struct of_device_id msm_clock_gcc_match_table[] = {
 	{ .compatible = "qcom,gcc-8994" },
+	{ .compatible = "qcom,gcc-8994v2" },
 	{}
 };
 
@@ -2702,6 +2984,9 @@ arch_initcall(msm_gcc_8994_init);
 
 /* ======== Clock Debug Controller ======== */
 static struct clk_lookup msm_clocks_measure_8994[] = {
+	CLK_LIST(debug_mmss_clk),
+	CLK_LIST(debug_rpm_clk),
+	CLK_LIST(debug_cpu_clk),
 	CLK_LOOKUP_OF("measure", gcc_debug_mux, "debug"),
 };
 
@@ -2732,17 +3017,12 @@ static int msm_clock_debug_8994_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
-	debug_mmss_clk.c.parent = clk_get(&pdev->dev, "debug_mmss_clk");
-	if (IS_ERR(debug_mmss_clk.c.parent)) {
-		dev_err(&pdev->dev, "Failed to get MMSS debug mux\n");
-		return PTR_ERR(debug_mmss_clk.c.parent);
-	}
-
-	debug_rpm_clk.c.parent = clk_get(&pdev->dev, "debug_rpm_clk");
-	if (IS_ERR(debug_rpm_clk.c.parent)) {
-		dev_err(&pdev->dev, "Failed to get RPM debug mux\n");
-		return PTR_ERR(debug_rpm_clk.c.parent);
-	}
+	debug_mmss_clk.dev = &pdev->dev;
+	debug_mmss_clk.clk_id = "debug_mmss_clk";
+	debug_rpm_clk.dev = &pdev->dev;
+	debug_rpm_clk.clk_id = "debug_rpm_clk";
+	debug_cpu_clk.dev = &pdev->dev;
+	debug_cpu_clk.clk_id = "debug_cpu_clk";
 
 	ret = of_msm_clock_register(pdev->dev.of_node,
 				    msm_clocks_measure_8994,

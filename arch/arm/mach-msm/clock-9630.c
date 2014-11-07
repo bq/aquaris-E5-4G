@@ -1968,6 +1968,9 @@ static struct clk_lookup msm_clocks_9630[] = {
 	CLK_LOOKUP("iface_clk", gcc_blsp1_ahb_clk.c, "f991f000.serial"),
 	CLK_LOOKUP("core_clk", gcc_blsp1_uart3_apps_clk.c, "f991f000.serial"),
 
+	CLK_LOOKUP("iface_clk", gcc_blsp1_ahb_clk.c, "f991e000.uart"),
+	CLK_LOOKUP("core_clk", gcc_blsp1_uart2_apps_clk.c, "f991e000.uart"),
+
 	CLK_LOOKUP("iface_clk", gcc_blsp1_ahb_clk.c, "f9928000.spi"),
 	CLK_LOOKUP("core_clk", gcc_blsp1_qup6_spi_apps_clk.c, "f9928000.spi"),
 
@@ -2022,13 +2025,22 @@ static struct clk_lookup msm_clocks_9630[] = {
 	CLK_LOOKUP("core_clk", gcc_sdcc3_apps_clk.c, "msm_sdcc.3"),
 	CLK_LOOKUP("bus_clk", pnoc_sdcc3_clk.c, "msm_sdcc.3"),
 
-	CLK_LOOKUP("iface_clk", gcc_usb_hsic_ahb_clk.c,	  "msm_hsic_host"),
-	CLK_LOOKUP("phy_clk", gcc_usb_hsic_clk.c,	  "msm_hsic_host"),
-	CLK_LOOKUP("cal_clk", gcc_usb_hsic_io_cal_clk.c,  "msm_hsic_host"),
-	CLK_LOOKUP("core_clk", gcc_usb_hsic_system_clk.c, "msm_hsic_host"),
-	CLK_LOOKUP("alt_core_clk", gcc_usb_hsic_xcvr_fs_clk.c, ""),
+	CLK_LOOKUP("iface_clk", gcc_usb_hsic_ahb_clk.c,	"f9a15000.hsic_host"),
+	CLK_LOOKUP("phy_clk", gcc_usb_hsic_clk.c,	  "f9a15000.hsic_host"),
+	CLK_LOOKUP("cal_clk", gcc_usb_hsic_io_cal_clk.c,  "f9a15000.hsic_host"),
+	CLK_LOOKUP("core_clk", gcc_usb_hsic_system_clk.c, "f9a15000.hsic_host"),
+	CLK_LOOKUP("alt_core_clk", gcc_usb_hsic_xcvr_fs_clk.c,
+							"f9a15000.hsic_host"),
 	CLK_LOOKUP("inactivity_clk", gcc_usb_hsic_io_cal_sleep_clk.c,
-							"msm_hsic_host"),
+							"f9a15000.hsic_host"),
+
+	CLK_LOOKUP("iface_clk", gcc_usb_hsic_ahb_clk.c,	  "f9a15000.hsic"),
+	CLK_LOOKUP("phy_clk", gcc_usb_hsic_clk.c,	  "f9a15000.hsic"),
+	CLK_LOOKUP("cal_clk", gcc_usb_hsic_io_cal_clk.c,  "f9a15000.hsic"),
+	CLK_LOOKUP("core_clk", gcc_usb_hsic_system_clk.c, "f9a15000.hsic"),
+	CLK_LOOKUP("alt_core_clk", gcc_usb_hsic_xcvr_fs_clk.c, "f9a15000.hsic"),
+	CLK_LOOKUP("inactivity_clk", gcc_usb_hsic_io_cal_sleep_clk.c,
+		"f9a15000.hsic"),
 
 	CLK_LOOKUP("core_clk", gcc_ce1_clk.c, "fd400000.qcom,qcedev"),
 	CLK_LOOKUP("iface_clk", gcc_ce1_ahb_clk.c, "fd400000.qcom,qcedev"),
@@ -2042,10 +2054,12 @@ static struct clk_lookup msm_clocks_9630[] = {
 	CLK_LOOKUP("core_clk_src", qcrypto_ce1_clk_src.c,
 						"fd400000.qcom,qcrypto"),
 
-	CLK_LOOKUP("core_clk",     gcc_ce1_clk.c,         "scm"),
-	CLK_LOOKUP("iface_clk",    gcc_ce1_ahb_clk.c,     "scm"),
-	CLK_LOOKUP("bus_clk",      gcc_ce1_axi_clk.c,     "scm"),
-	CLK_LOOKUP("core_clk_src", scm_ce1_clk_src.c,     "scm"),
+	/* Crypto clocks */
+	CLK_LOOKUP("scm_core_clk", gcc_ce1_clk.c, "fe200000.qcom,lpass"),
+	CLK_LOOKUP("scm_iface_clk", gcc_ce1_ahb_clk.c, "fe200000.qcom,lpass"),
+	CLK_LOOKUP("scm_bus_clk", gcc_ce1_axi_clk.c, "fe200000.qcom,lpass"),
+	CLK_LOOKUP("scm_core_clk_src", scm_ce1_clk_src.c,
+						"fe200000.qcom,lpass"),
 
 	/* RPM and voter clocks */
 	CLK_LOOKUP("bus_clk", snoc_clk.c, ""),
@@ -2187,9 +2201,10 @@ static struct clk_lookup msm_clocks_9630[] = {
 	CLK_LOOKUP("ref_clk", lnbbclk_clk.c, "f9200000.ssusb"),
 	CLK_LOOKUP("", lnbbclk_a_clk.c, ""),
 	CLK_LOOKUP("xo", cxo_dwc3_clk.c, "f9200000.ssusb"),
+	CLK_LOOKUP("phy_com_reset",  gcc_usb3_phy_com_reset.c,
+		"f9200000.ssusb"),
 	CLK_LOOKUP("phy_sleep_clk", gcc_usb2b_phy_sleep_clk.c,
-		   "f9200000.ssusb"),
-
+		   "f92f8800.hsphy"),
 	CLK_LOOKUP("core_clk", qpic_clk.c, "f9ac0000.qcom,nand"),
 	CLK_LOOKUP("", qpic_a_clk.c, ""),
 };

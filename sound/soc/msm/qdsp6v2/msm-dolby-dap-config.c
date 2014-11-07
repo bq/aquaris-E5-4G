@@ -14,9 +14,9 @@
 #include <linux/bitops.h>
 #include <sound/control.h>
 #include <sound/q6adm-v2.h>
+#include <sound/q6core.h>
 
 #include "msm-dolby-dap-config.h"
-#include "q6core.h"
 
 /* dolby endp based parameters */
 struct dolby_dap_endp_params_s {
@@ -168,22 +168,6 @@ const struct dolby_dap_endp_params_s
 		{-320, -320, 144}
 	},
 	{REMOTE_SUBMIX,	2, DOLBY_ENDP_EXT_SPEAKERS,
-		{DOLBY_PARAM_ID_DVLO, DOLBY_PARAM_ID_DVLI, DOLBY_PARAM_ID_VMB},
-		{DOLBY_ENDDEP_PARAM_DVLO_LENGTH, DOLBY_ENDDEP_PARAM_DVLI_LENGTH,
-		 DOLBY_ENDDEP_PARAM_VMB_LENGTH},
-		{DOLBY_ENDDEP_PARAM_DVLO_OFFSET, DOLBY_ENDDEP_PARAM_DVLI_OFFSET,
-		 DOLBY_ENDDEP_PARAM_VMB_OFFSET},
-		{-320, -320, 144}
-	},
-	{ANC_HEADSET, 2, DOLBY_ENDP_HEADPHONES,
-		{DOLBY_PARAM_ID_DVLO, DOLBY_PARAM_ID_DVLI, DOLBY_PARAM_ID_VMB},
-		{DOLBY_ENDDEP_PARAM_DVLO_LENGTH, DOLBY_ENDDEP_PARAM_DVLI_LENGTH,
-		 DOLBY_ENDDEP_PARAM_VMB_LENGTH},
-		{DOLBY_ENDDEP_PARAM_DVLO_OFFSET, DOLBY_ENDDEP_PARAM_DVLI_OFFSET,
-		 DOLBY_ENDDEP_PARAM_VMB_OFFSET},
-		{-320, -320, 144}
-	},
-	{ANC_HEADPHONE,	2, DOLBY_ENDP_HEADPHONES,
 		{DOLBY_PARAM_ID_DVLO, DOLBY_PARAM_ID_DVLI, DOLBY_PARAM_ID_VMB},
 		{DOLBY_ENDDEP_PARAM_DVLO_LENGTH, DOLBY_ENDDEP_PARAM_DVLI_LENGTH,
 		 DOLBY_ENDDEP_PARAM_VMB_LENGTH},
@@ -1004,6 +988,27 @@ int msm_dolby_dap_security_control_put(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+int msm_dolby_dap_license_control_get(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	ucontrol->value.integer.value[0] =
+			core_get_license_status(DOLBY_DS1_LICENSE_ID);
+	return 0;
+}
+
+int msm_dolby_dap_license_control_put(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	return core_set_license(ucontrol->value.integer.value[0],
+						DOLBY_DS1_LICENSE_ID);
+}
+
+static const struct snd_kcontrol_new dolby_license_controls[] = {
+	SOC_SINGLE_MULTI_EXT("DS1 License", SND_SOC_NOPM, 0,
+	0xFFFFFFFF, 0, 1, msm_dolby_dap_license_control_get,
+	msm_dolby_dap_license_control_put),
+};
+
 static const struct snd_kcontrol_new dolby_security_controls[] = {
 	SOC_SINGLE_MULTI_EXT("DS1 Security", SND_SOC_NOPM, 0,
 	0xFFFFFFFF, 0, 1, msm_dolby_dap_security_control_get,
@@ -1036,6 +1041,10 @@ static const struct snd_kcontrol_new dolby_dap_param_end_point_controls[] = {
 
 void msm_dolby_dap_add_controls(struct snd_soc_platform *platform)
 {
+	snd_soc_add_platform_controls(platform,
+				dolby_license_controls,
+			ARRAY_SIZE(dolby_license_controls));
+
 	snd_soc_add_platform_controls(platform,
 				dolby_security_controls,
 			ARRAY_SIZE(dolby_security_controls));

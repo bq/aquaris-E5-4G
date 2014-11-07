@@ -24,9 +24,11 @@
 #include <linux/percpu.h>
 #include <linux/of.h>
 #include <linux/cpu.h>
+#include <linux/cpu_pm.h>
 #include <linux/platform_device.h>
 #include <soc/qcom/scm.h>
 #include <soc/qcom/memory_dump.h>
+#include <soc/qcom/watchdog.h>
 
 #define MODULE_NAME "msm_watchdog"
 #define WDT0_ACCSCSSNBARK_INT 0
@@ -37,18 +39,23 @@
 #define WDT0_BARK_TIME	0x10
 #define WDT0_BITE_TIME	0x14
 
+#define WDOG_ABSENT	0
+
 #define MASK_SIZE		32
 #define SCM_SET_REGSAVE_CMD	0x2
 #define SCM_SVC_SEC_WDOG_DIS	0x7
-#define MAX_CPU_CTX_SIZE	512
+#define MAX_CPU_CTX_SIZE	2048
 
 static struct workqueue_struct *wdog_wq;
 static struct msm_watchdog_data *wdog_data;
+
+static int cpu_idle_pc_state[NR_CPUS];
 
 struct msm_watchdog_data {
 	unsigned int __iomem phys_base;
 	size_t size;
 	void __iomem *base;
+	void __iomem *wdog_absent_base;
 	struct device *dev;
 	unsigned int pet_time;
 	unsigned int bark_time;
@@ -71,7 +78,7 @@ struct msm_watchdog_data {
 
 /*
  * On the kernel command line specify
- * msm_watchdog_v2.enable=1 to enable the watchdog
+ * watchdog_v2.enable=1 to enable the watchdog
  * By default watchdog is turned on
  */
 static int enable = 1;
@@ -79,11 +86,19 @@ module_param(enable, int, 0);
 
 /*
  * On the kernel command line specify
- * msm_watchdog_v2.WDT_HZ=<clock val in HZ> to set Watchdog
+ * watchdog_v2.WDT_HZ=<clock val in HZ> to set Watchdog
  * ticks. By default it is set to 32765.
  */
 static long WDT_HZ = 32765;
 module_param(WDT_HZ, long, 0);
+
+/*
+ * On the kernel command line specify
+ * watchdog_v2.ipi_opt_en=1 to enable the watchdog ipi ping
+ * optimization. By default it is turned off
+ */
+static int ipi_opt_en;
+module_param(ipi_opt_en, int, 0);
 
 static void pet_watchdog_work(struct work_struct *work);
 static void init_watchdog_work(struct work_struct *work);
@@ -106,6 +121,7 @@ static int msm_watchdog_suspend(struct device *dev)
 	__raw_writel(0, wdog_dd->base + WDT0_EN);
 	mb();
 	wdog_dd->enabled = false;
+	wdog_dd->last_pet = sched_clock();
 	return 0;
 }
 
@@ -119,6 +135,7 @@ static int msm_watchdog_resume(struct device *dev)
 	__raw_writel(1, wdog_dd->base + WDT0_RST);
 	mb();
 	wdog_dd->enabled = true;
+	wdog_dd->last_pet = sched_clock();
 	return 0;
 }
 
@@ -210,8 +227,16 @@ static ssize_t wdog_disable_set(struct device *dev,
 			return count;
 		}
 		disable = 1;
-		ret = scm_call(SCM_SVC_BOOT, SCM_SVC_SEC_WDOG_DIS, &disable,
-						sizeof(disable), NULL, 0);
+		if (!is_scm_armv8()) {
+			ret = scm_call(SCM_SVC_BOOT, SCM_SVC_SEC_WDOG_DIS,
+				       &disable, sizeof(disable), NULL, 0);
+		} else {
+			struct scm_desc desc = {0};
+			desc.args[0] = 1;
+			desc.arginfo = SCM_ARGS(1);
+			ret = scm_call2(SCM_SIP_FNID(SCM_SVC_BOOT,
+					SCM_SVC_SEC_WDOG_DIS), &desc);
+		}
 		if (ret) {
 			dev_err(wdog_dd->dev,
 					"Failed to deactivate secure wdog\n");
@@ -276,8 +301,11 @@ static void ping_other_cpus(struct msm_watchdog_data *wdog_dd)
 	int cpu;
 	cpumask_clear(&wdog_dd->alive_mask);
 	smp_mb();
-	for_each_cpu(cpu, cpu_online_mask)
-		smp_call_function_single(cpu, keep_alive_response, wdog_dd, 1);
+	for_each_cpu(cpu, cpu_online_mask) {
+		if (!cpu_idle_pc_state[cpu])
+			smp_call_function_single(cpu, keep_alive_response,
+						 wdog_dd, 1);
+	}
 }
 
 static void pet_watchdog_work(struct work_struct *work)
@@ -300,11 +328,38 @@ static void pet_watchdog_work(struct work_struct *work)
 				&wdog_dd->dogwork_struct, delay_time);
 }
 
+static int wdog_cpu_pm_notify(struct notifier_block *self,
+			      unsigned long action, void *v)
+{
+	int cpu;
+
+	cpu = raw_smp_processor_id();
+
+	switch (action) {
+	case CPU_PM_ENTER:
+		cpu_idle_pc_state[cpu] = 1;
+		break;
+	case CPU_PM_ENTER_FAILED:
+	case CPU_PM_EXIT:
+		cpu_idle_pc_state[cpu] = 0;
+		break;
+	}
+
+	return NOTIFY_OK;
+}
+
+static struct notifier_block wdog_cpu_pm_nb = {
+	.notifier_call = wdog_cpu_pm_notify,
+};
+
 static int msm_watchdog_remove(struct platform_device *pdev)
 {
 	struct wdog_disable_work_data work_data;
 	struct msm_watchdog_data *wdog_dd =
 			(struct msm_watchdog_data *)platform_get_drvdata(pdev);
+
+	if (ipi_opt_en)
+		cpu_pm_unregister_notifier(&wdog_cpu_pm_nb);
 
 	mutex_lock(&wdog_dd->disable_lock);
 	if (enable) {
@@ -324,6 +379,24 @@ static int msm_watchdog_remove(struct platform_device *pdev)
 	return 0;
 }
 
+void msm_trigger_wdog_bite(void)
+{
+	if (!wdog_data)
+		return;
+	pr_info("Causing a watchdog bite!");
+	__raw_writel(1, wdog_data->base + WDT0_BITE_TIME);
+	mb();
+	__raw_writel(1, wdog_data->base + WDT0_RST);
+	mb();
+	/* Delay to make sure bite occurs */
+	mdelay(1);
+	pr_err("Wdog - STS: 0x%x, CTL: 0x%x, BARK TIME: 0x%x, BITE TIME: 0x%x",
+		__raw_readl(wdog_data->base + WDT0_STS),
+		__raw_readl(wdog_data->base + WDT0_EN),
+		__raw_readl(wdog_data->base + WDT0_BARK_TIME),
+		__raw_readl(wdog_data->base + WDT0_BITE_TIME));
+}
+
 static irqreturn_t wdog_bark_handler(int irq, void *dev_id)
 {
 	struct msm_watchdog_data *wdog_dd = (struct msm_watchdog_data *)dev_id;
@@ -339,18 +412,7 @@ static irqreturn_t wdog_bark_handler(int irq, void *dev_id)
 		wdog_dd->last_pet, nanosec_rem / 1000);
 	if (wdog_dd->do_ipi_ping)
 		dump_cpu_alive_mask(wdog_dd);
-	printk(KERN_INFO "Causing a watchdog bite!");
-	__raw_writel(1, wdog_dd->base + WDT0_BITE_TIME);
-	mb();
-	__raw_writel(1, wdog_dd->base + WDT0_RST);
-	mb();
-	/* Delay to make sure bite occurs */
-	mdelay(1);
-	pr_err("Wdog - STS: 0x%x, CTL: 0x%x, BARK TIME: 0x%x, BITE TIME: 0x%x",
-		__raw_readl(wdog_dd->base + WDT0_STS),
-		__raw_readl(wdog_dd->base + WDT0_EN),
-		__raw_readl(wdog_dd->base + WDT0_BARK_TIME),
-		__raw_readl(wdog_dd->base + WDT0_BITE_TIME));
+	msm_trigger_wdog_bite();
 	panic("Failed to cause a watchdog bite! - Falling back to kernel panic!");
 	return IRQ_HANDLED;
 }
@@ -374,14 +436,23 @@ static void configure_bark_dump(struct msm_watchdog_data *wdog_dd)
 		unsigned addr;
 		int len;
 	} cmd_buf;
+	struct scm_desc desc = {0};
 
 	if (MSM_DUMP_MAJOR(msm_dump_table_version()) == 1) {
 		wdog_dd->scm_regsave = (void *)__get_free_page(GFP_KERNEL);
 		if (wdog_dd->scm_regsave) {
-			cmd_buf.addr = virt_to_phys(wdog_dd->scm_regsave);
-			cmd_buf.len  = PAGE_SIZE;
-			ret = scm_call(SCM_SVC_UTIL, SCM_SET_REGSAVE_CMD,
-					&cmd_buf, sizeof(cmd_buf), NULL, 0);
+			desc.args[0] = cmd_buf.addr =
+					virt_to_phys(wdog_dd->scm_regsave);
+			desc.args[1] = cmd_buf.len  = PAGE_SIZE;
+			desc.arginfo = SCM_ARGS(2, SCM_RW, SCM_VAL);
+
+			if (!is_scm_armv8())
+				ret = scm_call(SCM_SVC_UTIL,
+					       SCM_SET_REGSAVE_CMD, &cmd_buf,
+					       sizeof(cmd_buf), NULL, 0);
+			else
+				ret = scm_call2(SCM_SIP_FNID(SCM_SVC_UTIL,
+						SCM_SET_REGSAVE_CMD), &desc);
 			if (ret)
 				pr_err("Setting register save address failed.\n"
 				       "Registers won't be dumped on a dog "
@@ -453,6 +524,13 @@ static void init_watchdog_work(struct work_struct *work)
 	u64 timeout;
 	int ret;
 
+	/*
+	 * Disable the watchdog for cluster 1 so that cluster 0 watchdog will
+	 * be mapped to the entire sub-system.
+	 */
+	if (wdog_dd->wdog_absent_base)
+		__raw_writel(2, wdog_dd->wdog_absent_base + WDOG_ABSENT);
+
 	if (wdog_dd->irq_ppi) {
 		wdog_dd->wdog_cpu_dd = alloc_percpu(struct msm_watchdog_data *);
 		if (!wdog_dd->wdog_cpu_dd) {
@@ -500,6 +578,8 @@ static void init_watchdog_work(struct work_struct *work)
 		dev_err(wdog_dd->dev, "cannot create sysfs attribute\n");
 	if (wdog_dd->irq_ppi)
 		enable_percpu_irq(wdog_dd->bark_irq, 0);
+	if (ipi_opt_en)
+		cpu_pm_register_notifier(&wdog_cpu_pm_nb);
 	dev_info(wdog_dd->dev, "MSM Watchdog Initialized\n");
 	return;
 }
@@ -522,14 +602,14 @@ static int msm_wdog_dt_to_pdata(struct platform_device *pdev,
 					struct msm_watchdog_data *pdata)
 {
 	struct device_node *node = pdev->dev.of_node;
-	struct resource *wdog_resource;
+	struct resource *res;
 	int ret;
 
-	wdog_resource = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!wdog_resource)
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "wdt-base");
+	if (!res)
 		return -ENODEV;
-	pdata->size = resource_size(wdog_resource);
-	pdata->phys_base = wdog_resource->start;
+	pdata->size = resource_size(res);
+	pdata->phys_base = res->start;
 	if (unlikely(!(devm_request_mem_region(&pdev->dev, pdata->phys_base,
 					       pdata->size, "msm-watchdog")))) {
 
@@ -543,6 +623,20 @@ static int msm_wdog_dt_to_pdata(struct platform_device *pdev,
 		dev_err(&pdev->dev, "%s cannot map wdog register space\n",
 				__func__);
 		return -ENXIO;
+	}
+
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
+					   "wdt-absent-base");
+	if (res) {
+		pdata->wdog_absent_base  = devm_ioremap(&pdev->dev, res->start,
+							 resource_size(res));
+		if (!pdata->wdog_absent_base) {
+			dev_err(&pdev->dev,
+				"cannot map wdog absent register space\n");
+			return -ENXIO;
+		}
+	} else {
+		dev_info(&pdev->dev, "wdog absent resource not present\n");
 	}
 
 	pdata->bark_irq = platform_get_irq(pdev, 0);
@@ -592,13 +686,14 @@ static int msm_watchdog_probe(struct platform_device *pdev)
 	ret = msm_wdog_dt_to_pdata(pdev, wdog_dd);
 	if (ret)
 		goto err;
+
+	wdog_data = wdog_dd;
 	wdog_dd->dev = &pdev->dev;
 	platform_set_drvdata(pdev, wdog_dd);
 	cpumask_clear(&wdog_dd->alive_mask);
 	INIT_WORK(&wdog_dd->init_dogwork_struct, init_watchdog_work);
 	INIT_DELAYED_WORK(&wdog_dd->dogwork_struct, pet_watchdog_work);
 	queue_work(wdog_wq, &wdog_dd->init_dogwork_struct);
-	wdog_data = wdog_dd;
 	return 0;
 err:
 	destroy_workqueue(wdog_wq);

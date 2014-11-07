@@ -37,6 +37,7 @@
 		qcom,soft-vfloat-comp-disabled;
 		therm-bias-supply = <&pma8084_lvs2>;
 		qcom,thermal-mitigation = <1500 700 600 0>;
+		qcom,charging-disabled;
 	};
 };
 
@@ -57,6 +58,10 @@
 	status = "ok";
 };
 
+&pcie1 {
+	qcom,ep-wakeirq;
+};
+
 &mhi {
 	esoc-names = "mdm";
 	esoc-0 = <&mdm1>;
@@ -67,7 +72,7 @@
 	qcom,msm-bus,num-paths = <1>;
 	qcom,msm-bus,vectors-KBps =
 			<100 512 0 0>,
-			<100 512 625000000 625000000>;
+			<100 512 1200000000 1200000000>;
 };
 
 &usb3 {

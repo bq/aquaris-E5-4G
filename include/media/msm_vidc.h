@@ -36,6 +36,7 @@ enum smem_prop {
  * in arch/arm/boot/dts/<arch>.dtsi
  */
 enum hal_buffer {
+	HAL_BUFFER_NONE = 0x0,
 	HAL_BUFFER_INPUT = 0x1,
 	HAL_BUFFER_OUTPUT = 0x2,
 	HAL_BUFFER_OUTPUT2 = 0x4,
@@ -78,6 +79,7 @@ enum session_type {
 };
 void *msm_vidc_open(int core_id, int session_type);
 int msm_vidc_close(void *instance);
+int msm_vidc_suspend(int core_id);
 int msm_vidc_querycap(void *instance, struct v4l2_capability *cap);
 int msm_vidc_enum_fmt(void *instance, struct v4l2_fmtdesc *f);
 int msm_vidc_s_fmt(void *instance, struct v4l2_format *f);

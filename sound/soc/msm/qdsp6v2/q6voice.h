@@ -16,6 +16,8 @@
 #include <linux/qdsp6v2/rtac.h>
 #include <linux/msm_ion.h>
 #include <sound/voice_params.h>
+#include <linux/power_supply.h>
+#include <uapi/linux/vm_bms.h>
 
 #define MAX_VOC_PKT_SIZE 642
 #define SESSION_NAME_LEN 20
@@ -33,15 +35,29 @@
 #define VOC_REC_DOWNLINK	0x01
 #define VOC_REC_BOTH		0x02
 
+#define VSS_IVERSION_CMD_GET                 0x00011378
+#define VSS_IVERSION_RSP_GET                 0x00011379
+#define CVD_VERSION_STRING_MAX_SIZE          31
+#define CVD_VERSION_DEFAULT                  ""
+#define CVD_VERSION_0_0                      "0.0"
+
+int voc_get_cvd_version(char *);
+
+/* Payload structure for the VSS_IVERSION_RSP_GET command response */
+struct vss_iversion_rsp_get_t {
+	char version[CVD_VERSION_STRING_MAX_SIZE];
+	/* NULL-terminated version string */
+};
+
 enum {
 	CVP_VOC_RX_TOPOLOGY_CAL = 0,
 	CVP_VOC_TX_TOPOLOGY_CAL,
 	CVP_VOCPROC_CAL,
 	CVP_VOCVOL_CAL,
-	CVS_VOCSTRM_CAL,
 	CVP_VOCDEV_CFG_CAL,
 	CVP_VOCPROC_COL_CAL,
 	CVP_VOCVOL_COL_CAL,
+	CVS_VOCSTRM_CAL,
 	CVS_VOCSTRM_COL_CAL,
 	VOICE_RTAC_INFO_CAL,
 	VOICE_RTAC_APR_CAL,
@@ -226,6 +242,8 @@ struct vss_unmap_memory_cmd {
 #define VSS_IMEMORY_CMD_UNMAP				0x00011337
 #define VSS_IMVM_CMD_SET_CAL_NETWORK			0x0001137A
 #define VSS_IMVM_CMD_SET_CAL_MEDIA_TYPE		0x0001137B
+#define VSS_IHDVOICE_CMD_ENABLE				0x000130A2
+#define VSS_IHDVOICE_CMD_DISABLE			0x000130A3
 
 enum msm_audio_voc_rate {
 		VOC_0_RATE, /* Blank frame */
@@ -361,6 +379,10 @@ struct mvm_set_voice_timing_cmd {
 	struct vss_icommon_cmd_set_voice_timing_t timing;
 } __packed;
 
+struct mvm_set_hd_enable_cmd {
+	struct apr_hdr hdr;
+} __packed;
+
 struct vss_imemory_table_descriptor_t {
 	uint64_t mem_address;
 	/*
@@ -465,6 +487,9 @@ struct vss_imemory_cmd_unmap_t {
 #define VSS_ISTREAM_CMD_REGISTER_CALIBRATION_DATA_V2    0x00011369
 
 #define VSS_ISTREAM_CMD_DEREGISTER_CALIBRATION_DATA     0x0001127A
+
+#define VSS_ISTREAM_CMD_REGISTER_STATIC_CALIBRATION_DATA        0x0001307D
+#define VSS_ISTREAM_CMD_DEREGISTER_STATIC_CALIBRATION_DATA      0x0001307E
 
 #define VSS_ISTREAM_CMD_SET_MEDIA_TYPE			0x00011186
 /* Set media type on the stream. */
@@ -954,6 +979,12 @@ struct vss_istream_cmd_set_packet_exchange_mode_t {
 #define VSS_IVOCPROC_CMD_REGISTER_VOL_CALIBRATION_DATA	0x00011374
 #define VSS_IVOCPROC_CMD_DEREGISTER_VOL_CALIBRATION_DATA	0x00011375
 
+#define VSS_IVOCPROC_CMD_REGISTER_STATIC_CALIBRATION_DATA       0x00013079
+#define VSS_IVOCPROC_CMD_DEREGISTER_STATIC_CALIBRATION_DATA     0x0001307A
+
+#define VSS_IVOCPROC_CMD_REGISTER_DYNAMIC_CALIBRATION_DATA      0x0001307B
+#define VSS_IVOCPROC_CMD_DEREGISTER_DYNAMIC_CALIBRATION_DATA    0x0001307C
+
 #define VSS_IVOCPROC_TOPOLOGY_ID_NONE			0x00010F70
 #define VSS_IVOCPROC_TOPOLOGY_ID_TX_SM_ECNS		0x00010F71
 #define VSS_IVOCPROC_TOPOLOGY_ID_TX_DM_FLUENCE		0x00010F72
@@ -1346,6 +1377,9 @@ typedef void (*dtmf_rx_det_cb_fn)(uint8_t *pkt,
 				  char *session,
 				  void *private_data);
 
+typedef void (*voip_ssr_cb) (uint32_t opcode,
+				void *private_data);
+
 typedef void (*hostpcm_cb_fn)(uint8_t *data,
 			   char *session,
 			   void *private_data);
@@ -1357,6 +1391,7 @@ struct mvs_driver_info {
 	uint32_t dtx_mode;
 	ul_cb_fn ul_cb;
 	dl_cb_fn dl_cb;
+	voip_ssr_cb ssr_cb;
 	void *private_data;
 	uint32_t evrc_min_rate;
 	uint32_t evrc_max_rate;
@@ -1429,6 +1464,7 @@ struct voice_data {
 	uint8_t tty_mode;
 	/* slowtalk enable value */
 	uint32_t st_enable;
+	uint32_t hd_enable;
 	uint32_t dtmf_rx_detect_en;
 	/* Local Call Hold mode */
 	uint8_t lch_mode;
@@ -1442,6 +1478,8 @@ struct voice_data {
 	struct incall_music_info music_info;
 
 	struct voice_rec_route_state rec_route_state;
+
+	struct power_supply *psy;
 };
 
 struct cal_mem {
@@ -1494,6 +1532,9 @@ struct common_data {
 
 	bool srvcc_rec_flag;
 	bool is_destroy_cvd;
+	bool is_vote_bms;
+	char cvd_version[CVD_VERSION_STRING_MAX_SIZE];
+	bool is_per_vocoder_cal_enabled;
 };
 
 struct voice_session_itr {
@@ -1503,6 +1544,7 @@ struct voice_session_itr {
 
 void voc_register_mvs_cb(ul_cb_fn ul_cb,
 			dl_cb_fn dl_cb,
+			voip_ssr_cb ssr_cb,
 			void *private_data);
 
 void voc_register_dtmf_rx_detection_cb(dtmf_rx_det_cb_fn dtmf_rx_ul_cb,
@@ -1568,6 +1610,7 @@ enum vsid_app_type {
 int voc_set_pp_enable(uint32_t session_id, uint32_t module_id,
 		      uint32_t enable);
 int voc_get_pp_enable(uint32_t session_id, uint32_t module_id);
+int voc_set_hd_enable(uint32_t session_id, uint32_t enable);
 uint8_t voc_get_tty_mode(uint32_t session_id);
 int voc_set_tty_mode(uint32_t session_id, uint8_t tty_mode);
 int voc_start_voice_call(uint32_t session_id);
@@ -1589,6 +1632,7 @@ int voc_set_route_flag(uint32_t session_id, uint8_t path_dir, uint8_t set);
 uint8_t voc_get_route_flag(uint32_t session_id, uint8_t path_dir);
 int voc_enable_dtmf_rx_detection(uint32_t session_id, uint32_t enable);
 void voc_disable_dtmf_det_on_active_sessions(void);
+int voc_alloc_cal_shared_memory(void);
 int voc_alloc_voip_shared_memory(void);
 int is_voc_initialized(void);
 int voc_register_vocproc_vol_table(void);
@@ -1620,8 +1664,8 @@ int voc_update_amr_vocoder_rate(uint32_t session_id);
 int voc_disable_device(uint32_t session_id);
 int voc_enable_device(uint32_t session_id);
 void voc_set_destroy_cvd_flag(bool is_destroy_cvd);
+void voc_set_vote_bms_flag(bool is_vote_bms);
 int voc_disable_topology(uint32_t session_id, uint32_t disable);
 
-int voice_get_rx_topology(void);
-int voice_get_tx_topology(void);
+uint32_t voice_get_topology(uint32_t topology_idx);
 #endif

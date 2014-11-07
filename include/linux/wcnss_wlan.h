@@ -29,6 +29,7 @@ enum wcnss_hw_type {
 struct wcnss_wlan_config {
 	int	use_48mhz_xo;
 	int	is_pronto_vt;
+	int	is_pronto_v3;
 	void __iomem	*msm_wcnss_base;
 };
 
@@ -38,14 +39,36 @@ enum {
 	WCNSS_XO_INVALID,
 };
 
+enum {
+	WCNSS_WLAN_DATA2,
+	WCNSS_WLAN_DATA1,
+	WCNSS_WLAN_DATA0,
+	WCNSS_WLAN_SET,
+	WCNSS_WLAN_CLK,
+	WCNSS_WLAN_MAX_GPIO,
+};
+
 #define WCNSS_WLAN_IRQ_INVALID -1
 #define HAVE_WCNSS_SUSPEND_RESUME_NOTIFY 1
 #define HAVE_WCNSS_RESET_INTR 1
 #define HAVE_WCNSS_CAL_DOWNLOAD 1
 #define HAVE_WCNSS_RX_BUFF_COUNT 1
 #define WLAN_MAC_ADDR_SIZE (6)
+#define WLAN_RF_REG_ADDR_START_OFFSET	0x3
+#define WLAN_RF_REG_DATA_START_OFFSET	0xf
+#define WLAN_RF_READ_REG_CMD		0x3
+#define WLAN_RF_WRITE_REG_CMD		0x2
+#define WLAN_RF_READ_CMD_MASK		0x3fff
+#define WLAN_RF_CLK_WAIT_CYCLE		2
+#define WLAN_RF_PREPARE_CMD_DATA	5
+#define WLAN_RF_READ_DATA		6
+#define WLAN_RF_DATA_LEN		3
+#define WLAN_RF_DATA0_SHIFT		0
+#define WLAN_RF_DATA1_SHIFT		1
+#define WLAN_RF_DATA2_SHIFT		2
 
 struct device *wcnss_wlan_get_device(void);
+void wcnss_get_monotonic_boottime(struct timespec *ts);
 struct resource *wcnss_wlan_get_memory_map(struct device *dev);
 int wcnss_wlan_get_dxe_tx_irq(struct device *dev);
 int wcnss_wlan_get_dxe_rx_irq(struct device *dev);
@@ -78,6 +101,7 @@ void wcnss_suspend_notify(void);
 void wcnss_resume_notify(void);
 void wcnss_riva_log_debug_regs(void);
 void wcnss_pronto_log_debug_regs(void);
+int wcnss_is_hw_pronto_ver3(void);
 int wcnss_device_ready(void);
 int wcnss_device_is_shutdown(void);
 void wcnss_riva_dump_pmic_regs(void);

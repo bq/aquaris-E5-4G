@@ -70,25 +70,9 @@ static DEFINE_VDD_REGULATORS(vdd_mmpll4, VDD_DIG_NUM, 2, vdd_mmpll4_levels,
 #define GP1_CBCR                                         (0x1900)
 #define GP1_CMD_RCGR                                     (0x1904)
 #define MMPLL0_MODE                                      (0x0000)
-#define MMPLL0_L_VAL                                     (0x0004)
-#define MMPLL0_ALPHA_VAL                                 (0x0008)
-#define MMPLL0_ALPHA_VAL_U                               (0x000C)
-#define MMPLL0_USER_CTL                                  (0x0010)
 #define MMPLL1_MODE                                      (0x0030)
-#define MMPLL1_L_VAL                                     (0x0034)
-#define MMPLL1_ALPHA_VAL                                 (0x0038)
-#define MMPLL1_ALPHA_VAL_U                               (0x003C)
-#define MMPLL1_USER_CTL                                  (0x0040)
 #define MMPLL3_MODE                                      (0x0060)
-#define MMPLL3_L_VAL                                     (0x0064)
-#define MMPLL3_ALPHA_VAL                                 (0x0068)
-#define MMPLL3_ALPHA_VAL_U                               (0x006C)
-#define MMPLL3_USER_CTL                                  (0x0070)
 #define MMPLL4_MODE                                      (0x0090)
-#define MMPLL4_L_VAL                                     (0x0094)
-#define MMPLL4_ALPHA_VAL                                 (0x0098)
-#define MMPLL4_ALPHA_VAL_U                               (0x009C)
-#define MMPLL4_USER_CTL                                  (0x00A0)
 #define MMPLL5_MODE                                      (0x00C0)
 #define MMSS_PLL_VOTE_APCS                               (0x0100)
 #define VCODEC0_CMD_RCGR                                 (0x1000)
@@ -200,6 +184,8 @@ static DEFINE_VDD_REGULATORS(vdd_mmpll4, VDD_DIG_NUM, 2, vdd_mmpll4_levels,
 #define FD_AXI_CBCR                                      (0x3B70)
 #define FD_AHB_CBCR                                      (0x3B74)
 #define OXILI_GFX3D_CBCR                                 (0x4028)
+#define RBBMTIMER_CMD_RCGR                               (0x4090)
+#define OXILI_RBBMTIMER_CBCR                             (0x40B0)
 #define OXILICX_AHB_CBCR                                 (0x403C)
 #define OCMEMCX_OCMEMNOC_CBCR                            (0x4058)
 #define MMSS_MISC_AHB_CBCR                               (0x502C)
@@ -209,10 +195,19 @@ static DEFINE_VDD_REGULATORS(vdd_mmpll4, VDD_DIG_NUM, 2, vdd_mmpll4_levels,
 #define OCMEMNOC_CMD_RCGR                                (0x5090)
 #define MMSS_DEBUG_CLK_CTL                               (0x0900)
 
-static struct alpha_pll_masks alpha_pll_masks_20nm = {
+static struct alpha_pll_masks pll_masks_p = {
 	.lock_mask = BIT(31),
-	.update_mask = BIT(22),
+	.active_mask = BIT(30),
+	.vco_mask = BM(21, 20) >> 20,
+	.vco_shift = 20,
 	.alpha_en_mask = BIT(24),
+	.output_mask = 0xf,
+};
+
+static struct alpha_pll_masks pll_masks_t = {
+	.lock_mask = BIT(31),
+	.alpha_en_mask = BIT(24),
+	.output_mask = 0xf,
 };
 
 static struct alpha_pll_vco_tbl mmpll_t_vco[] = {
@@ -230,17 +225,20 @@ DEFINE_EXT_CLK(mmsscc_xo, NULL);
 DEFINE_EXT_CLK(mmsscc_gpll0, NULL);
 DEFINE_EXT_CLK(mmsscc_mmssnoc_ahb, NULL);
 
-static struct pll_vote_clk mmpll0 = {
-	.en_reg = (void __iomem *)MMSS_PLL_VOTE_APCS,
-	.en_mask = BIT(0),
-	.status_reg = (void __iomem *)MMPLL0_MODE,
-	.status_mask = BIT(30),
+static struct alpha_pll_clk mmpll0 = {
+	.masks = &pll_masks_p,
 	.base = &virt_base,
+	.offset = MMPLL0_MODE,
+	.vco_tbl = mmpll_p_vco,
+	.num_vco = ARRAY_SIZE(mmpll_p_vco),
+	.fsm_reg_offset = MMSS_PLL_VOTE_APCS,
+	.fsm_en_mask = BIT(0),
+	.enable_config = 0x1,
 	.c = {
 		.rate = 800000000,
 		.parent = &mmsscc_xo.c,
 		.dbg_name = "mmpll0",
-		.ops = &clk_ops_pll_vote,
+		.ops = &clk_ops_fixed_alpha_pll,
 		VDD_DIG_FMAX_MAP3(LOWER, 400000000, LOW, 400000000,
 				  NOMINAL, 800000000),
 		CLK_INIT(mmpll0.c),
@@ -249,63 +247,74 @@ static struct pll_vote_clk mmpll0 = {
 DEFINE_EXT_CLK(mmpll0_out_main, &mmpll0.c);
 
 static struct alpha_pll_clk mmpll4 = {
-	.masks = &alpha_pll_masks_20nm,
+	.masks = &pll_masks_t,
 	.base = &virt_base,
 	.offset = MMPLL4_MODE,
 	.vco_tbl = mmpll_t_vco,
 	.num_vco = ARRAY_SIZE(mmpll_t_vco),
+	.enable_config = 0x1,
 	.c = {
 		.parent = &mmsscc_xo.c,
 		.rate = 930000000,
 		.dbg_name = "mmpll4",
 		.ops = &clk_ops_fixed_alpha_pll,
-		VDD_MMPLL4_FMAX_MAP3(LOWER, 650000000, LOW, 650000000,
-				     NOMINAL, 1300000000),
+		VDD_MMPLL4_FMAX_MAP3(LOWER, 625000000, LOW, 625000000,
+				     NOMINAL, 1250000000),
 		CLK_INIT(mmpll4.c),
 	},
 };
 DEFINE_EXT_CLK(mmpll4_out_main, &mmpll4.c);
 
-static struct pll_vote_clk mmpll1 = {
-	.en_reg = (void __iomem *)MMSS_PLL_VOTE_APCS,
-	.en_mask = BIT(1),
-	.status_reg = (void __iomem *)MMPLL1_MODE,
-	.status_mask = BIT(30),
+static struct alpha_pll_clk mmpll1 = {
+	.masks = &pll_masks_p,
 	.base = &virt_base,
+	.offset = MMPLL1_MODE,
+	.vco_tbl = mmpll_p_vco,
+	.num_vco = ARRAY_SIZE(mmpll_p_vco),
+	.fsm_reg_offset = MMSS_PLL_VOTE_APCS,
+	.fsm_en_mask = BIT(1),
+	.enable_config = 0x1,
 	.c = {
-		.rate = 1167000000,
+		.rate = 726000000,
 		.parent = &mmsscc_xo.c,
 		.dbg_name = "mmpll1",
-		.ops = &clk_ops_pll_vote,
-		VDD_DIG_FMAX_MAP3(LOWER, 650000000, LOW, 650000000,
-				  NOMINAL, 1300000000),
+		.ops = &clk_ops_fixed_alpha_pll,
+		VDD_DIG_FMAX_MAP3(LOWER, 600000000, LOW, 600000000,
+				  NOMINAL, 1200000000),
 		CLK_INIT(mmpll1.c),
 	},
 };
 DEFINE_EXT_CLK(mmpll1_out_main, &mmpll1.c);
 
 static struct alpha_pll_clk mmpll3 = {
-	.masks = &alpha_pll_masks_20nm,
+	.masks = &pll_masks_p,
 	.base = &virt_base,
 	.offset = MMPLL3_MODE,
 	.vco_tbl = mmpll_p_vco,
 	.num_vco = ARRAY_SIZE(mmpll_p_vco),
+	.enable_config = 0x1,
 	.c = {
 		.parent = &mmsscc_xo.c,
 		.rate = 930000000,
 		.dbg_name = "mmpll3",
 		.ops = &clk_ops_fixed_alpha_pll,
-		VDD_DIG_FMAX_MAP3(LOWER, 650000000, LOW, 650000000,
-				  NOMINAL, 1300000000),
+		VDD_DIG_FMAX_MAP3(LOWER, 600000000, LOW, 600000000,
+				  NOMINAL, 1200000000),
 		CLK_INIT(mmpll3.c),
 	},
 };
 DEFINE_EXT_CLK(mmpll3_out_main, &mmpll3.c);
 
 static struct clk_freq_tbl ftbl_axi_clk_src[] = {
-	F_MM(  19200000,        mmsscc_xo,    1,    0,     0),
 	F_MM(  75000000,     mmsscc_gpll0,    8,    0,     0),
-	F_MM( 100000000,     mmsscc_gpll0,    6,    0,     0),
+	F_MM( 150000000,     mmsscc_gpll0,    4,    0,     0),
+	F_MM( 300000000,     mmsscc_gpll0,    2,    0,     0),
+	F_MM( 363000000,  mmpll1_out_main,    2,    0,     0),
+	F_END
+};
+
+static struct clk_freq_tbl ftbl_axi_clk_src_v2[] = {
+	F_MM(  75000000,     mmsscc_gpll0,    8,    0,     0),
 	F_MM( 150000000,     mmsscc_gpll0,    4,    0,     0),
 	F_MM( 333430000,  mmpll1_out_main,  3.5,    0,     0),
 	F_MM( 466800000,  mmpll1_out_main,  2.5,    0,     0),
@@ -322,24 +331,25 @@ static struct rcg_clk axi_clk_src = {
 		.dbg_name = "axi_clk_src",
 		.ops = &clk_ops_rcg,
 		VDD_DIG_FMAX_MAP4(LOWER, 75000000, LOW, 150000000,
-				  NOMINAL, 333430000, HIGH, 466800000),
+				  NOMINAL, 300000000, HIGH, 363000000),
 		CLK_INIT(axi_clk_src.c),
 	},
 };
 
 static struct alpha_pll_clk mmpll5 = {
-	.masks = &alpha_pll_masks_20nm,
+	.masks = &pll_masks_p,
 	.base = &virt_base,
 	.offset = MMPLL5_MODE,
 	.vco_tbl = mmpll_p_vco,
 	.num_vco = ARRAY_SIZE(mmpll_p_vco),
+	.enable_config = 0x1,
 	.c = {
 		.parent = &mmsscc_xo.c,
 		.rate = 960000000,
 		.dbg_name = "mmpll5",
 		.ops = &clk_ops_fixed_alpha_pll,
-		VDD_DIG_FMAX_MAP3(LOWER, 650000000, LOW, 650000000,
-				  NOMINAL, 1300000000),
+		VDD_DIG_FMAX_MAP3(LOWER, 600000000, LOW, 600000000,
+				  NOMINAL, 1200000000),
 		CLK_INIT(mmpll5.c),
 	},
 };
@@ -347,6 +357,7 @@ DEFINE_EXT_CLK(mmpll5_out_main, &mmpll5.c);
 
 static struct clk_freq_tbl ftbl_csi0_clk_src[] = {
 	F_MM( 100000000,     mmsscc_gpll0,    6,    0,     0),
+	F_MM( 240000000,     mmsscc_gpll0,  2.5,    0,     0),
 	F_MM( 266670000,  mmpll0_out_main,    3,    0,     0),
 	F_END
 };
@@ -361,7 +372,7 @@ static struct rcg_clk csi0_clk_src = {
 		.dbg_name = "csi0_clk_src",
 		.ops = &clk_ops_rcg,
 		VDD_DIG_FMAX_MAP3(LOWER, 50000000, LOW, 100000000,
-				  NOMINAL, 266670000),
+				  NOMINAL, 240000000),
 		CLK_INIT(csi0_clk_src.c),
 	},
 };
@@ -371,8 +382,21 @@ static struct clk_freq_tbl ftbl_vcodec0_clk_src[] = {
 	F_MM( 100000000,     mmsscc_gpll0,    6,    0,     0),
 	F_MM( 133330000,     mmsscc_gpll0,  4.5,    0,     0),
 	F_MM( 200000000,  mmpll0_out_main,    4,    0,     0),
-	F_MM( 266670000,  mmpll0_out_main,    3,    0,     0),
+	F_MM( 240000000,     mmsscc_gpll0,  2.5,    0,     0),
 	F_MM( 465000000,  mmpll3_out_main,    2,    0,     0),
+	F_END
+};
+
+static struct clk_freq_tbl ftbl_vcodec0_clk_src_v2[] = {
+	F_MM(  66670000,     mmsscc_gpll0,    9,    0,     0),
+	F_MM( 100000000,     mmsscc_gpll0,    6,    0,     0),
+	F_MM( 133330000,     mmsscc_gpll0,  4.5,    0,     0),
+	F_MM( 150000000,     mmsscc_gpll0,    4,    0,     0),
+	F_MM( 200000000,  mmpll0_out_main,    4,    0,     0),
+	F_MM( 240000000,     mmsscc_gpll0,  2.5,    0,     0),
+	F_MM( 266670000,  mmpll0_out_main,    3,    0,     0),
+	F_MM( 320000000,  mmpll0_out_main,  2.5,    0,     0),
+	F_MM( 510000000,  mmpll3_out_main,    2,    0,     0),
 	F_END
 };
 
@@ -386,13 +410,14 @@ static struct rcg_clk vcodec0_clk_src = {
 		.dbg_name = "vcodec0_clk_src",
 		.ops = &clk_ops_rcg_mnd,
 		VDD_DIG_FMAX_MAP4(LOWER, 66670000, LOW, 133330000,
-				  NOMINAL, 266670000, HIGH, 510000000),
+				  NOMINAL, 240000000, HIGH, 465000000),
 		CLK_INIT(vcodec0_clk_src.c),
 	},
 };
 
 static struct clk_freq_tbl ftbl_csi1_clk_src[] = {
 	F_MM( 100000000,     mmsscc_gpll0,    6,    0,     0),
+	F_MM( 240000000,     mmsscc_gpll0,  2.5,    0,     0),
 	F_MM( 266670000,  mmpll0_out_main,    3,    0,     0),
 	F_END
 };
@@ -407,13 +432,14 @@ static struct rcg_clk csi1_clk_src = {
 		.dbg_name = "csi1_clk_src",
 		.ops = &clk_ops_rcg,
 		VDD_DIG_FMAX_MAP3(LOWER, 50000000, LOW, 100000000,
-				  NOMINAL, 266670000),
+				  NOMINAL, 240000000),
 		CLK_INIT(csi1_clk_src.c),
 	},
 };
 
 static struct clk_freq_tbl ftbl_csi2_clk_src[] = {
 	F_MM( 100000000,     mmsscc_gpll0,    6,    0,     0),
+	F_MM( 240000000,     mmsscc_gpll0,  2.5,    0,     0),
 	F_MM( 266670000,  mmpll0_out_main,    3,    0,     0),
 	F_END
 };
@@ -428,13 +454,14 @@ static struct rcg_clk csi2_clk_src = {
 		.dbg_name = "csi2_clk_src",
 		.ops = &clk_ops_rcg,
 		VDD_DIG_FMAX_MAP3(LOWER, 50000000, LOW, 100000000,
-				  NOMINAL, 266670000),
+				  NOMINAL, 240000000),
 		CLK_INIT(csi2_clk_src.c),
 	},
 };
 
 static struct clk_freq_tbl ftbl_csi3_clk_src[] = {
 	F_MM( 100000000,     mmsscc_gpll0,    6,    0,     0),
+	F_MM( 240000000,     mmsscc_gpll0,  2.5,    0,     0),
 	F_MM( 266670000,  mmpll0_out_main,    3,    0,     0),
 	F_END
 };
@@ -449,9 +476,21 @@ static struct rcg_clk csi3_clk_src = {
 		.dbg_name = "csi3_clk_src",
 		.ops = &clk_ops_rcg,
 		VDD_DIG_FMAX_MAP3(LOWER, 50000000, LOW, 100000000,
-				  NOMINAL, 266670000),
+				  NOMINAL, 240000000),
 		CLK_INIT(csi3_clk_src.c),
 	},
+};
+
+static struct clk_freq_tbl ftbl_vfe_clk_src_v2[] = {
+	F_MM(  80000000,     mmsscc_gpll0,  7.5,    0,     0),
+	F_MM( 100000000,     mmsscc_gpll0,    6,    0,     0),
+	F_MM( 200000000,     mmsscc_gpll0,    3,    0,     0),
+	F_MM( 320000000,  mmpll0_out_main,  2.5,    0,     0),
+	F_MM( 400000000,  mmpll0_out_main,    2,    0,     0),
+	F_MM( 480000000,  mmpll4_out_main,    2,    0,     0),
+	F_MM( 533330000,  mmpll0_out_main,  1.5,    0,     0),
+	F_MM( 600000000,     mmsscc_gpll0,    1,    0,     0),
+	F_END
 };
 
 static struct clk_freq_tbl ftbl_vfe0_clk_src[] = {
@@ -459,8 +498,8 @@ static struct clk_freq_tbl ftbl_vfe0_clk_src[] = {
 	F_MM( 100000000,     mmsscc_gpll0,    6,    0,     0),
 	F_MM( 200000000,     mmsscc_gpll0,    3,    0,     0),
 	F_MM( 320000000,  mmpll0_out_main,  2.5,    0,     0),
-	F_MM( 465000000,  mmpll4_out_main,    2,    0,     0),
-	F_MM( 600000000,     mmsscc_gpll0,    1,    0,     0),
+	F_MM( 400000000,  mmpll0_out_main,    2,    0,     0),
+	F_MM( 533330000,  mmpll0_out_main,  1.5,    0,     0),
 	F_END
 };
 
@@ -474,7 +513,7 @@ static struct rcg_clk vfe0_clk_src = {
 		.dbg_name = "vfe0_clk_src",
 		.ops = &clk_ops_rcg,
 		VDD_DIG_FMAX_MAP4(LOWER, 100000000, LOW, 200000000,
-				  NOMINAL, 465000000, HIGH, 600000000),
+				  NOMINAL, 400000000, HIGH, 533330000),
 		CLK_INIT(vfe0_clk_src.c),
 	},
 };
@@ -484,8 +523,8 @@ static struct clk_freq_tbl ftbl_vfe1_clk_src[] = {
 	F_MM( 100000000,     mmsscc_gpll0,    6,    0,     0),
 	F_MM( 200000000,     mmsscc_gpll0,    3,    0,     0),
 	F_MM( 320000000,  mmpll0_out_main,  2.5,    0,     0),
-	F_MM( 465000000,  mmpll4_out_main,    2,    0,     0),
-	F_MM( 600000000,     mmsscc_gpll0,    1,    0,     0),
+	F_MM( 400000000,  mmpll0_out_main,    2,    0,     0),
+	F_MM( 533330000,  mmpll0_out_main,  1.5,    0,     0),
 	F_END
 };
 
@@ -499,7 +538,7 @@ static struct rcg_clk vfe1_clk_src = {
 		.dbg_name = "vfe1_clk_src",
 		.ops = &clk_ops_rcg,
 		VDD_DIG_FMAX_MAP4(LOWER, 100000000, LOW, 200000000,
-				  NOMINAL, 465000000, HIGH, 600000000),
+				  NOMINAL, 400000000, HIGH, 533330000),
 		CLK_INIT(vfe1_clk_src.c),
 	},
 };
@@ -509,7 +548,17 @@ static struct clk_freq_tbl ftbl_cpp_clk_src[] = {
 	F_MM( 200000000,     mmsscc_gpll0,    3,    0,     0),
 	F_MM( 320000000,  mmpll0_out_main,  2.5,    0,     0),
 	F_MM( 465000000,  mmpll4_out_main,    2,    0,     0),
-	F_MM( 620000000,  mmpll4_out_main,  1.5,    0,     0),
+	F_MM( 600000000,     mmsscc_gpll0,    1,    0,     0),
+	F_END
+};
+
+static struct clk_freq_tbl ftbl_cpp_clk_src_v2[] = {
+	F_MM( 100000000,     mmsscc_gpll0,    6,    0,     0),
+	F_MM( 200000000,     mmsscc_gpll0,    3,    0,     0),
+	F_MM( 320000000,  mmpll0_out_main,  2.5,    0,     0),
+	F_MM( 480000000,  mmpll4_out_main,    2,    0,     0),
+	F_MM( 600000000,     mmsscc_gpll0,    1,    0,     0),
+	F_MM( 640000000,  mmpll4_out_main,  1.5,    0,     0),
 	F_END
 };
 
@@ -523,7 +572,7 @@ static struct rcg_clk cpp_clk_src = {
 		.dbg_name = "cpp_clk_src",
 		.ops = &clk_ops_rcg,
 		VDD_DIG_FMAX_MAP4(LOWER, 100000000, LOW, 200000000,
-				  NOMINAL, 465000000, HIGH, 620000000),
+				  NOMINAL, 465000000, HIGH, 600000000),
 		CLK_INIT(cpp_clk_src.c),
 	},
 };
@@ -535,6 +584,16 @@ static struct clk_freq_tbl ftbl_jpeg1_clk_src[] = {
 	F_MM( 266670000,  mmpll0_out_main,    3,    0,     0),
 	F_MM( 320000000,  mmpll0_out_main,  2.5,    0,     0),
 	F_MM( 465000000,  mmpll4_out_main,    2,    0,     0),
+	F_END
+};
+
+static struct clk_freq_tbl ftbl_jpeg1_clk_src_v2[] = {
+	F_MM(  75000000,     mmsscc_gpll0,    8,    0,     0),
+	F_MM( 150000000,     mmsscc_gpll0,    4,    0,     0),
+	F_MM( 228570000,  mmpll0_out_main,  3.5,    0,     0),
+	F_MM( 266670000,  mmpll0_out_main,    3,    0,     0),
+	F_MM( 320000000,  mmpll0_out_main,  2.5,    0,     0),
+	F_MM( 480000000,  mmpll4_out_main,    2,    0,     0),
 	F_END
 };
 
@@ -555,6 +614,16 @@ static struct rcg_clk jpeg1_clk_src = {
 
 static struct clk_freq_tbl ftbl_jpeg2_clk_src[] = {
 	F_MM(  75000000,     mmsscc_gpll0,    8,    0,     0),
+	F_MM( 150000000,     mmsscc_gpll0,    4,    0,     0),
+	F_MM( 228570000,  mmpll0_out_main,  3.5,    0,     0),
+	F_MM( 266670000,  mmpll0_out_main,    3,    0,     0),
+	F_MM( 320000000,  mmpll0_out_main,  2.5,    0,     0),
+	F_END
+};
+
+static struct clk_freq_tbl ftbl_jpeg2_clk_src_v2[] = {
+	F_MM(  75000000,     mmsscc_gpll0,    8,    0,     0),
+	F_MM( 133330000,     mmsscc_gpll0,  4.5,    0,     0),
 	F_MM( 150000000,     mmsscc_gpll0,    4,    0,     0),
 	F_MM( 228570000,  mmpll0_out_main,  3.5,    0,     0),
 	F_MM( 266670000,  mmpll0_out_main,    3,    0,     0),
@@ -602,6 +671,7 @@ static struct rcg_clk csi2phytimer_clk_src = {
 static struct clk_freq_tbl ftbl_fd_core_clk_src[] = {
 	F_MM(  60000000,     mmsscc_gpll0,   10,    0,     0),
 	F_MM( 200000000,     mmsscc_gpll0,    3,    0,     0),
+	F_MM( 320000000,  mmpll0_out_main,  2.5,    0,     0),
 	F_MM( 400000000,  mmpll0_out_main,    2,    0,     0),
 	F_END
 };
@@ -615,16 +685,22 @@ static struct rcg_clk fd_core_clk_src = {
 	.c = {
 		.dbg_name = "fd_core_clk_src",
 		.ops = &clk_ops_rcg,
-		VDD_DIG_FMAX_MAP3(LOWER, 60000000, LOW, 200000000,
-				  NOMINAL, 400000000),
+		VDD_DIG_FMAX_MAP4(LOWER, 60000000, LOW, 200000000,
+				  NOMINAL, 320000000, HIGH, 400000000),
 		CLK_INIT(fd_core_clk_src.c),
 	},
 };
 
 static struct clk_freq_tbl ftbl_mdp_clk_src[] = {
 	F_MM(  85710000,     mmsscc_gpll0,    7,    0,     0),
+	F_MM( 100000000,     mmsscc_gpll0,    6,    0,     0),
+	F_MM( 120000000,     mmsscc_gpll0,    5,    0,     0),
+	F_MM( 150000000,     mmsscc_gpll0,    4,    0,     0),
 	F_MM( 171430000,     mmsscc_gpll0,  3.5,    0,     0),
-	F_MM( 250000000,     mmsscc_gpll0,    4,    0,     0),
+	F_MM( 200000000,     mmsscc_gpll0,    3,    0,     0),
+	F_MM( 240000000,     mmsscc_gpll0,  2.5,    0,     0),
+	F_MM( 266670000,  mmpll0_out_main,    3,    0,     0),
+	F_MM( 300000000,     mmsscc_gpll0,    2,    0,     0),
 	F_MM( 320000000,  mmpll0_out_main,  2.5,    0,     0),
 	F_MM( 400000000,  mmpll0_out_main,    2,    0,     0),
 	F_END
@@ -645,10 +721,12 @@ static struct rcg_clk mdp_clk_src = {
 	},
 };
 
+DEFINE_EXT_CLK(ext_pclk0_clk_src, NULL);
 static struct clk_freq_tbl ftbl_pclk0_clk_src[] = {
 	{
 		.div_src_val = BVAL(10, 8, dsi0phypll_mm_source_val)
 				| BVAL(4, 0, 0),
+		.src_clk = &ext_pclk0_clk_src.c,
 	},
 	F_END
 };
@@ -659,6 +737,7 @@ static struct rcg_clk pclk0_clk_src = {
 	.base = &virt_base,
 	.c = {
 		.dbg_name = "pclk0_clk_src",
+		.parent = &ext_pclk0_clk_src.c,
 		.ops = &clk_ops_pixel,
 		VDD_DIG_FMAX_MAP3(LOWER, 75000000, LOW, 150000000,
 				  NOMINAL, 250000000),
@@ -666,10 +745,12 @@ static struct rcg_clk pclk0_clk_src = {
 	},
 };
 
+DEFINE_EXT_CLK(ext_pclk1_clk_src, NULL);
 static struct clk_freq_tbl ftbl_pclk1_clk_src[] = {
 	{
-		.div_src_val = BVAL(10, 8, dsi1phypll_mm_source_val)
+		.div_src_val = BVAL(10, 8, dsi0phypll_mm_source_val)
 				| BVAL(4, 0, 0),
+		.src_clk = &ext_pclk1_clk_src.c,
 	},
 	F_END
 };
@@ -680,6 +761,7 @@ static struct rcg_clk pclk1_clk_src = {
 	.base = &virt_base,
 	.c = {
 		.dbg_name = "pclk1_clk_src",
+		.parent = &ext_pclk1_clk_src.c,
 		.ops = &clk_ops_pixel,
 		VDD_DIG_FMAX_MAP3(LOWER, 75000000, LOW, 150000000,
 				  NOMINAL, 250000000),
@@ -692,6 +774,8 @@ static struct clk_freq_tbl ftbl_ocmemnoc_clk_src[] = {
 	F_MM(  75000000,     mmsscc_gpll0,    8,    0,     0),
 	F_MM( 100000000,     mmsscc_gpll0,    6,    0,     0),
 	F_MM( 150000000,     mmsscc_gpll0,    4,    0,     0),
+	F_MM( 228570000,  mmpll0_out_main,  3.5,    0,     0),
+	F_MM( 266670000,  mmpll0_out_main,    3,    0,     0),
 	F_MM( 320000000,  mmpll0_out_main,  2.5,    0,     0),
 	F_MM( 400000000,  mmpll0_out_main,    2,    0,     0),
 	F_END
@@ -707,12 +791,13 @@ static struct rcg_clk ocmemnoc_clk_src = {
 		.dbg_name = "ocmemnoc_clk_src",
 		.ops = &clk_ops_rcg,
 		VDD_DIG_FMAX_MAP4(LOWER, 75000000, LOW, 150000000,
-				  NOMINAL, 320000000, HIGH, 400000000),
+				  NOMINAL, 228570000, HIGH, 266670000),
 		CLK_INIT(ocmemnoc_clk_src.c),
 	},
 };
 
 static struct clk_freq_tbl ftbl_cci_clk_src[] = {
+	F_MM(  19200000,        mmsscc_xo,    1,    0,     0),
 	F_MM(  50000000,     mmsscc_gpll0,   12,    0,     0),
 	F_MM( 100000000,     mmsscc_gpll0,    6,    0,     0),
 	F_END
@@ -793,6 +878,16 @@ static struct clk_freq_tbl ftbl_jpeg0_clk_src[] = {
 	F_END
 };
 
+static struct clk_freq_tbl ftbl_jpeg0_clk_src_v2[] = {
+	F_MM(  75000000,     mmsscc_gpll0,    8,    0,     0),
+	F_MM( 150000000,     mmsscc_gpll0,    4,    0,     0),
+	F_MM( 228570000,  mmpll0_out_main,  3.5,    0,     0),
+	F_MM( 266670000,  mmpll0_out_main,    3,    0,     0),
+	F_MM( 320000000,  mmpll0_out_main,  2.5,    0,     0),
+	F_MM( 480000000,  mmpll4_out_main,    2,    0,     0),
+	F_END
+};
+
 static struct rcg_clk jpeg0_clk_src = {
 	.cmd_rcgr_reg = JPEG0_CMD_RCGR,
 	.set_rate = set_rate_hid,
@@ -815,6 +910,16 @@ static struct clk_freq_tbl ftbl_jpeg_dma_clk_src[] = {
 	F_MM( 266670000,  mmpll0_out_main,    3,    0,     0),
 	F_MM( 320000000,  mmpll0_out_main,  2.5,    0,     0),
 	F_MM( 465000000,  mmpll4_out_main,    2,    0,     0),
+	F_END
+};
+
+static struct clk_freq_tbl ftbl_jpeg_dma_clk_src_v2[] = {
+	F_MM(  75000000,     mmsscc_gpll0,    8,    0,     0),
+	F_MM( 150000000,     mmsscc_gpll0,    4,    0,     0),
+	F_MM( 228570000,  mmpll0_out_main,  3.5,    0,     0),
+	F_MM( 266670000,  mmpll0_out_main,    3,    0,     0),
+	F_MM( 320000000,  mmpll0_out_main,  2.5,    0,     0),
+	F_MM( 480000000,  mmpll4_out_main,    2,    0,     0),
 	F_END
 };
 
@@ -989,9 +1094,11 @@ static struct rcg_clk csi1phytimer_clk_src = {
 	},
 };
 
+DEFINE_EXT_CLK(ext_byte0_clk_src, NULL);
 static struct clk_freq_tbl ftbl_byte0_clk_src[] = {
 	{
 		.div_src_val = BVAL(10, 8, dsi0phypll_mm_source_val),
+		.src_clk = &ext_byte0_clk_src.c,
 	},
 	F_END
 };
@@ -1002,6 +1109,7 @@ static struct rcg_clk byte0_clk_src = {
 	.base = &virt_base,
 	.c = {
 		.dbg_name = "byte0_clk_src",
+		.parent = &ext_byte0_clk_src.c,
 		.ops = &clk_ops_byte,
 		VDD_DIG_FMAX_MAP3(LOWER, 60000000, LOW, 112500000,
 				  NOMINAL, 187500000),
@@ -1009,9 +1117,11 @@ static struct rcg_clk byte0_clk_src = {
 	},
 };
 
+DEFINE_EXT_CLK(ext_byte1_clk_src, NULL);
 static struct clk_freq_tbl ftbl_byte1_clk_src[] = {
 	{
 		.div_src_val = BVAL(10, 8, dsi0phypll_mm_source_val),
+		.src_clk = &ext_byte1_clk_src.c,
 	},
 	F_END
 };
@@ -1022,6 +1132,7 @@ static struct rcg_clk byte1_clk_src = {
 	.base = &virt_base,
 	.c = {
 		.dbg_name = "byte1_clk_src",
+		.parent = &ext_byte1_clk_src.c,
 		.ops = &clk_ops_byte,
 		VDD_DIG_FMAX_MAP3(LOWER, 60000000, LOW, 112500000,
 				  NOMINAL, 187500000),
@@ -1067,9 +1178,11 @@ static struct rcg_clk esc1_clk_src = {
 	},
 };
 
+DEFINE_EXT_CLK(ext_extpclk_clk_src, NULL);
 static struct clk_freq_tbl ftbl_extpclk_clk_src[] = {
 	{
 		.div_src_val = BVAL(10, 8, hdmiphypll_mm_source_val),
+		.src_clk = &ext_extpclk_clk_src.c,
 	},
 	F_END
 };
@@ -1080,6 +1193,7 @@ static struct rcg_clk extpclk_clk_src = {
 	.base = &virt_base,
 	.c = {
 		.dbg_name = "extpclk_clk_src",
+		.parent = &ext_extpclk_clk_src.c,
 		.ops = &clk_ops_byte,
 		VDD_DIG_FMAX_MAP3(LOWER, 85000000, LOW, 170000000,
 				  NOMINAL, 340000000),
@@ -1122,6 +1236,25 @@ static struct rcg_clk vsync_clk_src = {
 		.ops = &clk_ops_rcg,
 		VDD_DIG_FMAX_MAP1(LOWER, 19200000),
 		CLK_INIT(vsync_clk_src.c),
+	},
+};
+
+static struct clk_freq_tbl ftbl_rbbmtimer_clk_src[] = {
+	F_MM(  19200000,        mmsscc_xo,    1,    0,     0),
+	F_END
+};
+
+static struct rcg_clk rbbmtimer_clk_src = {
+	.cmd_rcgr_reg = RBBMTIMER_CMD_RCGR,
+	.set_rate = set_rate_hid,
+	.freq_tbl = ftbl_rbbmtimer_clk_src,
+	.current_freq = &rcg_dummy_freq,
+	.base = &virt_base,
+	.c = {
+		.dbg_name = "rbbmtimer_clk_src",
+		.ops = &clk_ops_rcg,
+		VDD_DIG_FMAX_MAP1(LOWER, 19200000),
+		CLK_INIT(rbbmtimer_clk_src.c),
 	},
 };
 
@@ -1974,6 +2107,18 @@ static struct branch_clk oxili_gfx3d_clk = {
 	},
 };
 
+static struct branch_clk oxili_rbbmtimer_clk = {
+	.cbcr_reg = OXILI_RBBMTIMER_CBCR,
+	.has_sibling = 0,
+	.base = &virt_base,
+	.c = {
+		.dbg_name = "oxili_rbbmtimer_clk",
+		.parent = &rbbmtimer_clk_src.c,
+		.ops = &clk_ops_branch,
+		CLK_INIT(oxili_rbbmtimer_clk.c),
+	},
+};
+
 static struct branch_clk oxilicx_ahb_clk = {
 	.cbcr_reg = OXILICX_AHB_CBCR,
 	.has_sibling = 1,
@@ -2121,6 +2266,7 @@ static struct mux_clk mmss_debug_mux = {
 	.ops = &debug_mux_ops,
 	MUX_SRC_LIST(
 		{ &mmsscc_mmssnoc_ahb.c, 0x0001 },
+		{ &oxili_gfx3d_clk.c, 0x000d },
 		{ &mmss_misc_ahb_clk.c, 0x0003 },
 		{ &mmss_mmssnoc_axi_clk.c, 0x0004 },
 		{ &mmss_s0_axi_clk.c, 0x0005 },
@@ -2170,6 +2316,7 @@ static struct mux_clk mmss_debug_mux = {
 		{ &camss_vfe_cpp_ahb_clk.c, 0x003b },
 		{ &camss_vfe_vfe_ahb_clk.c, 0x003c },
 		{ &camss_vfe_vfe_axi_clk.c, 0x003d },
+		{ &oxili_rbbmtimer_clk.c, 0x003e },
 		{ &camss_csi_vfe0_clk.c, 0x003f },
 		{ &camss_csi_vfe1_clk.c, 0x0040 },
 		{ &camss_csi0_clk.c, 0x0041 },
@@ -2235,6 +2382,8 @@ static struct clk_lookup msm_clocks_mmss_8994[] = {
 	CLK_LIST(jpeg1_clk_src),
 	CLK_LIST(jpeg2_clk_src),
 	CLK_LIST(csi2phytimer_clk_src),
+	CLK_LIST(pclk0_clk_src),
+	CLK_LIST(pclk1_clk_src),
 	CLK_LIST(fd_core_clk_src),
 	CLK_LIST(mdp_clk_src),
 	CLK_LIST(ocmemnoc_clk_src),
@@ -2249,10 +2398,14 @@ static struct clk_lookup msm_clocks_mmss_8994[] = {
 	CLK_LIST(mclk3_clk_src),
 	CLK_LIST(csi0phytimer_clk_src),
 	CLK_LIST(csi1phytimer_clk_src),
+	CLK_LIST(byte0_clk_src),
+	CLK_LIST(byte1_clk_src),
 	CLK_LIST(esc0_clk_src),
 	CLK_LIST(esc1_clk_src),
+	CLK_LIST(extpclk_clk_src),
 	CLK_LIST(hdmi_clk_src),
 	CLK_LIST(vsync_clk_src),
+	CLK_LIST(rbbmtimer_clk_src),
 	CLK_LIST(camss_ahb_clk),
 	CLK_LIST(camss_cci_cci_ahb_clk),
 	CLK_LIST(camss_cci_cci_clk),
@@ -2309,17 +2462,23 @@ static struct clk_lookup msm_clocks_mmss_8994[] = {
 	CLK_LIST(fd_core_uar_clk),
 	CLK_LIST(mdss_ahb_clk),
 	CLK_LIST(mdss_axi_clk),
+	CLK_LIST(mdss_byte0_clk),
+	CLK_LIST(mdss_byte1_clk),
 	CLK_LIST(mdss_esc0_clk),
 	CLK_LIST(mdss_esc1_clk),
+	CLK_LIST(mdss_extpclk_clk),
 	CLK_LIST(mdss_hdmi_ahb_clk),
 	CLK_LIST(mdss_hdmi_clk),
 	CLK_LIST(mdss_mdp_clk),
+	CLK_LIST(mdss_pclk0_clk),
+	CLK_LIST(mdss_pclk1_clk),
 	CLK_LIST(mdss_vsync_clk),
 	CLK_LIST(mmss_misc_ahb_clk),
 	CLK_LIST(mmss_mmssnoc_axi_clk),
 	CLK_LIST(mmss_s0_axi_clk),
 	CLK_LIST(ocmemcx_ocmemnoc_clk),
 	CLK_LIST(oxili_gfx3d_clk),
+	CLK_LIST(oxili_rbbmtimer_clk),
 	CLK_LIST(oxilicx_ahb_clk),
 	CLK_LIST(venus0_ahb_clk),
 	CLK_LIST(venus0_axi_clk),
@@ -2331,107 +2490,52 @@ static struct clk_lookup msm_clocks_mmss_8994[] = {
 	CLK_LIST(mmss_debug_mux),
 };
 
-static struct pll_config_regs mmpll0_regs = {
-	.l_reg = (void __iomem *)MMPLL0_L_VAL,
-	.m_reg = (void __iomem *)MMPLL0_ALPHA_VAL,
-	.n_reg = (void __iomem *)MMPLL0_ALPHA_VAL_U,
-	.config_reg = (void __iomem *)MMPLL0_USER_CTL,
-	.mode_reg = (void __iomem *)MMPLL0_MODE,
-	.base = &virt_base,
-};
+static void msm_mmsscc_8994v2_fixup(void)
+{
+	mmpll1.c.rate = 1167000000;
+	mmpll3.c.rate = 1020000000;
+	mmpll4.c.rate = 960000000;
+	mmpll5.c.rate = 600000000;
 
-/* MMPLL0 at 800 MHz, main output enabled. */
-static struct pll_config mmpll0_config = {
-	.l = 41,
-	.m = 0xAAAAAAAA,
-	.n = 0xAA,
-	.vco_val = 0x2,
-	.vco_mask = BM(21, 20),
-	.pre_div_val = 0x0,
-	.pre_div_mask = BM(14, 12),
-	.post_div_val = 0x0,
-	.post_div_mask = BM(9, 8),
-	.mn_ena_val = BIT(24),
-	.mn_ena_mask = BIT(24),
-	.main_output_val = BIT(0),
-	.main_output_mask = BIT(0),
-};
+	axi_clk_src.freq_tbl = ftbl_axi_clk_src_v2;
+	axi_clk_src.c.fmax[VDD_DIG_NOMINAL] = 333430000;
+	axi_clk_src.c.fmax[VDD_DIG_HIGH] = 466800000;
 
-static struct pll_config_regs mmpll1_regs = {
-	.l_reg = (void __iomem *)MMPLL1_L_VAL,
-	.m_reg = (void __iomem *)MMPLL1_ALPHA_VAL,
-	.n_reg = (void __iomem *)MMPLL1_ALPHA_VAL_U,
-	.config_reg = (void __iomem *)MMPLL1_USER_CTL,
-	.mode_reg = (void __iomem *)MMPLL1_MODE,
-	.base = &virt_base,
-};
+	vcodec0_clk_src.freq_tbl = ftbl_vcodec0_clk_src_v2;
+	vcodec0_clk_src.c.fmax[VDD_DIG_LOW] = 150000000;
+	vcodec0_clk_src.c.fmax[VDD_DIG_NOMINAL] = 320000000;
+	vcodec0_clk_src.c.fmax[VDD_DIG_HIGH] = 510000000;
 
-/* MMPLL1 at 1167 MHz, main output enabled. */
-static struct pll_config mmpll1_config = {
-	.l = 60,
-	.m = 0x0,
-	.n = 0xC8,
-	.vco_val = 0x1,
-	.vco_mask = BM(21, 20),
-	.pre_div_val = 0x0,
-	.pre_div_mask = BM(14, 12),
-	.post_div_val = 0x0,
-	.post_div_mask = BM(9, 8),
-	.mn_ena_val = BIT(24),
-	.mn_ena_mask = BIT(24),
-	.main_output_val = BIT(0),
-	.main_output_mask = BIT(0),
-};
+	csi0_clk_src.c.fmax[VDD_DIG_NOMINAL] = 266670000;
+	csi1_clk_src.c.fmax[VDD_DIG_NOMINAL] = 266670000;
+	csi2_clk_src.c.fmax[VDD_DIG_NOMINAL] = 266670000;
+	csi3_clk_src.c.fmax[VDD_DIG_NOMINAL] = 266670000;
 
-static struct pll_config_regs mmpll3_regs = {
-	.l_reg = (void __iomem *)MMPLL3_L_VAL,
-	.m_reg = (void __iomem *)MMPLL3_ALPHA_VAL,
-	.n_reg = (void __iomem *)MMPLL3_ALPHA_VAL_U,
-	.config_reg = (void __iomem *)MMPLL3_USER_CTL,
-	.mode_reg = (void __iomem *)MMPLL3_MODE,
-	.base = &virt_base,
-};
+	vfe0_clk_src.freq_tbl = ftbl_vfe_clk_src_v2;
+	vfe0_clk_src.c.fmax[VDD_DIG_NOMINAL] = 480000000;
+	vfe0_clk_src.c.fmax[VDD_DIG_HIGH] = 600000000;
+	vfe1_clk_src.freq_tbl = ftbl_vfe_clk_src_v2;
+	vfe1_clk_src.c.fmax[VDD_DIG_NOMINAL] = 480000000;
+	vfe1_clk_src.c.fmax[VDD_DIG_HIGH] = 600000000;
 
-/* MMPLL3 at 930 MHz, main output enabled. */
-static struct pll_config mmpll3_config = {
-	.l = 48,
-	.m = 0x0,
-	.n = 0x70,
-	.vco_val = 0x2,
-	.vco_mask = BM(21, 20),
-	.pre_div_val = 0x0,
-	.pre_div_mask = BM(14, 12),
-	.post_div_val = 0x0,
-	.post_div_mask = BM(9, 8),
-	.mn_ena_val = BIT(24),
-	.mn_ena_mask = BIT(24),
-	.main_output_val = BIT(0),
-	.main_output_mask = BIT(0),
-};
+	cpp_clk_src.freq_tbl = ftbl_cpp_clk_src_v2;
+	cpp_clk_src.c.fmax[VDD_DIG_NOMINAL] = 480000000;
+	cpp_clk_src.c.fmax[VDD_DIG_HIGH] = 640000000;
 
-static struct pll_config_regs mmpll4_regs = {
-	.l_reg = (void __iomem *)MMPLL4_L_VAL,
-	.m_reg = (void __iomem *)MMPLL4_ALPHA_VAL,
-	.n_reg = (void __iomem *)MMPLL4_ALPHA_VAL_U,
-	.config_reg = (void __iomem *)MMPLL4_USER_CTL,
-	.mode_reg = (void __iomem *)MMPLL4_MODE,
-	.base = &virt_base,
-};
+	jpeg_dma_clk_src.freq_tbl = ftbl_jpeg_dma_clk_src_v2;
+	jpeg_dma_clk_src.c.fmax[VDD_DIG_HIGH] = 480000000;
+	jpeg0_clk_src.freq_tbl = ftbl_jpeg0_clk_src_v2;
+	jpeg0_clk_src.c.fmax[VDD_DIG_HIGH] = 480000000;
+	jpeg1_clk_src.freq_tbl = ftbl_jpeg1_clk_src_v2;
+	jpeg1_clk_src.c.fmax[VDD_DIG_HIGH] = 480000000;
+	jpeg2_clk_src.freq_tbl = ftbl_jpeg2_clk_src_v2;
 
-/* MMPLL4 at 930 MHz, main output enabled. */
-static struct pll_config mmpll4_config  = {
-	.l = 48,
-	.m = 0x0,
-	.n = 0x70,
-	.pre_div_val = 0x0,
-	.pre_div_mask = BM(14, 12),
-	.post_div_val = 0x0,
-	.post_div_mask = BM(9, 8),
-	.mn_ena_val = BIT(24),
-	.mn_ena_mask = BIT(24),
-	.main_output_val = BIT(0),
-	.main_output_mask = BIT(0),
-};
+	fd_core_clk_src.c.fmax[VDD_DIG_NOMINAL] = 400000000;
+	fd_core_clk_src.c.fmax[VDD_DIG_HIGH] = 0;
+
+	ocmemnoc_clk_src.c.fmax[VDD_DIG_NOMINAL] = 320000000;
+	ocmemnoc_clk_src.c.fmax[VDD_DIG_HIGH] = 400000000;
+}
 
 int msm_mmsscc_8994_probe(struct platform_device *pdev)
 {
@@ -2439,6 +2543,9 @@ int msm_mmsscc_8994_probe(struct platform_device *pdev)
 	int rc;
 	struct clk *tmp;
 	struct regulator *reg;
+	const char *compat = NULL;
+	int compatlen = 0;
+	bool is_v2 = false;
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "cc_base");
 	if (!res) {
@@ -2496,10 +2603,32 @@ int msm_mmsscc_8994_probe(struct platform_device *pdev)
 		return PTR_ERR(tmp);
 	}
 
-	configure_sr_hpm_lp_pll(&mmpll0_config, &mmpll0_regs, 1);
-	configure_sr_hpm_lp_pll(&mmpll1_config, &mmpll1_regs, 1);
-	configure_sr_hpm_lp_pll(&mmpll3_config, &mmpll3_regs, 0);
-	configure_sr_hpm_lp_pll(&mmpll4_config, &mmpll4_regs, 0);
+	tmp = oxili_gfx3d_clk.c.parent =
+				devm_clk_get(&pdev->dev, "oxili_gfx3d_clk");
+	if (IS_ERR(tmp)) {
+		if (PTR_ERR(tmp) != -EPROBE_DEFER)
+			dev_err(&pdev->dev, "Unable to get oxili_gfx3d clock!");
+		return PTR_ERR(tmp);
+	}
+
+	ext_pclk0_clk_src.dev = &pdev->dev;
+	ext_pclk0_clk_src.clk_id = "pclk0_src";
+	ext_pclk1_clk_src.dev = &pdev->dev;
+	ext_pclk1_clk_src.clk_id = "pclk1_src";
+	ext_byte0_clk_src.dev = &pdev->dev;
+	ext_byte0_clk_src.clk_id = "byte0_src";
+	ext_byte1_clk_src.dev = &pdev->dev;
+	ext_byte1_clk_src.clk_id = "byte1_src";
+	ext_extpclk_clk_src.dev = &pdev->dev;
+	ext_extpclk_clk_src.clk_id = "extpclk_src";
+
+	/* Perform revision specific fixes */
+	compat = of_get_property(pdev->dev.of_node, "compatible", &compatlen);
+	if (!compat || (compatlen <= 0))
+		return -EINVAL;
+	is_v2 = !strcmp(compat, "qcom,mmsscc-8994v2");
+	if (is_v2)
+		msm_mmsscc_8994v2_fixup();
 
 	rc = of_msm_clock_register(pdev->dev.of_node, msm_clocks_mmss_8994,
 				   ARRAY_SIZE(msm_clocks_mmss_8994));
@@ -2513,6 +2642,7 @@ int msm_mmsscc_8994_probe(struct platform_device *pdev)
 
 static struct of_device_id msm_clock_mmss_match_table[] = {
 	{ .compatible = "qcom,mmsscc-8994" },
+	{ .compatible = "qcom,mmsscc-8994v2" },
 	{}
 };
 
@@ -2530,95 +2660,4 @@ int __init msm_mmsscc_8994_init(void)
 	return platform_driver_register(&msm_clock_mmss_driver);
 }
 arch_initcall(msm_mmsscc_8994_init);
-
-static struct clk_lookup msm_clocks_mdss_8994[] = {
-	CLK_LIST(pclk0_clk_src),
-	CLK_LIST(pclk1_clk_src),
-	CLK_LIST(byte0_clk_src),
-	CLK_LIST(byte1_clk_src),
-	CLK_LIST(extpclk_clk_src),
-	CLK_LIST(mdss_byte0_clk),
-	CLK_LIST(mdss_byte1_clk),
-	CLK_LIST(mdss_extpclk_clk),
-	CLK_LIST(mdss_pclk0_clk),
-	CLK_LIST(mdss_pclk1_clk),
-};
-
-static int msm_mdss_get_ext_clk(struct device *dev, const char *con,
-				struct clk *clk, struct clk_freq_tbl *ftbl,
-				size_t ftbl_size)
-{
-	int i;
-
-	clk->parent = clk_get(dev, con);
-	if (IS_ERR(clk->parent)) {
-		if (PTR_ERR(clk->parent) != -EPROBE_DEFER)
-			dev_err(dev, "Failed to get clock %s\n", con);
-		return PTR_ERR(clk->parent);
-	}
-
-	for (i = 0; i < ftbl_size; i++)
-		ftbl[i].src_clk = clk->parent;
-
-	return 0;
-}
-
-int msm_mmsscc_mdss_8994_probe(struct platform_device *pdev)
-{
-	int rc;
-
-	rc = msm_mdss_get_ext_clk(&pdev->dev, "pclk0_src", &pclk0_clk_src.c,
-			ftbl_pclk0_clk_src, ARRAY_SIZE(ftbl_pclk0_clk_src));
-	if (rc)
-		return rc;
-
-	rc = msm_mdss_get_ext_clk(&pdev->dev, "pclk1_src", &pclk1_clk_src.c,
-			ftbl_pclk1_clk_src, ARRAY_SIZE(ftbl_pclk1_clk_src));
-	if (rc)
-		return rc;
-
-	rc = msm_mdss_get_ext_clk(&pdev->dev, "byte0_src", &byte0_clk_src.c,
-			ftbl_byte0_clk_src, ARRAY_SIZE(ftbl_byte0_clk_src));
-	if (rc)
-		return rc;
-
-	rc = msm_mdss_get_ext_clk(&pdev->dev, "byte1_src", &byte1_clk_src.c,
-			ftbl_byte1_clk_src, ARRAY_SIZE(ftbl_byte1_clk_src));
-	if (rc)
-		return rc;
-
-	rc = msm_mdss_get_ext_clk(&pdev->dev, "extpclk_src", &extpclk_clk_src.c,
-			ftbl_extpclk_clk_src, ARRAY_SIZE(ftbl_extpclk_clk_src));
-	if (rc)
-		return rc;
-
-	rc = of_msm_clock_register(pdev->dev.of_node, msm_clocks_mdss_8994,
-				   ARRAY_SIZE(msm_clocks_mdss_8994));
-	if (rc)
-		return rc;
-
-	dev_info(&pdev->dev, "Registered MMSS display clocks.\n");
-
-	return 0;
-}
-
-static struct of_device_id msm_clock_mdss_match_table[] = {
-	{ .compatible = "qcom,mmsscc-mdss-8994" },
-	{}
-};
-
-static struct platform_driver msm_clock_mdss_driver = {
-	.probe = msm_mmsscc_mdss_8994_probe,
-	.driver = {
-		.name = "qcom,mmsscc-mdss-8994",
-		.of_match_table = msm_clock_mdss_match_table,
-		.owner = THIS_MODULE,
-	},
-};
-
-int __init msm_mmsscc_mdss_8994_init(void)
-{
-	return platform_driver_register(&msm_clock_mdss_driver);
-}
-arch_initcall(msm_mmsscc_mdss_8994_init);
 

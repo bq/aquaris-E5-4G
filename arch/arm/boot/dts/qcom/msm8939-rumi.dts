@@ -31,6 +31,10 @@
 	};
 };
 
+&slim_msm {
+	status = "disabled";
+};
+
 &blsp1_uart2 {
 	status = "ok";
 	pinctrl-names = "default";
@@ -131,5 +135,69 @@
 };
 
 &pm8916_tombak_analog {
+	status = "disabled";
+};
+
+&qcom_tzlog {
+	status = "okay";
+};
+
+&qcom_rng {
+	status = "okay";
+};
+
+&qcom_crypto {
+	status = "okay";
+};
+
+&qcom_cedev {
+	status = "okay";
+};
+
+&qcom_seecom {
+	status = "okay";
+};
+
+&ncp6335d {
+	status = "disabled";
+};
+
+&fan53555 {
+	status = "disabled";
+};
+
+&apc_vreg_corner {
+	status = "disabled";
+};
+
+&etm0 {
+	status = "disabled";
+};
+
+&etm1 {
+	status = "disabled";
+};
+
+&etm2 {
+	status = "disabled";
+};
+
+&etm3 {
+	status = "disabled";
+};
+
+&etm4 {
+	status = "disabled";
+};
+
+&etm5 {
+	status = "disabled";
+};
+
+&etm6 {
+	status = "disabled";
+};
+
+&etm7 {
 	status = "disabled";
 };

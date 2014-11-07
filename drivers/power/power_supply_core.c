@@ -182,6 +182,22 @@ int power_supply_set_scope(struct power_supply *psy, int scope)
 EXPORT_SYMBOL_GPL(power_supply_set_scope);
 
 /**
+ * power_supply_set_usb_otg - set otg of the usb power supply
+ * @psy:	the usb power supply to control
+ * @scope:	value to set the otg property to
+ */
+int power_supply_set_usb_otg(struct power_supply *psy, int otg)
+{
+	const union power_supply_propval ret = {otg, };
+
+	if (psy->set_property)
+		return psy->set_property(psy, POWER_SUPPLY_PROP_USB_OTG,
+								&ret);
+	return -ENXIO;
+}
+EXPORT_SYMBOL(power_supply_set_usb_otg);
+
+/**
  * power_supply_set_supply_type - set type of the power supply
  * @psy:	the power supply to control
  * @supply_type:	sets type property of power supply
@@ -215,6 +231,40 @@ int power_supply_set_charge_type(struct power_supply *psy, int charge_type)
 	return -ENXIO;
 }
 EXPORT_SYMBOL_GPL(power_supply_set_charge_type);
+
+/**
+ * power_supply_set_hi_power_state - set power state for power_supply
+ * @psy:	the power supply to control
+ * @value:	value to be passed to the power_supply
+ *
+ */
+int power_supply_set_hi_power_state(struct power_supply *psy, int value)
+{
+	const union power_supply_propval ret = {value, };
+
+	if (psy->set_property)
+		return psy->set_property(psy, POWER_SUPPLY_PROP_HI_POWER,
+								&ret);
+	return -ENXIO;
+}
+EXPORT_SYMBOL(power_supply_set_hi_power_state);
+
+/**
+ * power_supply_set_low_power_state - set power state for power_supply
+ * @psy:	the power supply to control
+ * @value:	value to be passed to the power_supply
+ *
+ */
+int power_supply_set_low_power_state(struct power_supply *psy, int value)
+{
+	const union power_supply_propval ret = {value, };
+
+	if (psy->set_property)
+		return psy->set_property(psy, POWER_SUPPLY_PROP_LOW_POWER,
+								&ret);
+	return -ENXIO;
+}
+EXPORT_SYMBOL(power_supply_set_low_power_state);
 
 static int __power_supply_changed_work(struct device *dev, void *data)
 {

@@ -52,6 +52,20 @@ const char emac_drv_version[] = DRV_VERSION;
 
 #define EMAC_RSS_IDT_SIZE     256
 
+#define EMAC_SKB_CB(skb) ((struct emac_skb_cb *)(skb)->cb)
+
+struct emac_skb_cb {
+	u32           tpd_idx;
+	unsigned long jiffies;
+};
+
+#define EMAC_HWTXTSTAMP_CB(skb) ((struct emac_hwtxtstamp_cb *)(skb)->cb)
+
+struct emac_hwtxtstamp_cb {
+	u32 sec;
+	u32 ns;
+};
+
 static int msm_emac_msglvl = -1;
 module_param_named(msglvl, msm_emac_msglvl, int, S_IRUGO | S_IWUSR | S_IWGRP);
 
@@ -444,40 +458,122 @@ static void emac_clean_rfdesc(struct emac_rx_queue *rxque,
 	rxque->rfd.process_idx = consume_idx;
 }
 
-static void emac_read_tx_tstamp_fifo(struct emac_hw *hw,
-				     struct emac_tx_queue *txque)
+static inline bool emac_skb_cb_expired(struct sk_buff *skb)
 {
-	struct emac_buffer *tpbuf;
-	u32 ts_idx = 0;
-	u32 sec, ns;
+	if (time_is_after_jiffies(EMAC_SKB_CB(skb)->jiffies +
+				  msecs_to_jiffies(100)))
+		return false;
+	return true;
+}
 
-	while (1) {
-		ts_idx = emac_reg_r32(hw, EMAC_CSR,
-				      EMAC_EMAC_WRAPPER_TX_TS_INX);
-		if (ts_idx & EMAC_WRAPPER_TX_TS_EMPTY)
-			break;
+/* proper lock must be acquired before polling */
+static void emac_poll_hwtxtstamp(struct emac_adapter *adpt)
+{
+	struct sk_buff_head *pending_q = &adpt->hwtxtstamp_pending_queue;
+	struct sk_buff_head *q = &adpt->hwtxtstamp_ready_queue;
+	struct sk_buff *skb, *skb_tmp;
+	struct emac_hwtxtstamp hwtxtstamp;
 
-		ns = emac_reg_r32(hw, EMAC_CSR, EMAC_EMAC_WRAPPER_TX_TS_LO);
-		sec = emac_reg_r32(hw, EMAC_CSR, EMAC_EMAC_WRAPPER_TX_TS_HI);
+	while (emac_hw_read_tx_tstamp(&adpt->hw, &hwtxtstamp)) {
+		bool found = false;
 
-		ts_idx &= EMAC_WRAPPER_TX_TS_INX_BMSK;
-		if ((ts_idx < txque->tpd.consume_idx) ||
-		    (ts_idx > txque->tpd.last_produce_idx)) {
-			emac_warn(hw->adpt, tx_done,
-				  "zombie timestamp desc idx %d\n", ts_idx);
-			continue;
+		adpt->hwtxtstamp_stats.rx++;
+
+		skb_queue_walk_safe(pending_q, skb, skb_tmp) {
+			if (EMAC_SKB_CB(skb)->tpd_idx == hwtxtstamp.ts_idx) {
+				struct sk_buff *pskb;
+
+				EMAC_HWTXTSTAMP_CB(skb)->sec = hwtxtstamp.sec;
+				EMAC_HWTXTSTAMP_CB(skb)->ns = hwtxtstamp.ns;
+				/* the tx timestamps for all the pending
+				   packets before this one are lost
+				 */
+				while ((pskb = __skb_dequeue(pending_q))
+				       != skb) {
+					EMAC_HWTXTSTAMP_CB(pskb)->sec = 0;
+					EMAC_HWTXTSTAMP_CB(pskb)->ns = 0;
+					__skb_queue_tail(q, pskb);
+					adpt->hwtxtstamp_stats.lost++;
+				}
+				__skb_queue_tail(q, skb);
+				found = true;
+				break;
+			}
 		}
 
-		tpbuf  = GET_TPD_BUFFER(txque, ts_idx);
-
-		if (tpbuf->skb &&
-		    (skb_shinfo(tpbuf->skb)->tx_flags & SKBTX_HW_TSTAMP)) {
-			struct skb_shared_hwtstamps ts;
-
-			ts.hwtstamp = ktime_set(sec, ns);
-			skb_tstamp_tx(tpbuf->skb, &ts);
+		if (!found) {
+			emac_dbg(adpt, tx_done,
+				 "no entry(tpd=%d) found, drop tx timestamp\n",
+				 hwtxtstamp.ts_idx);
+			adpt->hwtxtstamp_stats.drop++;
 		}
 	}
+
+	skb_queue_walk_safe(pending_q, skb, skb_tmp) {
+		/* No packet after this one expires */
+		if (!emac_skb_cb_expired(skb))
+			break;
+		adpt->hwtxtstamp_stats.timeout++;
+		emac_dbg(adpt, tx_done,
+			 "tx timestamp timeout: tpd_idx=%d\n",
+			 EMAC_SKB_CB(skb)->tpd_idx);
+
+		__skb_unlink(skb, pending_q);
+		EMAC_HWTXTSTAMP_CB(skb)->sec = 0;
+		EMAC_HWTXTSTAMP_CB(skb)->ns = 0;
+		__skb_queue_tail(q, skb);
+	}
+}
+
+static void emac_schedule_hwtxtstamp_task(struct emac_adapter *adpt)
+{
+	if (CHK_ADPT_FLAG(STATE_DOWN))
+		return;
+
+	if (schedule_work(&adpt->hwtxtstamp_task))
+		adpt->hwtxtstamp_stats.sched++;
+}
+
+static void emac_hwtxtstamp_task_routine(struct work_struct *work)
+{
+	struct emac_adapter *adpt = container_of(work, struct emac_adapter,
+						 hwtxtstamp_task);
+	struct sk_buff *skb;
+	struct sk_buff_head q;
+	unsigned long flags;
+
+	adpt->hwtxtstamp_stats.poll++;
+
+	__skb_queue_head_init(&q);
+
+	while (1) {
+		spin_lock_irqsave(&adpt->hwtxtstamp_lock, flags);
+		if (adpt->hwtxtstamp_pending_queue.qlen)
+			emac_poll_hwtxtstamp(adpt);
+		skb_queue_splice_tail_init(&adpt->hwtxtstamp_ready_queue, &q);
+		spin_unlock_irqrestore(&adpt->hwtxtstamp_lock, flags);
+
+		if (!q.qlen)
+			break;
+
+		while ((skb = __skb_dequeue(&q))) {
+			struct emac_hwtxtstamp_cb *cb = EMAC_HWTXTSTAMP_CB(skb);
+
+			if (cb->sec || cb->ns) {
+				struct skb_shared_hwtstamps ts;
+
+				ts.hwtstamp = ktime_set(cb->sec, cb->ns);
+				ts.syststamp = ktime_add_ns(
+					ts.hwtstamp, adpt->hw.tstamp_tx_offset);
+				skb_tstamp_tx(skb, &ts);
+				adpt->hwtxtstamp_stats.deliver++;
+			}
+			dev_kfree_skb_any(skb);
+		}
+	}
+
+	if (adpt->hwtxtstamp_pending_queue.qlen)
+		emac_schedule_hwtxtstamp_task(adpt);
 }
 
 /* Process receive event */
@@ -527,8 +623,7 @@ static void emac_handle_rx(struct emac_adapter *adpt,
 		count++;
 
 		if (srrd.genr.res || srrd.genr.lene) {
-			dev_kfree_skb(rfbuf->skb);
-			emac_warn(adpt, rx_err, "received packet has errors\n");
+			dev_kfree_skb(skb);
 			continue;
 		}
 
@@ -545,6 +640,8 @@ static void emac_handle_rx(struct emac_adapter *adpt,
 
 			hwts->hwtstamp = ktime_set(srrd.genr.ts_high,
 						   srrd.genr.ts_low);
+			hwts->syststamp = ktime_sub_ns(hwts->hwtstamp,
+						       hw->tstamp_rx_offset);
 		}
 
 		emac_receive_skb(rxque, skb, (u16)srrd.genr.cvlan_tag,
@@ -588,6 +685,7 @@ static void emac_handle_tx(struct emac_adapter *adpt,
 	struct emac_hw *hw = &adpt->hw;
 	struct emac_buffer *tpbuf;
 	u32 hw_consume_idx;
+	u32 pkts_compl = 0, bytes_compl = 0;
 
 	hw_consume_idx = emac_reg_field_r32(hw, EMAC, txque->consume_reg,
 					    txque->consume_mask,
@@ -596,7 +694,6 @@ static void emac_handle_tx(struct emac_adapter *adpt,
 		 txque->que_idx, hw_consume_idx);
 
 	while (txque->tpd.consume_idx != hw_consume_idx) {
-		emac_read_tx_tstamp_fifo(hw, txque);
 		tpbuf = GET_TPD_BUFFER(txque, txque->tpd.consume_idx);
 		if (tpbuf->dma) {
 			dma_unmap_single(txque->dev, tpbuf->dma, tpbuf->length,
@@ -605,6 +702,8 @@ static void emac_handle_tx(struct emac_adapter *adpt,
 		}
 
 		if (tpbuf->skb) {
+			pkts_compl++;
+			bytes_compl += tpbuf->skb->len;
 			dev_kfree_skb_irq(tpbuf->skb);
 			tpbuf->skb = NULL;
 		}
@@ -613,10 +712,8 @@ static void emac_handle_tx(struct emac_adapter *adpt,
 			txque->tpd.consume_idx = 0;
 	}
 
-	if (netif_queue_stopped(adpt->netdev) &&
-	    netif_carrier_ok(adpt->netdev) &&
-	    (emac_get_num_free_tpdescs(txque) >= (txque->tpd.count / 8)))
-		netif_wake_queue(adpt->netdev);
+	if (pkts_compl || bytes_compl)
+		netdev_completed_queue(adpt->netdev, pkts_compl, bytes_compl);
 }
 
 /* NAPI */
@@ -818,8 +915,29 @@ static void emac_tx_map(struct emac_adapter *adpt,
 
 	if (CHK_HW_FLAG(TS_TX_EN) &&
 	    (skb_shinfo(skb)->tx_flags & SKBTX_HW_TSTAMP)) {
-		emac_set_tpdesc_tstamp_sav(txque);
-		skb_shinfo(skb)->tx_flags |= SKBTX_IN_PROGRESS;
+		struct sk_buff *skb_ts = skb_clone(skb, GFP_ATOMIC);
+
+		if (likely(skb_ts)) {
+			unsigned long flags;
+
+			emac_set_tpdesc_tstamp_sav(txque);
+			skb_ts->sk = skb->sk;
+			EMAC_SKB_CB(skb_ts)->tpd_idx =
+				txque->tpd.last_produce_idx;
+			EMAC_SKB_CB(skb_ts)->jiffies = get_jiffies_64();
+			skb_shinfo(skb_ts)->tx_flags |= SKBTX_IN_PROGRESS;
+			spin_lock_irqsave(&adpt->hwtxtstamp_lock, flags);
+			if (adpt->hwtxtstamp_pending_queue.qlen >=
+			    EMAC_TX_POLL_HWTXTSTAMP_THRESHOLD) {
+				emac_poll_hwtxtstamp(adpt);
+				adpt->hwtxtstamp_stats.tx_poll++;
+			}
+			__skb_queue_tail(&adpt->hwtxtstamp_pending_queue,
+					 skb_ts);
+			spin_unlock_irqrestore(&adpt->hwtxtstamp_lock, flags);
+			adpt->hwtxtstamp_stats.tx++;
+			emac_schedule_hwtxtstamp_task(adpt);
+		}
 	}
 
 	/* The last buffer info contain the skb address,
@@ -868,6 +986,8 @@ static int emac_start_xmit_frame(struct emac_adapter *adpt,
 
 	emac_tx_map(adpt, txque, skb, &stpd);
 
+	netdev_sent_queue(adpt->netdev, skb->len);
+
 	/* update produce idx */
 	prod_idx = (txque->tpd.produce_idx << txque->produce_shft) &
 			txque->produce_mask;
@@ -907,7 +1027,7 @@ static irqreturn_t emac_interrupt(int irq, void *data)
 	struct emac_irq_info *irq_info = data;
 	struct emac_adapter *adpt = irq_info->adpt;
 	struct emac_hw *hw = &adpt->hw;
-	int max_ints = EMAC_MAX_HANDLED_INTRS;
+	int max_ints = 1;
 	u32 isr, status;
 
 	/* disable the interrupt */
@@ -964,6 +1084,8 @@ static irqreturn_t emac_interrupt(int irq, void *data)
 			break;
 		}
 
+		if (status & PTP_INT)
+			emac_ptp_intr(hw);
 	} while (--max_ints > 0);
 
 	/* enable the interrupt */
@@ -1113,6 +1235,7 @@ static void emac_clean_all_tx_queues(struct emac_adapter *adpt)
 
 	for (i = 0; i < adpt->num_txques; i++)
 		emac_clean_tx_queue(&adpt->tx_queue[i]);
+	netdev_reset_queue(adpt->netdev);
 }
 
 /* Free all descriptors of given receive queue */
@@ -1555,6 +1678,7 @@ void emac_down(struct emac_adapter *adpt, u32 ctrl)
 {
 	struct net_device *netdev = adpt->netdev;
 	struct emac_hw *hw = &adpt->hw;
+	unsigned long flags;
 	int i;
 
 	SET_ADPT_FLAG(STATE_DOWN);
@@ -1576,6 +1700,12 @@ void emac_down(struct emac_adapter *adpt, u32 ctrl)
 	CLI_ADPT_FLAG(TASK_REINIT_REQ);
 	CLI_ADPT_FLAG(TASK_CHK_SGMII_REQ);
 	del_timer_sync(&adpt->emac_timer);
+
+	cancel_work_sync(&adpt->hwtxtstamp_task);
+	spin_lock_irqsave(&adpt->hwtxtstamp_lock, flags);
+	__skb_queue_purge(&adpt->hwtxtstamp_pending_queue);
+	__skb_queue_purge(&adpt->hwtxtstamp_ready_queue);
+	spin_unlock_irqrestore(&adpt->hwtxtstamp_lock, flags);
 
 	if (ctrl & EMAC_HW_CTRL_RESET_MAC)
 		emac_hw_reset_mac(hw);
@@ -2627,10 +2757,8 @@ static int emac_probe(struct platform_device *pdev)
 	adpt->tpdesc_size = EMAC_TPDESC_SIZE;
 	adpt->rfdesc_size = EMAC_RFDESC_SIZE;
 
-	if (adpt->tstamp_en) {
-		hw->rtc_ref_clkrate = DEFAULT_RTC_REF_CLKRATE;
+	if (adpt->tstamp_en)
 		SET_HW_FLAG(PTP_CAP);
-	}
 
 	/* init netdev */
 	netdev->netdev_ops = &emac_netdev_ops;
@@ -2688,6 +2816,11 @@ static int emac_probe(struct platform_device *pdev)
 	for (i = 0; i < adpt->num_rxques; i++)
 		netif_napi_add(netdev, &adpt->rx_queue[i].napi,
 			       emac_napi_rtx, 64);
+
+	spin_lock_init(&adpt->hwtxtstamp_lock);
+	skb_queue_head_init(&adpt->hwtxtstamp_pending_queue);
+	skb_queue_head_init(&adpt->hwtxtstamp_ready_queue);
+	INIT_WORK(&adpt->hwtxtstamp_task, emac_hwtxtstamp_task_routine);
 
 	SET_HW_FLAG(VLANSTRIP_EN);
 	SET_ADPT_FLAG(STATE_DOWN);

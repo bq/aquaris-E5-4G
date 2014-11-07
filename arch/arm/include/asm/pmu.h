@@ -25,6 +25,12 @@ enum arm_pmu_type {
 	ARM_NUM_PMU_DEVICES,
 };
 
+enum arm_pmu_state {
+	ARM_PMU_STATE_OFF       = 0,
+	ARM_PMU_STATE_GOING_DOWN,
+	ARM_PMU_STATE_RUNNING,
+};
+
 /*
  * struct arm_pmu_platdata - ARM PMU platform data
  *
@@ -85,6 +91,7 @@ struct arm_pmu {
 	cpumask_t	active_irqs;
 	char		*name;
 	int		num_events;
+	int             pmu_state;
 	atomic_t	active_events;
 	struct mutex	reserve_mutex;
 	u64		max_period;
@@ -103,6 +110,7 @@ struct arm_pmu {
 	void		(*start)(struct arm_pmu *);
 	void		(*stop)(struct arm_pmu *);
 	void		(*reset)(void *);
+	void		(*force_reset)(void *);
 	int		(*request_irq)(struct arm_pmu *, irq_handler_t handler);
 	void		(*free_irq)(struct arm_pmu *);
 	int		(*map_event)(struct perf_event *event);

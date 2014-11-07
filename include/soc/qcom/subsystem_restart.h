@@ -17,8 +17,6 @@
 #include <linux/spinlock.h>
 #include <linux/interrupt.h>
 
-#define SUBSYS_NAME_MAX_LENGTH 40
-
 struct subsys_device;
 
 enum {
@@ -44,6 +42,9 @@ struct module;
  * framework
  * @no_auth: Set if subsystem does not rely on PIL to authenticate and bring
  * it out of reset
+ * @ssctl_instance_id: Instance id used to connect with SSCTL service
+ * @sysmon_pid:	pdev id that sysmon is probed with for the subsystem
+ * @sysmon_shutdown_ret: Return value for the call to sysmon_send_shutdown
  */
 struct subsys_desc {
 	const char *name;
@@ -64,7 +65,12 @@ struct subsys_desc {
 	unsigned int stop_ack_irq;
 	unsigned int wdog_bite_irq;
 	int force_stop_gpio;
+	int ramdump_disable_gpio;
+	int ramdump_disable;
 	bool no_auth;
+	int ssctl_instance_id;
+	u32 sysmon_pid;
+	int sysmon_shutdown_ret;
 };
 
 /**
@@ -147,5 +153,4 @@ static inline void notify_proxy_vote(struct device *device) { }
 static inline void notify_proxy_unvote(struct device *device) { }
 #endif /* CONFIG_MSM_SUBSYSTEM_RESTART */
 
-u32 wcnss_rf_read_reg(u32 rf_reg_addr);
 #endif

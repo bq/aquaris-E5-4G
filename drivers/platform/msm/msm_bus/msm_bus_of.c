@@ -22,7 +22,6 @@
 #include <linux/msm-bus-board.h>
 #include "msm_bus_core.h"
 
-#define KBTOB(a) (a * 1000ULL)
 static const char * const hw_sel_name[] = {"RPM", "NoC", "BIMC", NULL};
 static const char * const mode_sel_name[] = {"Fixed", "Limiter", "Bypass",
 						"Regulator", NULL};
@@ -253,8 +252,13 @@ static int *get_arr(struct platform_device *pdev,
 		return NULL;
 	}
 
+	if (!size) {
+		*nports = 0;
+		return NULL;
+	}
+
 	arr = devm_kzalloc(&pdev->dev, size, GFP_KERNEL);
-	if ((size > 0) && ZERO_OR_NULL_PTR(arr)) {
+	if (ZERO_OR_NULL_PTR(arr)) {
 		pr_err("Error: Failed to alloc mem for %s\n", prop);
 		return NULL;
 	}
@@ -288,12 +292,21 @@ static u64 *get_th_params(struct platform_device *pdev,
 		return NULL;
 	}
 
+	if (!size) {
+		*nports = 0;
+		return NULL;
+	}
+
 	ret_arr = devm_kzalloc(&pdev->dev, (*nports * sizeof(u64)),
 							GFP_KERNEL);
+	if (ZERO_OR_NULL_PTR(ret_arr)) {
+		pr_err("Error: Failed to alloc mem for ret arr %s\n", prop);
+		return NULL;
+	}
+
 	arr = kzalloc(size, GFP_KERNEL);
-	if ((size > 0) && (ZERO_OR_NULL_PTR(arr)
-				|| ZERO_OR_NULL_PTR(ret_arr))) {
-		pr_err("Error: Failed to alloc mem for %s\n", prop);
+	if ((ZERO_OR_NULL_PTR(arr))) {
+		pr_err("Error: Failed to alloc temp mem for %s\n", prop);
 		return NULL;
 	}
 

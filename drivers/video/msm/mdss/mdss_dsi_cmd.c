@@ -66,6 +66,7 @@ char *mdss_dsi_buf_init(struct dsi_buf *dp)
 		off = 8 - off;
 	dp->data += off;
 	dp->len = 0;
+	dp->read_cnt = 0;
 	return dp->data;
 }
 
@@ -85,6 +86,7 @@ int mdss_dsi_buf_alloc(struct device *ctrl_dev, struct dsi_buf *dp, int size)
 
 	dp->data = dp->start;
 	dp->len = 0;
+	dp->read_cnt = 0;
 	return size;
 }
 
@@ -573,6 +575,8 @@ int mdss_dsi_short_read1_resp(struct dsi_buf *rp)
 	/* strip out dcs type */
 	rp->data++;
 	rp->len = 1;
+	/* 1 byte for dcs type + 1 byte for ECC + 1 byte for 2nd data byte */
+	rp->read_cnt -= 3;
 	return rp->len;
 }
 
@@ -584,6 +588,7 @@ int mdss_dsi_short_read2_resp(struct dsi_buf *rp)
 	/* strip out dcs type */
 	rp->data++;
 	rp->len = 2;
+	rp->read_cnt -= 2; /* 1 byte for dcs type + 1 byte for ECC */
 	return rp->len;
 }
 
@@ -592,6 +597,7 @@ int mdss_dsi_long_read_resp(struct dsi_buf *rp)
 	/* strip out dcs header */
 	rp->data += 4;
 	rp->len -= 4;
+	rp->read_cnt -= 6; /* 4 bytes for dcs header + 2 bytes for CRC */
 	return rp->len;
 }
 
@@ -606,6 +612,11 @@ static struct dsi_cmd_desc dsi_tear_off_cmd = {
 void mdss_dsi_set_tear_on(struct mdss_dsi_ctrl_pdata *ctrl)
 {
 	struct dcs_cmd_req cmdreq;
+	struct mdss_panel_info *pinfo;
+
+	pinfo = &(ctrl->panel_data.panel_info);
+	if (pinfo->dcs_cmd_by_left && ctrl->ndx != DSI_CTRL_LEFT)
+		return;
 
 	cmdreq.cmds = &dsi_tear_on_cmd;
 	cmdreq.cmds_cnt = 1;
@@ -619,6 +630,11 @@ void mdss_dsi_set_tear_on(struct mdss_dsi_ctrl_pdata *ctrl)
 void mdss_dsi_set_tear_off(struct mdss_dsi_ctrl_pdata *ctrl)
 {
 	struct dcs_cmd_req cmdreq;
+	struct mdss_panel_info *pinfo;
+
+	pinfo = &(ctrl->panel_data.panel_info);
+	if (pinfo->dcs_cmd_by_left && ctrl->ndx != DSI_CTRL_LEFT)
+		return;
 
 	cmdreq.cmds = &dsi_tear_off_cmd;
 	cmdreq.cmds_cnt = 1;
@@ -654,7 +670,7 @@ int mdss_dsi_cmdlist_put(struct mdss_dsi_ctrl_pdata *ctrl,
 {
 	struct dcs_cmd_req *req;
 	struct dcs_cmd_list *clist;
-	int ret = -EINVAL;
+	int ret = 0;
 
 	mutex_lock(&ctrl->cmd_mutex);
 	clist = &ctrl->cmdlist;
@@ -671,7 +687,6 @@ int mdss_dsi_cmdlist_put(struct mdss_dsi_ctrl_pdata *ctrl,
 		clist->get %= CMD_REQ_MAX;
 		clist->tot--;
 	}
-	mutex_unlock(&ctrl->cmd_mutex);
 
 	pr_debug("%s: tot=%d put=%d get=%d\n", __func__,
 		clist->tot, clist->put, clist->get);
@@ -682,6 +697,8 @@ int mdss_dsi_cmdlist_put(struct mdss_dsi_ctrl_pdata *ctrl,
 		else
 			ret = ctrl->cmdlist_commit(ctrl, 0);
 	}
+	mutex_unlock(&ctrl->cmd_mutex);
+
 	return ret;
 }
 

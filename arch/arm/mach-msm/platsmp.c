@@ -10,15 +10,15 @@
 
 #include <linux/init.h>
 #include <linux/kernel.h>
-#include <linux/init.h>
+#include <linux/bitops.h>
 #include <linux/cpumask.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/regulator/krait-regulator.h>
-#include <soc/qcom/spm.h>
 #include <soc/qcom/pm.h>
 #include <soc/qcom/scm-boot.h>
+#include <soc/qcom/cpu_pwr_ctl.h>
 
 #include <asm/cacheflush.h>
 #include <asm/cputype.h>
@@ -105,8 +105,6 @@ static int __cpuinit msm8960_release_secondary(unsigned long base,
 	void *base_ptr = ioremap_nocache(base + (cpu * 0x10000), SZ_4K);
 	if (!base_ptr)
 		return -ENODEV;
-
-	msm_spm_turn_on_cpu_rail(MSM8960_SAW2_BASE_ADDR, cpu);
 
 	writel_relaxed(0x109, base_ptr+0x04);
 	writel_relaxed(0x101, base_ptr+0x04);
@@ -300,19 +298,20 @@ static int __cpuinit msm8916_boot_secondary(unsigned int cpu,
 static int __cpuinit msm8936_boot_secondary(unsigned int cpu,
 						struct task_struct *idle)
 {
+	int ret = 0;
+
 	pr_debug("Starting secondary CPU %d\n", cpu);
 
 	if (per_cpu(cold_boot_done, cpu) == false) {
-		u32 mpidr = cpu_logical_map(cpu);
-		u32 apcs_base = MPIDR_AFFINITY_LEVEL(mpidr, 1) ?
-				0xb088000 : 0xb188000;
-		if (of_board_is_sim())
-			release_secondary_sim(apcs_base,
-				MPIDR_AFFINITY_LEVEL(mpidr, 0));
-		else if (!of_board_is_rumi())
-			arm_release_secondary(apcs_base,
-				MPIDR_AFFINITY_LEVEL(mpidr, 0));
-
+		if (of_board_is_sim()) {
+			ret = msm_unclamp_secondary_arm_cpu_sim(cpu);
+			if (ret)
+				return ret;
+		} else if (!of_board_is_rumi()) {
+			ret = msm_unclamp_secondary_arm_cpu(cpu);
+			if (ret)
+				return ret;
+		}
 		per_cpu(cold_boot_done, cpu) = true;
 	}
 	return release_from_pen(cpu);
@@ -374,10 +373,32 @@ static int cold_boot_flags[] __initdata = {
 	SCM_FLAG_COLDBOOT_CPU3,
 };
 
+static void __init msm_platform_smp_prepare_cpus_mc(unsigned int max_cpus)
+{
+	int cpu, map;
+	u32 aff0_mask = 0;
+	u32 aff1_mask = 0;
+	u32 aff2_mask = 0;
+
+	for_each_present_cpu(cpu) {
+		map = cpu_logical_map(cpu);
+		aff0_mask |= BIT(MPIDR_AFFINITY_LEVEL(map, 0));
+		aff1_mask |= BIT(MPIDR_AFFINITY_LEVEL(map, 1));
+		aff2_mask |= BIT(MPIDR_AFFINITY_LEVEL(map, 2));
+	}
+
+	if (scm_set_boot_addr_mc(virt_to_phys(msm_secondary_startup),
+		aff0_mask, aff1_mask, aff2_mask, SCM_FLAG_COLDBOOT_MC))
+		pr_warn("Failed to set CPU boot address\n");
+}
+
 static void __init msm_platform_smp_prepare_cpus(unsigned int max_cpus)
 {
 	int cpu, map;
 	unsigned int flags = 0;
+
+	if (scm_is_mc_boot_available())
+		return msm_platform_smp_prepare_cpus_mc(max_cpus);
 
 	for_each_present_cpu(cpu) {
 		map = cpu_logical_map(cpu);

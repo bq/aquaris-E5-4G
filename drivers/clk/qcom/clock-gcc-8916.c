@@ -341,9 +341,12 @@ static DEFINE_VDD_REGULATORS(vdd_sr2_pll, VDD_SR2_PLL_NUM, 2,
 static struct pll_freq_tbl apcs_pll_freq[] = {
 	F_APCS_PLL( 998400000, 52, 0x0, 0x1, 0x0, 0x0, 0x0),
 	F_APCS_PLL(1094400000, 57, 0x0, 0x1, 0x0, 0x0, 0x0),
+	F_APCS_PLL(1152000000, 60, 0x0, 0x1, 0x0, 0x0, 0x0),
 	F_APCS_PLL(1190400000, 62, 0x0, 0x1, 0x0, 0x0, 0x0),
+	F_APCS_PLL(1209600000, 63, 0x0, 0x1, 0x0, 0x0, 0x0),
 	F_APCS_PLL(1248000000, 65, 0x0, 0x1, 0x0, 0x0, 0x0),
 	F_APCS_PLL(1401600000, 73, 0x0, 0x1, 0x0, 0x0, 0x0),
+	PLL_F_END
 };
 
 static struct pll_clk a53sspll = {
@@ -903,6 +906,7 @@ static struct rcg_clk jpeg0_clk_src = {
 };
 
 static struct clk_freq_tbl ftbl_gcc_camss_mclk0_1_clk[] = {
+	F(   9600000,	      xo,   2,	  0,	0),
 	F(  23880000,      gpll0,   1,    2,   67),
 	F(  66670000,	   gpll0,  12,	  0,	0),
 	F_END
@@ -1052,7 +1056,7 @@ static struct rcg_clk byte0_clk_src = {
 	.c = {
 		.dbg_name = "byte0_clk_src",
 		.ops = &clk_ops_byte,
-		VDD_DIG_FMAX_MAP2(LOW, 112500000, NOMINAL, 187500000),
+		VDD_DIG_FMAX_MAP2(LOW, 94400000, NOMINAL, 188500000),
 		CLK_INIT(byte0_clk_src.c),
 	},
 };
@@ -2712,14 +2716,12 @@ static struct clk_lookup msm_clocks_lookup[] = {
 	CLK_LIST(gcc_bimc_gfx_clk),
 	CLK_LIST(gcc_bimc_gpu_clk),
 	CLK_LIST(wcnss_m_clk),
-};
 
-static struct clk_lookup msm_clocks_gcc_8916_crypto[] = {
 	/* Crypto clocks */
-	CLK_LOOKUP_OF("core_clk",     gcc_crypto_clk,      "scm"),
-	CLK_LOOKUP_OF("iface_clk",    gcc_crypto_ahb_clk,  "scm"),
-	CLK_LOOKUP_OF("bus_clk",      gcc_crypto_axi_clk,  "scm"),
-	CLK_LOOKUP_OF("core_clk_src", crypto_clk_src,      "scm"),
+	CLK_LIST(gcc_crypto_clk),
+	CLK_LIST(gcc_crypto_ahb_clk),
+	CLK_LIST(gcc_crypto_axi_clk),
+	CLK_LIST(crypto_clk_src),
 };
 
 static int msm_gcc_probe(struct platform_device *pdev)
@@ -2793,27 +2795,21 @@ static int msm_gcc_probe(struct platform_device *pdev)
 	regval |= BIT(0);
 	writel_relaxed(regval, GCC_REG_BASE(APCS_GPLL_ENA_VOTE));
 
-	ret = of_msm_clock_register(pdev->dev.of_node,
-				msm_clocks_lookup,
-				ARRAY_SIZE(msm_clocks_lookup));
-	if (ret)
-		return ret;
-
-	ret = of_msm_clock_register(pdev->dev.of_node,
-				 msm_clocks_gcc_8916_crypto,
-				 ARRAY_SIZE(msm_clocks_gcc_8916_crypto));
-	if (ret)
-		return ret;
-
-	clk_set_rate(&apss_ahb_clk_src.c, 19200000);
-	clk_prepare_enable(&apss_ahb_clk_src.c);
-
 	xo_a_clk_src.c.parent = clk_get(&pdev->dev, "xo_a");
 	if (IS_ERR(xo_a_clk_src.c.parent)) {
 		if (!(PTR_ERR(xo_a_clk_src.c.parent) == -EPROBE_DEFER))
 			dev_err(&pdev->dev, "Unable to get xo_a clock!!!\n");
 		return PTR_ERR(xo_a_clk_src.c.parent);
 	}
+
+	ret = of_msm_clock_register(pdev->dev.of_node,
+				msm_clocks_lookup,
+				ARRAY_SIZE(msm_clocks_lookup));
+	if (ret)
+		return ret;
+
+	clk_set_rate(&apss_ahb_clk_src.c, 19200000);
+	clk_prepare_enable(&apss_ahb_clk_src.c);
 
 	dev_info(&pdev->dev, "Registered GCC clocks\n");
 

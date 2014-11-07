@@ -1001,6 +1001,14 @@ static int msm_hsic_resume(struct msm_hsic_hcd *mehci)
 
 skip_phy_resume:
 
+	/* Check HSIC host pipe state before resume.  Pipe should be empty. */
+	if (pdata->consider_ipa_handshake) {
+		if (!msm_bam_hsic_host_pipe_empty()) {
+			dev_err(mehci->dev, "Data pending without resumed.\n");
+			BUG_ON(1);
+		}
+	}
+
 	usb_hcd_resume_root_hub(hcd);
 
 	atomic_set(&mehci->in_lpm, 0);
@@ -1132,6 +1140,10 @@ static int ehci_hsic_reset(struct usb_hcd *hcd)
 	mehci->timer = USB_HS_GPTIMER_BASE;
 	ehci->caps = USB_CAPLENGTH;
 	hcd->has_tt = 1;
+
+
+	/* Disable streaming mode and select host mode */
+	writel_relaxed(0x13, USB_USBMODE);
 
 	retval = ehci_setup(hcd);
 	if (retval)
@@ -1576,7 +1588,9 @@ static int msm_hsic_init_clocks(struct msm_hsic_hcd *mehci, u32 init)
 		mehci->phy_clk = NULL;
 		if (ret != -EPROBE_DEFER)
 			dev_err(mehci->dev, "failed to get phy_clk\n");
-		return ret;
+		else
+			dev_err(mehci->dev, "Deferring phy_clk\n");
+		goto put_core_clk;
 	}
 
 	/* 10MHz cal_clk is required for calibration of I/O pads */
@@ -1586,7 +1600,9 @@ static int msm_hsic_init_clocks(struct msm_hsic_hcd *mehci, u32 init)
 		mehci->cal_clk = NULL;
 		if (ret != -EPROBE_DEFER)
 			dev_err(mehci->dev, "failed to get cal_clk\n");
-		return ret;
+		else
+			dev_err(mehci->dev, "Deferring cal_clk\n");
+		goto put_phy_clk;
 	}
 
 	/* ahb_clk is required for data transfers */
@@ -1596,7 +1612,9 @@ static int msm_hsic_init_clocks(struct msm_hsic_hcd *mehci, u32 init)
 		mehci->ahb_clk = NULL;
 		if (ret != -EPROBE_DEFER)
 			dev_err(mehci->dev, "failed to get iface_clk\n");
-		return ret;
+		else
+			dev_err(mehci->dev, "Deferring iface_clk\n");
+		goto put_cal_clk;
 	}
 
 	/*
@@ -1617,12 +1635,46 @@ static int msm_hsic_init_clocks(struct msm_hsic_hcd *mehci, u32 init)
 	if (IS_ERR(mehci->alt_core_clk))
 		dev_dbg(mehci->dev, "failed to get alt_core_clk\n");
 
-	clk_prepare_enable(mehci->core_clk);
-	clk_prepare_enable(mehci->phy_clk);
-	clk_prepare_enable(mehci->cal_clk);
-	clk_prepare_enable(mehci->ahb_clk);
-	if (!IS_ERR(mehci->inactivity_clk))
-		clk_prepare_enable(mehci->inactivity_clk);
+	ret = clk_set_rate(mehci->core_clk,
+			clk_round_rate(mehci->core_clk, LONG_MAX));
+	if (ret)
+		dev_err(mehci->dev, "failed to set core_clk rate\n");
+
+	ret = clk_set_rate(mehci->phy_clk,
+			clk_round_rate(mehci->phy_clk, LONG_MAX));
+	if (ret)
+		dev_err(mehci->dev, "failed to set phy_clk rate\n");
+
+	if (!IS_ERR(mehci->alt_core_clk)) {
+		ret = clk_set_rate(mehci->alt_core_clk,
+			clk_round_rate(mehci->alt_core_clk, LONG_MAX));
+		if (ret)
+			dev_err(mehci->dev, "failed to set_rate alt_core_clk\n");
+	}
+
+	ret = clk_set_rate(mehci->cal_clk,
+			clk_round_rate(mehci->cal_clk, LONG_MAX));
+	if (ret)
+		dev_err(mehci->dev, "failed to set cal_clk rate\n");
+
+	ret = clk_prepare_enable(mehci->core_clk);
+	if (ret)
+		dev_err(mehci->dev, "failed to enable core_clk\n");
+	ret = clk_prepare_enable(mehci->phy_clk);
+	if (ret)
+		dev_err(mehci->dev, "failed to enable phy_clk\n");
+	ret = clk_prepare_enable(mehci->cal_clk);
+	if (ret)
+		dev_err(mehci->dev, "failed to enable cal_clk\n");
+	ret = clk_prepare_enable(mehci->ahb_clk);
+	if (ret)
+		dev_err(mehci->dev, "failed to enable ahb_clk\n");
+
+	if (!IS_ERR(mehci->inactivity_clk)) {
+		ret = clk_prepare_enable(mehci->inactivity_clk);
+		if (ret)
+			dev_err(mehci->dev, "failed to enable inactvty_clk\n");
+	}
 
 	return 0;
 
@@ -1636,7 +1688,16 @@ put_clocks:
 			clk_disable_unprepare(mehci->inactivity_clk);
 	}
 
-	return 0;
+	clk_put(mehci->alt_core_clk);
+	clk_put(mehci->ahb_clk);
+put_cal_clk:
+	clk_put(mehci->cal_clk);
+put_phy_clk:
+	clk_put(mehci->phy_clk);
+put_core_clk:
+	clk_put(mehci->core_clk);
+
+	return ret;
 }
 
 static irqreturn_t hsic_peripheral_status_change(int irq, void *dev_id)

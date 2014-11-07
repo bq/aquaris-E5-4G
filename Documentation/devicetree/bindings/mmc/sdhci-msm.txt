@@ -45,8 +45,13 @@ Optional Properties:
 			   1, 4 and 8.
 	- qcom,nonremovable - specifies whether the card in slot is
 			      hot pluggable or hard wired.
+	- qcom,nonhotplug - specifies the card in slot is not hot pluggable.
+			    if card lost or removed manually at runtime, don't retry
+			    to redetect it until next reboot probe.
 	- qcom,bus-speed-mode - specifies supported bus speed modes by host.
 				The supported bus speed modes are :
+				"HS400_1p8v" - indicates that host can support HS400 at 1.8v.
+				"HS400_1p2v" - indicates that host can support HS400 at 1.2v.
 				"HS200_1p8v" - indicates that host can support HS200 at 1.8v.
 				"HS200_1p2v" - indicates that host can support HS200 at 1.2v.
 				"DDR_1p8v" - indicates that host can support DDR mode at 1.8v.
@@ -95,6 +100,19 @@ In the following, <supply> can be vdd (flash core voltage) or vdd-io (I/O voltag
 	  for following optional properties:
 		- pinctrl-names
 		- pinctrl-0, pinctrl-1,.. pinctrl-n
+
+        - qcom,cpu-affinity: this is a string that specifies the pm QoS request
+	  type. The supported cpu affinity modes are :
+	  "all_cores" - PM_QOS_REQ_ALL_CORES is applicable to all CPU cores that
+	  are online and this would have a power impact when there are more
+	  number of CPUs.
+	  "affine_irq" - PM_QOS_REQ_AFFINE_IRQ request type shall update/apply
+	  the vote only to that CPU to which this IRQ's affinity is set to.
+	  "affine_cores" - PM_QOS_REQ_AFFINE_CORES request type is used for
+	  targets that have little cluster and will update/apply the vote to
+	  all the cores in the little cluster.
+	  The default CPU affinity mode is PM_QOS_REQ_AFFINE_IRQ to maintain
+	  backward compatibility.
 
 Example:
 

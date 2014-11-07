@@ -55,6 +55,11 @@
 #define APDS993X_COE_C	70	/* 0.70 without glass window */
 #define APDS993X_COE_D	142	/* 1.42 without glass window */
 #define APDS993X_DF	52
+#define ALS_MAX_RANGE	60000
+
+#define APDS_CAL_SKIP_COUNT     5
+#define APDS_MAX_CAL	(10 + APDS_CAL_SKIP_COUNT)
+#define CAL_NUM		99
 
 /* Change History
  *
@@ -73,6 +78,11 @@
 /*
  * Defines
  */
+#define	APDS9930_ID	0x30
+#define	APDS9931_ID	0x39
+#define	APDS9900_ID	0x29
+#define	APDS9901_ID	0x20
+
 #define APDS993X_ENABLE_REG	0x00
 #define APDS993X_ATIME_REG	0x01
 #define APDS993X_PTIME_REG	0x02
@@ -170,7 +180,7 @@
 #define APDS993X_PDRVIE_12_5MA	0xC0  /* PS 12.5mA LED drive */
 
 /*calibration*/
-#define DEFAULT_CROSS_TALK	400
+#define DEFAULT_CROSS_TALK	100
 #define ADD_TO_CROSS_TALK	300
 #define SUB_FROM_PS_THRESHOLD	100
 
@@ -201,18 +211,28 @@ typedef enum
 struct apds993x_data {
 	struct i2c_client *client;
 	struct mutex update_lock;
+	struct mutex op_mutex;
 	struct delayed_work	dwork;		/* for PS interrupt */
 	struct delayed_work	als_dwork;	/* for ALS polling */
 	struct input_dev *input_dev_als;
 	struct input_dev *input_dev_ps;
-	struct regulator *vdd;
-	struct regulator *vio;
 	struct sensors_classdev als_cdev;
 	struct sensors_classdev ps_cdev;
+
+	/* pinctrl data*/
+	struct pinctrl *pinctrl;
+	struct pinctrl_state *pin_default;
+	struct pinctrl_state *pin_sleep;
 
 	struct apds993x_platform_data *platform_data;
 	int irq;
 
+	/* regulator data */
+	bool power_on;
+	struct regulator *vdd;
+	struct regulator *vio;
+
+	/* register configuration*/
 	unsigned int enable;
 	unsigned int atime;
 	unsigned int ptime;
@@ -230,6 +250,9 @@ struct apds993x_data {
 	unsigned int enable_ps_sensor;
 	unsigned int enable_als_sensor;
 
+	/* save sensor enabling state for resume */
+	unsigned int als_enable_state;
+
 	/* PS parameters */
 	unsigned int ps_threshold;
 	unsigned int ps_hysteresis_threshold; 	/* always lower than ps_threshold */
@@ -240,6 +263,11 @@ struct apds993x_data {
 	unsigned int cross_talk;		/* cross_talk value */
 	unsigned int avg_cross_talk;		/* average cross_talk  */
 	unsigned int ps_cal_result;		/* result of calibration*/
+
+	int ps_cal_data;
+	char calibrate_buf[CAL_NUM];
+	int ps_cal_params[3];
+	int pre_enable_ps;
 
 	/* ALS parameters */
 	unsigned int als_threshold_l;	/* low threshold */
@@ -260,16 +288,19 @@ static struct sensors_classdev sensors_light_cdev = {
 	.version = 1,
 	.handle = SENSORS_LIGHT_HANDLE,
 	.type = SENSOR_TYPE_LIGHT,
-	.max_range = "30000",
+	.max_range = "60000",
 	.resolution = "0.0125",
 	.sensor_power = "0.20",
-	.min_delay = 1000, /* in microseconds */
+	.min_delay = 0, /* in microseconds */
 	.fifo_reserved_event_count = 0,
 	.fifo_max_event_count = 0,
 	.enabled = 0,
 	.delay_msec = 100,
 	.sensors_enable = NULL,
 	.sensors_poll_delay = NULL,
+	.sensors_write_cal_params = NULL,
+	.params = NULL,
+	.sensors_calibrate = NULL,
 };
 
 static struct sensors_classdev sensors_proximity_cdev = {
@@ -281,13 +312,16 @@ static struct sensors_classdev sensors_proximity_cdev = {
 	.max_range = "5",
 	.resolution = "5.0",
 	.sensor_power = "3",
-	.min_delay = 1000, /* in microseconds */
+	.min_delay = 0, /* in microseconds */
 	.fifo_reserved_event_count = 0,
 	.fifo_max_event_count = 0,
 	.enabled = 0,
 	.delay_msec = 100,
 	.sensors_enable = NULL,
 	.sensors_poll_delay = NULL,
+	.sensors_write_cal_params = NULL,
+	.params = NULL,
+	.sensors_calibrate = NULL,
 };
 
 /*
@@ -319,6 +353,8 @@ static int apds993x_set_als_poll_delay(struct i2c_client *client, unsigned int v
 #endif
 
 static int sensor_regulator_power_on(struct apds993x_data *data, bool on);
+static int apds993x_init_device(struct i2c_client *client);
+static int apds9930_ps_get_calibrate_data(struct apds993x_data *data);
 
 /*
  * Management functions
@@ -631,17 +667,10 @@ static void apds993x_set_ps_threshold_adding_cross_talk(
 	if (cal_data < 0)
 		cal_data = 0;
 
-	if (cal_data == 0) {
-		data->ps_threshold = apds993x_ps_detection_threshold;
-		data->ps_hysteresis_threshold =
-			data->ps_threshold - SUB_FROM_PS_THRESHOLD;
-	} else {
-		data->cross_talk = cal_data;
-		data->ps_threshold = ADD_TO_CROSS_TALK + data->cross_talk;
-		data->ps_hysteresis_threshold =
-			data->ps_threshold - SUB_FROM_PS_THRESHOLD;
-	}
-	pr_info("%s: configurations are set\n", __func__);
+	data->ps_threshold = apds993x_ps_detection_threshold + cal_data;
+	data->ps_hysteresis_threshold = apds993x_ps_hsyteresis_threshold
+				+ cal_data;
+	dev_dbg(&client->dev, "%s: configurations are set\n", __func__);
 }
 
 static int LuxCalculation(struct i2c_client *client, int ch0data, int ch1data)
@@ -654,7 +683,7 @@ static int LuxCalculation(struct i2c_client *client, int ch0data, int ch1data)
 
 	if (ch0data >= apds993x_als_res_tb[data->als_atime_index] ||
 	    ch1data >= apds993x_als_res_tb[data->als_atime_index]) {
-		luxValue = 30*1000;
+		luxValue = data->als_prev_lux;
 		return luxValue;
 	}
 
@@ -676,15 +705,9 @@ static int LuxCalculation(struct i2c_client *client, int ch0data, int ch1data)
 		return -1; 	/* don't report first, change gain may help */
 	}
 
-	if (data->als_reduce) {
-		luxValue = ((IAC * apds993x_ga * APDS993X_DF) / 100) * 65 / 10 /
-			((apds993x_als_integration_tb[data->als_atime_index] /
-			  100) * apds993x_als_again_tb[data->als_again_index]);
-	} else {
-		luxValue = ((IAC * apds993x_ga * APDS993X_DF) /100) /
-			((apds993x_als_integration_tb[data->als_atime_index] /
-			  100) * apds993x_als_again_tb[data->als_again_index]);
-	}
+	luxValue = ((IAC * apds993x_ga * APDS993X_DF) / 100) * 65 / 10 /
+		((apds993x_als_integration_tb[data->als_atime_index] /
+		  100) * apds993x_als_again_tb[data->als_again_index]);
 
 	return luxValue;
 }
@@ -754,17 +777,16 @@ static void apds993x_change_als_threshold(struct i2c_client *client)
 	luxValue = LuxCalculation(client, ch0data, ch1data);
 
 	if (luxValue >= 0) {
-		luxValue = (luxValue < 30000) ? luxValue : 30000;
+		luxValue = (luxValue < ALS_MAX_RANGE)
+					? luxValue : ALS_MAX_RANGE;
 		data->als_prev_lux = luxValue;
 	} else {
 		/* don't report, the lux is invalid value */
 		lux_is_valid = 0;
 		luxValue = data->als_prev_lux;
-		if (data->als_reduce) {
+		if (data->als_reduce)
 			lux_is_valid = 1;
 			/* report anyway since this is the lowest gain */
-			luxValue = 30000;
-		}
 	}
 
 	/*
@@ -904,17 +926,16 @@ static void apds993x_als_polling_work_handler(struct work_struct *work)
 	luxValue = LuxCalculation(client, ch0data, ch1data);
 
 	if (luxValue >= 0) {
-		luxValue = luxValue<30000 ? luxValue : 30000;
+		luxValue = (luxValue < ALS_MAX_RANGE)
+					? luxValue : ALS_MAX_RANGE;
 		data->als_prev_lux = luxValue;
 	} else {
 		/* don't report, this is invalid lux value */
 		lux_is_valid = 0;
 		luxValue = data->als_prev_lux;
-		if (data->als_reduce) {
+		if (data->als_reduce)
 			lux_is_valid = 1;
 			/* report anyway since this is the lowest gain */
-			luxValue = 30000;
-		}
 	}
 	/*
 	pr_info("%s: lux=%d ch0data=%d ch1data=%d pdata=%d delay=%d again=%d "
@@ -1088,6 +1109,8 @@ static irqreturn_t apds993x_interrupt(int vec, void *info)
 static int apds993x_enable_als_sensor(struct i2c_client *client, int val)
 {
 	struct apds993x_data *data = i2c_get_clientdata(client);
+	struct apds993x_platform_data *pdata = data->platform_data;
+	int rc;
 
 	pr_debug("%s: val=%d\n", __func__, val);
 
@@ -1096,8 +1119,23 @@ static int apds993x_enable_als_sensor(struct i2c_client *client, int val)
 		return -EINVAL;
 	}
 
+	mutex_lock(&data->op_mutex);
 	if (val == 1) {
 		/* turn on light  sensor */
+		if ((data->enable_als_sensor == 0) &&
+			(data->enable_ps_sensor == 0)) {
+			/* Power on and initalize the device */
+			if (pdata->power_on)
+				pdata->power_on(true);
+
+			rc = apds993x_init_device(client);
+			if (rc) {
+				dev_err(&client->dev, "Failed to init apds993x\n");
+				mutex_unlock(&data->op_mutex);
+				return rc;
+			}
+		}
+
 		if (data->enable_als_sensor == 0) {
 			data->enable_als_sensor = 1;
 			/* Power Off */
@@ -1125,6 +1163,8 @@ static int apds993x_enable_als_sensor(struct i2c_client *client, int val)
 			} else {
 				/* only enable light sensor with interrupt*/
 				apds993x_set_enable(client, 0x13);
+				if (data->irq)
+					enable_irq(data->irq);
 			}
 #endif
 
@@ -1134,8 +1174,7 @@ static int apds993x_enable_als_sensor(struct i2c_client *client, int val)
 			 * schedules will not change the scheduled time
 			 * that's why we have to cancel it first.
 			 */
-			cancel_delayed_work(&data->als_dwork);
-			flush_delayed_work(&data->als_dwork);
+			cancel_delayed_work_sync(&data->als_dwork);
 			queue_delayed_work(apds993x_workqueue, &data->als_dwork, msecs_to_jiffies(data->als_poll_delay));
 #endif
 		}
@@ -1166,10 +1205,17 @@ static int apds993x_enable_als_sensor(struct i2c_client *client, int val)
 		 * will not change the scheduled time that's why we have
 		 * to cancel it first.
 		 */
-		cancel_delayed_work(&data->als_dwork);
-		flush_delayed_work(&data->als_dwork);
+		cancel_delayed_work_sync(&data->als_dwork);
 #endif
 	}
+
+	/* Vote off  regulators if both light and prox sensor are off */
+	if ((data->enable_als_sensor == 0) &&
+		(data->enable_ps_sensor == 0) &&
+		(pdata->power_on))
+		pdata->power_on(false);
+
+	mutex_unlock(&data->op_mutex);
 	return 0;
 }
 
@@ -1182,13 +1228,12 @@ static int apds993x_set_als_poll_delay(struct i2c_client *client,
 	int atime_index=0;
 
 	pr_debug("%s: val=%d\n", __func__, val);
+	mutex_lock(&data->op_mutex);
 
-	/* minimum 5ms */
-	if (val < 3000)
-		val = 3000;
-
-	/* convert us => ms */
-	data->als_poll_delay = val / 1000;
+	/* minimum 3ms */
+	if (val < 3)
+		val = 3;
+	data->als_poll_delay = val;
 
 	if (data->als_poll_delay >= 100)
 		atime_index = APDS993X_ALS_RES_37888;
@@ -1203,18 +1248,17 @@ static int apds993x_set_als_poll_delay(struct i2c_client *client,
 		pr_debug("poll delay %d, atime_index %d\n",
 				data->als_poll_delay, data->als_atime_index);
 	} else {
+		mutex_unlock(&data->op_mutex);
 		return ret;
 	}
 
-	/*
-	 * If work is already scheduled then subsequent schedules will not
-	 * change the scheduled time that's why we have to cancel it first.
-	 */
-	cancel_delayed_work(&data->als_dwork);
-	flush_delayed_work(&data->als_dwork);
-	queue_delayed_work(apds993x_workqueue,
-			&data->als_dwork,
-			msecs_to_jiffies(data->als_poll_delay));
+	if (data->enable_als_sensor) {
+		mod_delayed_work(apds993x_workqueue,
+				&data->als_dwork,
+				msecs_to_jiffies(data->als_poll_delay));
+	}
+
+	mutex_unlock(&data->op_mutex);
 
 	return 0;
 }
@@ -1223,6 +1267,8 @@ static int apds993x_set_als_poll_delay(struct i2c_client *client,
 static int apds993x_enable_ps_sensor(struct i2c_client *client, int val)
 {
 	struct apds993x_data *data = i2c_get_clientdata(client);
+	struct apds993x_platform_data *pdata = data->platform_data;
+	int rc;
 
 	pr_debug("%s: val=%d\n", __func__, val);
 
@@ -1233,6 +1279,19 @@ static int apds993x_enable_ps_sensor(struct i2c_client *client, int val)
 
 	if (val == 1) {
 		/* turn on p sensor */
+		if ((data->enable_als_sensor == 0) &&
+			(data->enable_ps_sensor == 0)) {
+			/* Power on and initalize the device */
+			if (pdata->power_on)
+				pdata->power_on(true);
+
+			rc = apds993x_init_device(client);
+			if (rc) {
+				dev_err(&client->dev, "Failed to init apds993x\n");
+				return rc;
+			}
+		}
+
 		if (data->enable_ps_sensor==0) {
 			data->enable_ps_sensor= 1;
 
@@ -1245,18 +1304,30 @@ static int apds993x_enable_ps_sensor(struct i2c_client *client, int val)
 			apds993x_set_piht(client,
 					apds993x_ps_detection_threshold);
 			/*calirbation*/
-			apds993x_set_ps_threshold_adding_cross_talk(client, data->cross_talk);
+			if (data->platform_data->default_cal) {
+				apds993x_set_ps_threshold_adding_cross_talk(
+						client, data->cross_talk);
+			}
 
 			if (data->enable_als_sensor==0) {
 				/* only enable PS interrupt */
 				apds993x_set_enable(client, 0x27);
+				if (data->irq) {
+					enable_irq(data->irq);
+					irq_set_irq_wake(client->irq, 1);
+				}
 			} else {
 #ifdef ALS_POLLING_ENABLED
 				/* enable PS interrupt */
 				apds993x_set_enable(client, 0x27);
+				if (data->irq) {
+					enable_irq(data->irq);
+					irq_set_irq_wake(client->irq, 1);
+				}
 #else
 				/* enable ALS and PS interrupt */
 				apds993x_set_enable(client, 0x37);
+				irq_set_irq_wake(client->irq, 1);
 #endif
 			}
 		}
@@ -1270,6 +1341,11 @@ static int apds993x_enable_ps_sensor(struct i2c_client *client, int val)
 		if (data->enable_als_sensor) {
 #ifdef ALS_POLLING_ENABLED
 			/* no ALS interrupt */
+			if (data->irq) {
+				irq_set_irq_wake(client->irq, 0);
+				disable_irq(data->irq);
+			}
+
 			apds993x_set_enable(client, 0x03);
 
 			/*
@@ -1277,8 +1353,7 @@ static int apds993x_enable_ps_sensor(struct i2c_client *client, int val)
 			 * schedules will not change the scheduled time
 			 * that's why we have to cancel it first.
 			 */
-			cancel_delayed_work(&data->als_dwork);
-			flush_delayed_work(&data->als_dwork);
+			cancel_delayed_work_sync(&data->als_dwork);
 			/* 100ms */
 			queue_delayed_work(apds993x_workqueue,
 					&data->als_dwork,
@@ -1286,6 +1361,9 @@ static int apds993x_enable_ps_sensor(struct i2c_client *client, int val)
 
 #else
 			/* reconfigute light sensor setting */
+			if (data->irq)
+				irq_set_irq_wake(client->irq, 0);
+
 			/* Power Off */
 			apds993x_set_enable(client,0);
 			/* Force ALS interrupt */
@@ -1296,6 +1374,10 @@ static int apds993x_enable_ps_sensor(struct i2c_client *client, int val)
 			apds993x_set_enable(client, 0x13);
 #endif
 		} else {
+			if (data->irq) {
+				irq_set_irq_wake(client->irq, 0);
+				disable_irq(data->irq);
+			}
 			apds993x_set_enable(client, 0);
 #ifdef ALS_POLLING_ENABLED
 			/*
@@ -1303,11 +1385,17 @@ static int apds993x_enable_ps_sensor(struct i2c_client *client, int val)
 			 * schedules will not change the scheduled time
 			 * that's why we have to cancel it first.
 			 */
-			cancel_delayed_work(&data->als_dwork);
-			flush_delayed_work(&data->als_dwork);
+			cancel_delayed_work_sync(&data->als_dwork);
 #endif
 		}
 	}
+
+	/* Vote off  regulators if both light and prox sensor are off */
+	if ((data->enable_als_sensor == 0) &&
+		(data->enable_ps_sensor == 0) &&
+		(pdata->power_on))
+		pdata->power_on(false);
+
 	return 0;
 }
 
@@ -1541,7 +1629,10 @@ static ssize_t apds993x_show_pdata(struct device *dev,
 	int pdata;
 
 	mutex_lock(&data->update_lock);
-	pdata = i2c_smbus_read_word_data(client, CMD_WORD|APDS993X_PDATAL_REG);
+	pdata = i2c_smbus_read_word_data(client,
+			CMD_WORD|APDS993X_PDATAL_REG);
+	pdata |= i2c_smbus_read_word_data(client,
+			CMD_WORD|APDS993X_PDATAH_REG) << 8;
 	mutex_unlock(&data->update_lock);
 
 	return sprintf(buf, "%d\n", pdata);
@@ -1738,6 +1829,78 @@ static int apds993x_ps_set_enable(struct sensors_classdev *sensors_cdev,
 	return apds993x_enable_ps_sensor(data->client, enable);
 }
 
+static int apds993x_ps_calibrate(struct sensors_classdev *sensors_cdev,
+		int axis, int apply_now)
+{
+	int i, arry = 0;
+	int temp[3] = { 0 };
+	struct apds993x_data *data = container_of(sensors_cdev,
+			struct apds993x_data, ps_cdev);
+	data->pre_enable_ps = data->enable_ps_sensor;
+	if (!data->enable_ps_sensor)
+		apds993x_enable_ps_sensor(data->client, 1);
+	for (i = 0; i < APDS_MAX_CAL; i++) {
+		msleep(100);
+		data->ps_cal_data = i2c_smbus_read_word_data(
+			data->client, CMD_WORD|APDS993X_PDATAL_REG);
+		if (i < APDS_CAL_SKIP_COUNT)
+			continue;
+		dev_dbg(&data->client->dev, "ps_cal data = %d\n",
+				data->ps_cal_data);
+		arry = arry + data->ps_cal_data;
+	}
+	arry = arry / (APDS_MAX_CAL - APDS_CAL_SKIP_COUNT);
+	if (axis == AXIS_THRESHOLD_H)
+		temp[0] = arry;
+	else if (axis == AXIS_THRESHOLD_L)
+		temp[1] = arry;
+	else if (axis == AXIS_BIAS)
+		temp[2] = arry;
+
+	if (apply_now) {
+		data->ps_cal_params[0] = temp[0];
+		data->ps_cal_params[1] = temp[1];
+		data->ps_cal_params[2] = temp[2];
+		apds9930_ps_get_calibrate_data(data);
+	}
+	memset(data->calibrate_buf, 0 , sizeof(data->calibrate_buf));
+	snprintf(data->calibrate_buf, sizeof(data->calibrate_buf),
+			"%d,%d,%d", temp[0], temp[1], temp[2]);
+	sensors_cdev->params = data->calibrate_buf;
+	if (!data->pre_enable_ps)
+		apds993x_enable_ps_sensor(data->client, 0);
+	return 0;
+}
+
+static int apds993x_ps_write_calibrate(struct sensors_classdev *sensors_cdev,
+		struct cal_result_t *cal_result)
+{
+	struct apds993x_data *data = container_of(sensors_cdev,
+			struct apds993x_data, ps_cdev);
+	data->ps_cal_params[0] = cal_result->threshold_h;
+	data->ps_cal_params[1] = cal_result->threshold_l;
+	data->ps_cal_params[2] = cal_result->bias;
+	apds9930_ps_get_calibrate_data(data);
+	return 0;
+}
+
+static int apds9930_ps_get_calibrate_data(struct apds993x_data *data)
+{
+	if (data->ps_cal_params[2]) {
+		data->ps_hysteresis_threshold =
+			apds993x_ps_hsyteresis_threshold
+			+ data->ps_cal_params[2];
+		data->ps_threshold = apds993x_ps_detection_threshold
+				+ data->ps_cal_params[2];
+	} else if (data->ps_cal_params[0] && data->ps_cal_params[1]) {
+		apds993x_ps_detection_threshold = data->ps_cal_params[0];
+		data->ps_threshold = data->ps_cal_params[0];
+		apds993x_ps_hsyteresis_threshold = data->ps_cal_params[1];
+		data->ps_hysteresis_threshold = data->ps_cal_params[1];
+	}
+	return 0;
+}
+
 static DEVICE_ATTR(enable_als_sensor, S_IWUSR | S_IWGRP | S_IRUGO,
 		apds993x_show_enable_als_sensor,
 		apds993x_store_enable_als_sensor);
@@ -1749,7 +1912,7 @@ static ssize_t apds993x_show_als_poll_delay(struct device *dev,
 	struct apds993x_data *data = i2c_get_clientdata(client);
 
 	/* return in micro-second */
-	return sprintf(buf, "%d\n", data->als_poll_delay * 1000);
+	return snprintf(buf, PAGE_SIZE, "%d\n", data->als_poll_delay);
 }
 
 static ssize_t apds993x_store_als_poll_delay(struct device *dev,
@@ -1764,6 +1927,23 @@ static ssize_t apds993x_store_als_poll_delay(struct device *dev,
 
 	return count;
 }
+
+#ifdef ALS_POLLING_ENABLED
+static int apds993x_als_poll_delay(struct sensors_classdev *sensors_cdev,
+		unsigned int delay_msec)
+{
+	struct apds993x_data *data = container_of(sensors_cdev,
+			struct apds993x_data, als_cdev);
+	apds993x_set_als_poll_delay(data->client, delay_msec);
+	return 0;
+}
+#else
+static int apds993x_als_poll_delay(struct sensors_classdev *sensors_cdev,
+		unsigned int delay_msec)
+{
+	return 0;
+}
+#endif
 
 static DEVICE_ATTR(als_poll_delay, S_IWUSR | S_IRUGO,
 		apds993x_show_als_poll_delay, apds993x_store_als_poll_delay);
@@ -1817,29 +1997,45 @@ static struct miscdevice apds993x_als_device = {
 	.fops = &apds993x_als_fops,
 };
 
+static int apds993x_check_chip_id(struct i2c_client *client)
+{
+	int id;
+
+	id = i2c_smbus_read_byte_data(client, CMD_BYTE|APDS993X_ID_REG);
+	switch (id) {
+	case APDS9931_ID:
+		dev_dbg(&client->dev, "APDS9931\n");
+		break;
+
+	case APDS9930_ID:
+		dev_dbg(&client->dev, "APDS9930\n");
+		break;
+
+	case APDS9900_ID:
+		dev_dbg(&client->dev, "APDS9900\n");
+		break;
+
+	case APDS9901_ID:
+		dev_dbg(&client->dev, "APDS9931\n");
+		break;
+	default:
+		dev_err(&client->dev, "Neither APDS993x nor APDS990x\n");
+		return -ENODEV;
+	}
+	return 0;
+}
+
 /*
  * Initialization function
  */
-
-static int apds993x_init_client(struct i2c_client *client)
+static int apds993x_init_device(struct i2c_client *client)
 {
 	struct apds993x_data *data = i2c_get_clientdata(client);
 	int err;
-	int id;
 
 	err = apds993x_set_enable(client, 0);
 	if (err < 0)
 		return err;
-
-	id = i2c_smbus_read_byte_data(client, CMD_BYTE|APDS993X_ID_REG);
-	if (id == 0x30) {
-		pr_info("%s: APDS9931\n", __func__);
-	} else if (id == 0x39) {
-		pr_info("%s: APDS9930\n", __func__);
-	} else {
-		pr_info("%s: Neither APDS9931 nor APDS9930\n", __func__);
-		return -ENODEV;
-	}
 
 	/* 100.64ms ALS integration time */
 	err = apds993x_set_atime(client,
@@ -1884,7 +2080,10 @@ static int apds993x_init_client(struct i2c_client *client)
 		return err;
 
 	/*calirbation*/
-	apds993x_set_ps_threshold_adding_cross_talk(client, data->cross_talk);
+	if (data->platform_data->default_cal) {
+		apds993x_set_ps_threshold_adding_cross_talk(client,
+				data->cross_talk);
+	}
 	data->ps_detection = 0; /* initial value = far*/
 
 	/* force first ALS interrupt to get the environment reading */
@@ -1909,20 +2108,25 @@ static int apds993x_suspend(struct device *dev)
 {
 	struct apds993x_data *data;
 	struct apds993x_platform_data *pdata;
+	int rc;
 
 	data = dev_get_drvdata(dev);
 	pdata = data->platform_data;
 
-	if (data->irq)
-		disable_irq(data->irq);
+	/*
+	  * Save sensor state and disable them,
+	  * this is to ensure internal state flags are set correctly.
+	  * device will power off after both sensors are disabled.
+	  * P sensor will not be disabled because it  is a wakeup sensor.
+	*/
+	data->als_enable_state = data->enable_als_sensor;
 
-	cancel_delayed_work_sync(&data->dwork);
-#ifdef ALS_POLLING_ENABLED
-	cancel_delayed_work_sync(&data->als_dwork);
-#endif
-
-	if (pdata->power_on)
-		pdata->power_on(false);
+	if (data->als_enable_state) {
+		rc = apds993x_enable_als_sensor(data->client, 0);
+		if (rc)
+			dev_err(&data->client->dev,
+				"Disable light sensor fail! rc=%d\n", rc);
+	}
 
 	return 0;
 }
@@ -1931,21 +2135,18 @@ static int apds993x_resume(struct device *dev)
 {
 	struct apds993x_data *data;
 	struct apds993x_platform_data *pdata;
+	int rc;
 
 	data = dev_get_drvdata(dev);
 	pdata = data->platform_data;
 
-	if (pdata->power_on)
-		pdata->power_on(true);
-
-	if (data->enable_ps_sensor)
-		apds993x_ps_set_enable(&data->ps_cdev, 1);
-
-	if (data->enable_als_sensor)
-		apds993x_als_set_enable(&data->als_cdev, 1);
-
-	if (data->irq)
-		enable_irq(data->irq);
+	/* Resume L sensor state as P sensor does not disable */
+	if (data->als_enable_state) {
+		rc = apds993x_enable_als_sensor(data->client, 1);
+		if (rc)
+			dev_err(&data->client->dev,
+				"Disable light sensor fail! rc=%d\n", rc);
+	}
 
 	return 0;
 }
@@ -1955,9 +2156,6 @@ static int sensor_regulator_configure(struct apds993x_data *data, bool on)
 	int rc;
 
 	if (!on) {
-		rc = sensor_regulator_power_on(data, on);
-		if (rc)
-			return rc;
 
 		if (regulator_count_voltages(data->vdd) > 0)
 			regulator_set_voltage(data->vdd, 0,
@@ -2007,9 +2205,6 @@ static int sensor_regulator_configure(struct apds993x_data *data, bool on)
 				goto reg_vio_put;
 			}
 		}
-		rc = sensor_regulator_power_on(data, on);
-		if (rc)
-			goto reg_vio_put;
 	}
 
 	return 0;
@@ -2041,7 +2236,18 @@ static int sensor_regulator_power_on(struct apds993x_data *data, bool on)
 			dev_err(&data->client->dev,
 				"Regulator vio disable failed rc=%d\n", rc);
 			rc = regulator_enable(data->vdd);
+			dev_err(&data->client->dev,
+					"Regulator vio re-enabled rc=%d\n", rc);
+			/*
+			 * Successfully re-enable regulator.
+			 * Enter poweron delay and returns error.
+			 */
+			if (!rc) {
+				rc = -EBUSY;
+				goto enable_delay;
+			}
 		}
+		return rc;
 	} else {
 		rc = regulator_enable(data->vdd);
 		if (rc) {
@@ -2054,23 +2260,49 @@ static int sensor_regulator_power_on(struct apds993x_data *data, bool on)
 		if (rc) {
 			dev_err(&data->client->dev,
 				"Regulator vio enable failed rc=%d\n", rc);
-			rc = regulator_disable(data->vdd);
+			regulator_disable(data->vdd);
+			return rc;
 		}
 	}
 
+enable_delay:
 	msleep(130);
-
+	dev_dbg(&data->client->dev,
+		"Sensor regulator power on =%d\n", on);
 	return rc;
 }
 
 static int sensor_platform_hw_power_on(bool on)
 {
+	struct apds993x_data *data;
+	int err = 0;
+
 	if (pdev_data == NULL)
 		return -ENODEV;
 
-	sensor_regulator_power_on(pdev_data, on);
+	data = pdev_data;
+	if (data->power_on != on) {
+		if (!IS_ERR_OR_NULL(data->pinctrl)) {
+			if (on)
+				err = pinctrl_select_state(data->pinctrl,
+					data->pin_default);
+			else
+				err = pinctrl_select_state(data->pinctrl,
+					data->pin_sleep);
+			if (err)
+				dev_err(&data->client->dev,
+					"Can't select pinctrl state\n");
+		}
 
-	return 0;
+		err = sensor_regulator_power_on(data, on);
+		if (err)
+			dev_err(&data->client->dev,
+					"Can't configure regulator!\n");
+		else
+			data->power_on = on;
+	}
+
+	return err;
 }
 
 static int sensor_platform_hw_init(void)
@@ -2121,6 +2353,33 @@ static void sensor_platform_hw_exit(void)
 		gpio_free(data->platform_data->irq_gpio);
 }
 
+static int apds993x_pinctrl_init(struct apds993x_data *data)
+{
+	struct i2c_client *client = data->client;
+
+	data->pinctrl = devm_pinctrl_get(&client->dev);
+	if (IS_ERR_OR_NULL(data->pinctrl)) {
+		dev_err(&client->dev, "Failed to get pinctrl\n");
+		return PTR_ERR(data->pinctrl);
+	}
+
+	data->pin_default =
+		pinctrl_lookup_state(data->pinctrl, "default");
+	if (IS_ERR_OR_NULL(data->pin_default)) {
+		dev_err(&client->dev, "Failed to look up default state\n");
+		return PTR_ERR(data->pin_default);
+	}
+
+	data->pin_sleep =
+		pinctrl_lookup_state(data->pinctrl, "sleep");
+	if (IS_ERR_OR_NULL(data->pin_sleep)) {
+		dev_err(&client->dev, "Failed to look up sleep state\n");
+		return PTR_ERR(data->pin_sleep);
+	}
+
+	return 0;
+}
+
 static int sensor_parse_dt(struct device *dev,
 		struct apds993x_platform_data *pdata)
 {
@@ -2143,62 +2402,72 @@ static int sensor_parse_dt(struct device *dev,
 	pdata->irq_gpio = rc;
 
 	/* ps tuning data*/
-	rc = of_property_read_u32(np, "avago,ps_threshold", &tmp);
+	rc = of_property_read_u32(np, "avago,ps-threshold", &tmp);
 	if (rc) {
-		dev_err(dev, "Unable to read ps_threshold\n");
+		dev_err(dev, "Unable to read ps threshold\n");
 		return rc;
 	}
 	pdata->prox_threshold = tmp;
 
-	rc = of_property_read_u32(np, "avago,ps_hysteresis_threshold", &tmp);
+	rc = of_property_read_u32(np, "avago,ps-hysteresis-threshold", &tmp);
 	 if (rc) {
-		dev_err(dev, "Unable to read ps_hysteresis_threshold\n");
+		dev_err(dev, "Unable to read ps hysteresis threshold\n");
 		return rc;
 	}
 	pdata->prox_hsyteresis_threshold = tmp;
 
-	rc = of_property_read_u32(np, "avago,ps_pulse", &tmp);
+	rc = of_property_read_u32(np, "avago,cross-talk", &tmp);
 	if (rc) {
-		dev_err(dev, "Unable to read ps_pulse\n");
+		dev_info(dev, "Unable to read cross_talk use default 100\n");
+		pdata->cross_talk = DEFAULT_CROSS_TALK;
+	} else {
+		pdata->cross_talk = tmp;
+	}
+
+	rc = of_property_read_u32(np, "avago,ps-pulse", &tmp);
+	if (rc) {
+		dev_err(dev, "Unable to read ps pulse\n");
 		return rc;
 	}
 	pdata->prox_pulse = tmp;
 
-	rc = of_property_read_u32(np, "avago,ps_pgain", &tmp);
+	rc = of_property_read_u32(np, "avago,ps-pgain", &tmp);
 	if (rc) {
-		dev_err(dev, "Unable to read ps_pgain\n");
+		dev_err(dev, "Unable to read ps pgain\n");
 		return rc;
 	}
 	pdata->prox_gain = tmp;
 
 	/* ALS tuning value */
-	rc = of_property_read_u32(np, "avago,als_B", &tmp);
+	rc = of_property_read_u32(np, "avago,als-B", &tmp);
 	if (rc) {
-		dev_err(dev, "Unable to read apds993x_coe_b\n");
+		dev_err(dev, "Unable to read apds993x coefficient b\n");
 		return rc;
 	}
 	pdata->als_B = tmp;
 
-	rc = of_property_read_u32(np, "avago,als_C", &tmp);
+	rc = of_property_read_u32(np, "avago,als-C", &tmp);
 	if (rc) {
-		dev_err(dev, "Unable to read apds993x_coe_c\n");
+		dev_err(dev, "Unable to read apds993x coefficient c\n");
 		return rc;
 	}
 	pdata->als_C = tmp;
 
-	rc = of_property_read_u32(np, "avago,als_D", &tmp);
+	rc = of_property_read_u32(np, "avago,als-D", &tmp);
 	if (rc) {
-		dev_err(dev, "Unable to read apds993x_coe_d\n");
+		dev_err(dev, "Unable to read apds993x coefficient d\n");
 		return rc;
 	}
 	pdata->als_D = tmp;
 
-	rc = of_property_read_u32(np, "avago,ga_value", &tmp);
+	rc = of_property_read_u32(np, "avago,ga-value", &tmp);
 	if (rc) {
-		dev_err(dev, "Unable to read ga_value\n");
+		dev_err(dev, "Unable to read gain value\n");
 		return rc;
 	}
 	pdata->ga_value = tmp;
+
+	pdata->default_cal = of_property_read_bool(np, "avago,default-cal");
 
 	return 0;
 }
@@ -2268,6 +2537,19 @@ static int apds993x_probe(struct i2c_client *client,
 	data->client = client;
 	apds993x_i2c_client = client;
 
+	/* initialize pinctrl */
+	err = apds993x_pinctrl_init(data);
+	if (err) {
+		dev_err(&client->dev, "Can't initialize pinctrl\n");
+			goto exit_kfree;
+	}
+	err = pinctrl_select_state(data->pinctrl, data->pin_default);
+	if (err) {
+		dev_err(&client->dev,
+			"Can't select pinctrl default state\n");
+		goto exit_kfree;
+	}
+
 	/* h/w initialization */
 	if (pdata->init)
 		err = pdata->init();
@@ -2294,13 +2576,14 @@ static int apds993x_probe(struct i2c_client *client,
 		data->cross_talk = apds993x_cross_talk_val;
 	} else {
 		/*
-		 * default value: Get the cross-talk value from the memory.
+		 * default value: Get the cross-talk value from the devicetree.
 		 * This value is saved during the cross-talk calibration
 		 */
-		data->cross_talk = DEFAULT_CROSS_TALK;
+		data->cross_talk = pdata->cross_talk;
 	}
 
 	mutex_init(&data->update_lock);
+	mutex_init(&data->op_mutex);
 
 	INIT_DELAYED_WORK(&data->dwork, apds993x_work_handler);
 
@@ -2308,21 +2591,30 @@ static int apds993x_probe(struct i2c_client *client,
 	INIT_DELAYED_WORK(&data->als_dwork, apds993x_als_polling_work_handler);
 #endif
 
+	err = apds993x_check_chip_id(client);
+	if (err) {
+		dev_err(&client->dev, "Not a valid chip ID\n");
+		err = -ENODEV;
+		goto exit_uninit;
+	}
 	/* Initialize the APDS993X chip */
-	err = apds993x_init_client(client);
+	err = apds993x_init_device(client);
 	if (err) {
 		pr_err("%s: Failed to init apds993x\n", __func__);
-		goto exit_kfree;
+		goto exit_uninit;
 	}
 
-	err = request_irq(data->irq, apds993x_interrupt, IRQF_TRIGGER_FALLING,
-				APDS993X_DRV_NAME, (void *)client);
-	if (err < 0) {
-		pr_err("%s: Could not allocate APDS993X_INT !\n", __func__);
-		goto exit_kfree;
+	if (data->irq) {
+		err = request_irq(data->irq, apds993x_interrupt,
+					IRQF_TRIGGER_FALLING,
+					APDS993X_DRV_NAME, (void *)client);
+		if (err < 0) {
+			dev_err(&client->dev,
+				"Could not allocate APDS993X_INT !\n");
+			goto exit_uninit;
+		}
+		disable_irq(data->irq);
 	}
-
-	irq_set_irq_wake(client->irq, 1);
 
 	/* Register to Input Device */
 	data->input_dev_als = input_allocate_device();
@@ -2342,7 +2634,7 @@ static int apds993x_probe(struct i2c_client *client,
 	set_bit(EV_ABS, data->input_dev_als->evbit);
 	set_bit(EV_ABS, data->input_dev_ps->evbit);
 
-	input_set_abs_params(data->input_dev_als, ABS_MISC, 0, 30000, 0, 0);
+	input_set_abs_params(data->input_dev_als, ABS_MISC, 0, 60000, 0, 0);
 	input_set_abs_params(data->input_dev_ps, ABS_DISTANCE, 0, 1, 0, 0);
 
 	data->input_dev_als->name = "light";
@@ -2385,11 +2677,21 @@ static int apds993x_probe(struct i2c_client *client,
 	/* Register to sensors class */
 	data->als_cdev = sensors_light_cdev;
 	data->als_cdev.sensors_enable = apds993x_als_set_enable;
-	data->als_cdev.sensors_poll_delay = NULL;
-
+	data->als_cdev.sensors_poll_delay = apds993x_als_poll_delay;
+	memset(&data->als_cdev.cal_result, 0,
+			sizeof(data->als_cdev.cal_result));
 	data->ps_cdev = sensors_proximity_cdev;
 	data->ps_cdev.sensors_enable = apds993x_ps_set_enable;
-	data->ps_cdev.sensors_poll_delay = NULL,
+	data->ps_cdev.sensors_poll_delay = NULL;
+	if (pdata->default_cal) {
+		data->ps_cdev.sensors_calibrate = NULL;
+		data->ps_cdev.sensors_write_cal_params = NULL;
+	} else {
+		data->ps_cdev.sensors_calibrate = apds993x_ps_calibrate;
+		data->ps_cdev.sensors_write_cal_params =
+					apds993x_ps_write_calibrate;
+	}
+	memset(&data->ps_cdev.cal_result, 0 , sizeof(data->ps_cdev.cal_result));
 
 	err = sensors_classdev_register(&client->dev, &data->als_cdev);
 	if (err) {
@@ -2404,6 +2706,9 @@ static int apds993x_probe(struct i2c_client *client,
 			       __func__, err);
 		goto exit_unregister_als_class;
 	}
+
+	if (pdata->power_on)
+		err = pdata->power_on(false);
 
 	pr_info("%s: Support ver. %s enabled\n", __func__, DRIVER_VERSION);
 
@@ -2425,12 +2730,12 @@ exit_free_dev_ps:
 exit_free_dev_als:
 exit_free_irq:
 	free_irq(data->irq, client);
-exit_kfree:
+exit_uninit:
 	if (pdata->power_on)
 		pdata->power_on(false);
 	if (pdata->exit)
 		pdata->exit();
-
+exit_kfree:
 	kfree(data);
 	pdev_data = NULL;
 exit:
@@ -2475,6 +2780,7 @@ MODULE_DEVICE_TABLE(i2c, apds993x_id);
 
 static struct of_device_id apds993X_match_table[] = {
 	{ .compatible = "avago,apds9930",},
+	{ .compatible = "avago,apds9900",},
 	{ },
 };
 

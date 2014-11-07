@@ -35,9 +35,8 @@ int ipa_rm_prod_index(enum ipa_rm_resource_name resource_name)
 	case IPA_RM_RESOURCE_STD_ECM_PROD:
 	case IPA_RM_RESOURCE_RNDIS_PROD:
 	case IPA_RM_RESOURCE_WWAN_0_PROD:
-	case IPA_RM_RESOURCE_ODU_PROD:
-	case IPA_RM_RESOURCE_ODU_BRIDGE_PROD:
 	case IPA_RM_RESOURCE_WLAN_PROD:
+	case IPA_RM_RESOURCE_ODU_ADAPT_PROD:
 		break;
 	default:
 		result = IPA_RM_INDEX_INVALID;
@@ -66,6 +65,7 @@ int ipa_rm_cons_index(enum ipa_rm_resource_name resource_name)
 	case IPA_RM_RESOURCE_HSIC_CONS:
 	case IPA_RM_RESOURCE_WLAN_CONS:
 	case IPA_RM_RESOURCE_APPS_CONS:
+	case IPA_RM_RESOURCE_ODU_ADAPT_CONS:
 		break;
 	default:
 		result = IPA_RM_INDEX_INVALID;
@@ -457,12 +457,10 @@ int ipa_rm_resource_delete(struct ipa_rm_resource *resource)
 						resource,
 						consumer);
 			}
-			ipa_rm_peers_list_delete(resource->peers_list);
 		}
 
 		ipa_rm_resource_producer_delete(
 				(struct ipa_rm_resource_prod *) resource);
-		kfree((struct ipa_rm_resource_prod *) resource);
 	} else if (resource->type == IPA_RM_CONSUMER) {
 		if (resource->peers_list) {
 			list_size = ipa_rm_peers_list_get_size(
@@ -478,10 +476,10 @@ int ipa_rm_resource_delete(struct ipa_rm_resource *resource)
 							producer,
 							resource);
 			}
-			ipa_rm_peers_list_delete(resource->peers_list);
 		}
-		kfree((struct ipa_rm_resource_cons *) resource);
 	}
+	ipa_rm_peers_list_delete(resource->peers_list);
+	kfree(resource);
 	return result;
 }
 

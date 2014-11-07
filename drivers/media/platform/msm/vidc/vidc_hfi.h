@@ -240,6 +240,9 @@ struct hfi_extradata_header {
 
 #define HFI_PROPERTY_PARAM_VPE_OX_START					\
 	(HFI_DOMAIN_BASE_VPE + HFI_ARCH_OX_OFFSET + 0x7000)
+#define HFI_PROPERTY_PARAM_VPE_COLOR_SPACE_CONVERSION			\
+	(HFI_PROPERTY_PARAM_VPE_OX_START + 0x001)
+
 #define HFI_PROPERTY_CONFIG_VPE_OX_START				\
 	(HFI_DOMAIN_BASE_VPE + HFI_ARCH_OX_OFFSET + 0x8000)
 
@@ -316,6 +319,10 @@ struct hfi_metadata_pass_through {
 
 struct hfi_multi_view_select {
 	u32 view_index;
+};
+
+struct hfi_hybrid_hierp {
+	u32 layers;
 };
 
 #define HFI_PRIORITY_LOW		10

@@ -19,11 +19,7 @@
 #include "msm_eeprom.h"
 
 #undef CDBG
-#ifdef MSM_EEPROM_DEBUG
-#define CDBG(fmt, args...) pr_err(fmt, ##args)
-#else
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
-#endif
 
 DEFINE_MSM_MUTEX(msm_eeprom_mutex);
 #ifdef CONFIG_COMPAT
@@ -131,12 +127,6 @@ static int eeprom_config_read_cal_data(struct msm_eeprom_ctrl_t *e_ctrl,
 		e_ctrl->cal_data.mapdata,
 		cdata->cfg.read_data.num_bytes);
 
-	/* should only be called once.  free kernel resource */
-	if (!rc) {
-		kfree(e_ctrl->cal_data.mapdata);
-		kfree(e_ctrl->cal_data.map);
-		memset(&e_ctrl->cal_data, 0, sizeof(e_ctrl->cal_data));
-	}
 	return rc;
 }
 
@@ -580,8 +570,8 @@ static int msm_eeprom_spi_parse_of(struct msm_camera_spi_client *spic)
 		pr_err("%s: Failed to get eeprom id\n", __func__);
 		return rc;
 	}
-	spic->mfr_id = tmp[0];
-	spic->device_id = tmp[1];
+	spic->mfr_id0 = tmp[0];
+	spic->device_id0 = tmp[1];
 
 	return 0;
 }
@@ -596,9 +586,10 @@ static int msm_eeprom_match_id(struct msm_eeprom_ctrl_t *e_ctrl)
 	if (rc < 0)
 		return rc;
 	CDBG("%s: read 0x%x 0x%x, check 0x%x 0x%x\n", __func__, id[0],
-	     id[1], client->spi_client->mfr_id, client->spi_client->device_id);
-	if (id[0] != client->spi_client->mfr_id
-		    || id[1] != client->spi_client->device_id)
+		id[1], client->spi_client->mfr_id0,
+			client->spi_client->device_id0);
+	if (id[0] != client->spi_client->mfr_id0
+		    || id[1] != client->spi_client->device_id0)
 		return -ENODEV;
 
 	return 0;
@@ -622,6 +613,10 @@ static int msm_eeprom_get_dt_data(struct msm_eeprom_ctrl_t *e_ctrl)
 	else if (e_ctrl->eeprom_device_type == MSM_CAMERA_PLATFORM_DEVICE)
 		of_node = e_ctrl->pdev->dev.of_node;
 
+	if (!of_node) {
+		pr_err("%s: %d of_node is NULL\n", __func__ , __LINE__);
+		return -ENOMEM;
+	}
 	rc = msm_camera_get_dt_vreg_data(of_node, &power_info->cam_vreg,
 					     &power_info->num_vreg);
 	if (rc < 0)
@@ -1096,6 +1091,14 @@ static int msm_eeprom_platform_probe(struct platform_device *pdev)
 	power_info->clk_info_size = ARRAY_SIZE(cam_8974_clk_info);
 	power_info->dev = &pdev->dev;
 
+
+	rc = of_property_read_u32(of_node, "qcom,i2c-freq-mode",
+		&eb_info->i2c_freq_mode);
+	if (rc < 0 || (eb_info->i2c_freq_mode >= I2C_MAX_MODES)) {
+		eb_info->i2c_freq_mode = I2C_STANDARD_MODE;
+		CDBG("%s Default I2C standard speed mode.\n", __func__);
+	}
+
 	CDBG("qcom,slave-addr = 0x%X\n", eb_info->i2c_slaveaddr);
 	cci_client = e_ctrl->i2c_client.cci_client;
 	cci_client->cci_subdev = msm_cci_get_subdev();
@@ -1103,6 +1106,7 @@ static int msm_eeprom_platform_probe(struct platform_device *pdev)
 	cci_client->sid = eb_info->i2c_slaveaddr >> 1;
 	cci_client->retries = 3;
 	cci_client->id_map = 0;
+	cci_client->i2c_freq_mode = eb_info->i2c_freq_mode;
 
 	rc = of_property_read_string(of_node, "qcom,eeprom-name",
 		&eb_info->eeprom_name);

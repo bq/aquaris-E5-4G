@@ -138,7 +138,8 @@ static int qpnp_fts2_set_mode(struct spm_vreg *vreg, u8 mode)
 static int _spm_regulator_set_voltage(struct regulator_dev *rdev)
 {
 	struct spm_vreg *vreg = rdev_get_drvdata(rdev);
-	int rc;
+	bool spm_failed = false;
+	int rc = 0;
 	u8 reg;
 
 	if (vreg->vlevel == vreg->last_set_vlevel)
@@ -157,11 +158,13 @@ static int _spm_regulator_set_voltage(struct regulator_dev *rdev)
 		/* Set voltage control register via SPM. */
 		rc = msm_spm_set_vdd(vreg->cpu_num, vreg->vlevel);
 		if (rc) {
-			pr_err("%s: msm_spm_set_vdd failed %d\n",
+			pr_debug("%s: msm_spm_set_vdd failed, rc=%d; falling back on SPMI write\n",
 				vreg->rdesc.name, rc);
-			return rc;
+			spm_failed = true;
 		}
-	} else {
+	}
+
+	if (unlikely(vreg->bypass_spm || spm_failed)) {
 		/* Set voltage control register via SPMI. */
 		reg = vreg->vlevel;
 		rc = spmi_ext_register_writel(vreg->spmi_dev->ctrl,
@@ -169,7 +172,7 @@ static int _spm_regulator_set_voltage(struct regulator_dev *rdev)
 			vreg->spmi_base_addr + QPNP_SMPS_REG_VOLTAGE_SETPOINT,
 			&reg, 1);
 		if (rc) {
-			pr_err("%s: spmi_ext_register_writel failed %d\n",
+			pr_err("%s: spmi_ext_register_writel failed, rc=%d\n",
 				vreg->rdesc.name, rc);
 			return rc;
 		}
@@ -487,6 +490,12 @@ static int qpnp_smps_init_step_rate(struct spm_vreg *vreg)
 	return rc;
 }
 
+static bool spm_regulator_using_range0(struct spm_vreg *vreg)
+{
+	return vreg->range == &fts2_range0 || vreg->range == &fts2p5_range0
+		|| vreg->range == &ult_hf_range0;
+}
+
 static int spm_regulator_probe(struct spmi_device *spmi)
 {
 	struct regulator_config reg_config = {};
@@ -603,7 +612,8 @@ static int spm_regulator_probe(struct spmi_device *spmi)
 	dev_set_drvdata(&spmi->dev, vreg);
 
 	pr_info("name=%s, range=%s, voltage=%d uV, mode=%s, step rate=%d uV/us\n",
-		vreg->rdesc.name, vreg->range == &fts2_range0 ? "LV" : "MV",
+		vreg->rdesc.name,
+		spm_regulator_using_range0(vreg) ? "LV" : "MV",
 		vreg->uV,
 		vreg->init_mode & QPNP_SMPS_MODE_PWM ? "PWM" :
 		    (vreg->init_mode & QPNP_FTS2_MODE_AUTO ? "AUTO" : "PFM"),

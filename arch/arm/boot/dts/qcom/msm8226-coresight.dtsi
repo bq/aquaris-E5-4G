@@ -30,8 +30,9 @@
 
 	tpiu: tpiu@fc318000 {
 		compatible = "arm,coresight-tpiu";
-		reg = <0xfc318000 0x1000>;
-		reg-names = "tpiu-base";
+		reg = <0xfc318000 0x1000>,
+		      <0xfd512000 0x1000>;
+		reg-names = "tpiu-base", "nidnt-base";
 
 		coresight-id = <1>;
 		coresight-name = "coresight-tpiu";
@@ -46,6 +47,8 @@
 
 		qcom,vdd-io-voltage-level = <2950000 2950000>;
 		qcom,vdd-io-current-level = <6 22000>;
+
+		qcom,nidntsw;
 	};
 
 	replicator: replicator@fc31c000 {
@@ -167,6 +170,7 @@
 		coresight-outports = <0>;
 		coresight-child-list = <&funnel_a7ss>;
 		coresight-child-ports = <0>;
+		coresight-etm-cpu = <&CPU0>;
 
 		qcom,round-robin;
 	};
@@ -182,6 +186,7 @@
 		coresight-outports = <0>;
 		coresight-child-list = <&funnel_a7ss>;
 		coresight-child-ports = <1>;
+		coresight-etm-cpu = <&CPU1>;
 
 		qcom,round-robin;
 	};
@@ -197,6 +202,7 @@
 		coresight-outports = <0>;
 		coresight-child-list = <&funnel_a7ss>;
 		coresight-child-ports = <2>;
+		coresight-etm-cpu = <&CPU2>;
 
 		qcom,round-robin;
 	};
@@ -212,6 +218,7 @@
 		coresight-outports = <0>;
 		coresight-child-list = <&funnel_a7ss>;
 		coresight-child-ports = <3>;
+		coresight-etm-cpu = <&CPU3>;
 
 		qcom,round-robin;
 	};

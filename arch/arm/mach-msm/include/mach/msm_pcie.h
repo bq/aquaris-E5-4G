@@ -14,22 +14,28 @@
 #define __ASM_ARCH_MSM_PCIE_H
 
 #include <linux/types.h>
+#include <linux/pci.h>
 
 enum msm_pcie_config {
 	MSM_PCIE_CONFIG_INVALID = 0,
 	MSM_PCIE_CONFIG_NO_CFG_RESTORE = 0x1,
 	MSM_PCIE_CONFIG_LINKDOWN = 0x2,
+	MSM_PCIE_CONFIG_NO_RECOVERY = 0x4,
 };
 
 enum msm_pcie_pm_opt {
 	MSM_PCIE_SUSPEND,
-	MSM_PCIE_RESUME
+	MSM_PCIE_RESUME,
+	MSM_PCIE_REQ_EXIT_L1,
 };
 
 enum msm_pcie_event {
 	MSM_PCIE_EVENT_INVALID = 0,
 	MSM_PCIE_EVENT_LINKDOWN = 0x1,
 	MSM_PCIE_EVENT_LINKUP = 0x2,
+	MSM_PCIE_EVENT_WAKEUP = 0x4,
+	MSM_PCIE_EVENT_WAKE_RECOVERY = 0x8,
+	MSM_PCIE_EVENT_NO_ACCESS = 0x10,
 };
 
 enum msm_pcie_trigger {
@@ -91,4 +97,38 @@ int msm_pcie_register_event(struct msm_pcie_register_event *reg);
  * Return: 0 on success, negative value on error
  */
 int msm_pcie_deregister_event(struct msm_pcie_register_event *reg);
+
+/**
+ * msm_pcie_recover_config - recover config space.
+ * @dev:	pci device structure
+ *
+ * This function recovers the config space of both RC and Endpoint.
+ *
+ * Return: 0 on success, negative value on error
+ */
+int msm_pcie_recover_config(struct pci_dev *dev);
+
+/**
+ * msm_pcie_shadow_control - control the shadowing of PCIe config space.
+ * @dev:	pci device structure
+ * @enable:	shadowing should be enabled or disabled
+ *
+ * This function gives PCIe endpoint device drivers the control to enable
+ * or disable the shadowing of PCIe config space.
+ *
+ * Return: 0 on success, negative value on error
+ */
+int msm_pcie_shadow_control(struct pci_dev *dev, bool enable);
+
+/*
+ * msm_pcie_access_control - access control to PCIe address range.
+ * @dev:	pci device structure
+ * @enable:	enable or disable the access
+ *
+ * This function gives PCIe endpoint device drivers the control to enable
+ * or disable the access to PCIe address range.
+ *
+ * Return: 0 on success, negative value on error
+ */
+int msm_pcie_access_control(struct pci_dev *dev, bool enable);
 #endif

@@ -26,6 +26,7 @@
 #include <linux/ktime.h>
 #include <linux/uaccess.h>
 #include <linux/debugfs.h>
+#include <linux/pm_qos.h>
 #include <linux/pm_runtime.h>
 #include <linux/clk.h>
 #include <linux/regulator/consumer.h>
@@ -151,6 +152,11 @@ struct ice40_hcd {
 	struct workqueue_struct *wq;
 	struct work_struct async_work;
 
+	struct delayed_work ice40_pm_qos_work;
+	struct pm_qos_request ice40_pm_qos_req_dma;
+	unsigned pm_qos_latency_us;
+	bool pm_qos_voted;
+
 	struct clk *xo_clk;
 
 	struct pinctrl *pinctrl;
@@ -202,7 +208,7 @@ struct ice40_hcd {
 	u8 *out_rx_buf1; /* size 3 for reading XFR status */
 };
 
-#define FIRMWARE_LOAD_RETRIES 3
+#define FIRMWARE_LOAD_RETRIES 8
 
 static char fw_name[16] = "ice40.bin";
 module_param_string(fw, fw_name, sizeof(fw_name), S_IRUGO | S_IWUSR);
@@ -211,6 +217,32 @@ MODULE_PARM_DESC(fw, "firmware blob file name");
 static bool debugger;
 module_param(debugger, bool, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(debugger, "true to use the debug port");
+
+static bool uicc_card_present;
+module_param(uicc_card_present, bool, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(uicc_card_present, "UICC card is inserted");
+
+/*
+ * pm_qos delay is used to input period of the timer in miliseconds that start
+ * after the last access of the hardware to de-vote the latency vote.
+ * Its value is interpreted in following manner
+ * pm_qos_delay_ms = -1: Never vote for QOS
+ * pm_qos_delay_ms = 0: Always vote for QOS
+ * pm_qos_delay_ms > 0: delay before devote for QOS
+ */
+
+/*
+ * pm_qos_delay_ms default value is choosen as 500ms due to following reasons:
+ * (1) to avoid multiple vote and de-vote during TUR (TEST_UNIT_READY)
+ *     polling which happens with 1 sec period if enabled.
+ * (2) to avoid multiple vote and de-vote during continous mass storage
+ *     transfers
+ */
+
+#define ICE40_PM_QOS_DELAY 500
+static int pm_qos_delay_ms = ICE40_PM_QOS_DELAY;
+module_param(pm_qos_delay_ms, int, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(pm_qos_delay_ms, "Set delay for workqueue ");
 
 static inline struct ice40_hcd *hcd_to_ihcd(struct usb_hcd *hcd)
 {
@@ -411,6 +443,8 @@ static void ice40_stop(struct usb_hcd *hcd)
 	struct ice40_hcd *ihcd = hcd_to_ihcd(hcd);
 
 	cancel_work_sync(&ihcd->async_work);
+	if (ihcd->pm_qos_latency_us)
+		cancel_delayed_work_sync(&ihcd->ice40_pm_qos_work);
 }
 
 /*
@@ -1051,6 +1085,16 @@ static void ice40_async_work(struct work_struct *work)
 	 * if a URB is retired with -EPIPE/-EPROTO errors.
 	 */
 
+	if (pm_qos_delay_ms != -1 && ihcd->pm_qos_latency_us) {
+		cancel_delayed_work_sync(&ihcd->ice40_pm_qos_work);
+		if (!ihcd->pm_qos_voted) {
+			pm_qos_update_request(&ihcd->ice40_pm_qos_req_dma,
+					ihcd->pm_qos_latency_us);
+			ihcd->pm_qos_voted = true;
+			pr_debug("pm_qos voted\n");
+		}
+	}
+
 	spin_lock_irqsave(&ihcd->lock, flags);
 
 	if (list_empty(&ihcd->async_list))
@@ -1098,6 +1142,29 @@ static void ice40_async_work(struct work_struct *work)
 	}
 out:
 	spin_unlock_irqrestore(&ihcd->lock, flags);
+
+	if (pm_qos_delay_ms != 0 && ihcd->pm_qos_voted &&
+			ihcd->pm_qos_latency_us) {
+		if (pm_qos_delay_ms == -1)
+			queue_delayed_work(ihcd->wq, &ihcd->ice40_pm_qos_work,
+					msecs_to_jiffies(0));
+		else
+			queue_delayed_work(ihcd->wq, &ihcd->ice40_pm_qos_work,
+					msecs_to_jiffies(pm_qos_delay_ms));
+	}
+}
+
+static void ice40_pm_qos_work_f(struct work_struct *work)
+{
+	struct ice40_hcd *ihcd = container_of((struct delayed_work *)work,
+			struct ice40_hcd, ice40_pm_qos_work);
+
+	WARN_ON(!ihcd->pm_qos_latency_us);
+	pm_qos_update_request(&ihcd->ice40_pm_qos_req_dma,
+			PM_QOS_DEFAULT_VALUE);
+	ihcd->pm_qos_voted = false;
+	pr_debug("pm_qos devoted\n");
+
 }
 
 static int
@@ -1371,6 +1438,7 @@ static void ice40_spi_power_off(struct ice40_hcd *ihcd);
 static int ice40_bus_suspend(struct usb_hcd *hcd)
 {
 	struct ice40_hcd *ihcd = hcd_to_ihcd(hcd);
+	struct pinctrl_state *s;
 
 	trace_ice40_bus_suspend(0); /* start */
 
@@ -1396,6 +1464,17 @@ static int ice40_bus_suspend(struct usb_hcd *hcd)
 	ice40_spi_power_off(ihcd);
 	ice40_spi_clock_disable(ihcd);
 
+	s = pinctrl_lookup_state(ihcd->pinctrl, PINCTRL_STATE_SLEEP);
+	if (!IS_ERR(s))
+		pinctrl_select_state(ihcd->pinctrl, s);
+
+	if (ihcd->pm_qos_latency_us) {
+		cancel_delayed_work_sync(&ihcd->ice40_pm_qos_work);
+		pm_qos_update_request(&ihcd->ice40_pm_qos_req_dma,
+				PM_QOS_DEFAULT_VALUE);
+		ihcd->pm_qos_voted = false;
+	}
+
 	trace_ice40_bus_suspend(1); /* successful */
 	pm_relax(&ihcd->spi->dev);
 	return 0;
@@ -1405,11 +1484,17 @@ static int ice40_spi_load_fw(struct ice40_hcd *ihcd);
 static int ice40_bus_resume(struct usb_hcd *hcd)
 {
 	struct ice40_hcd *ihcd = hcd_to_ihcd(hcd);
+	struct pinctrl_state *s;
 	u8 ctrl0;
 	int ret, i;
 
 	pm_stay_awake(&ihcd->spi->dev);
 	trace_ice40_bus_resume(0); /* start */
+
+	s = pinctrl_lookup_state(ihcd->pinctrl, PINCTRL_STATE_DEFAULT);
+	if (!IS_ERR(s))
+		pinctrl_select_state(ihcd->pinctrl, s);
+
 	/*
 	 * Power up the bridge chip and load the configuration file.
 	 * Re-program the previous settings. For now we need to
@@ -1549,6 +1634,8 @@ static void ice40_spi_clock_disable(struct ice40_hcd *ihcd)
 	if (ihcd->xo_clk)
 		clk_disable_unprepare(ihcd->xo_clk);
 
+	if (ihcd->clk_en_gpio)
+		gpio_direction_input(ihcd->clk_en_gpio);
 	ihcd->clocked = false;
 }
 
@@ -1597,6 +1684,12 @@ static void ice40_spi_power_off(struct ice40_hcd *ihcd)
 	if (ihcd->gpio_vcc)
 		regulator_disable(ihcd->gpio_vcc);
 
+	/*
+	 * Unused gpio should be in input mode for
+	 * low power consumption.
+	 */
+	gpio_direction_input(ihcd->vcc_en_gpio);
+	gpio_direction_input(ihcd->reset_gpio);
 	ihcd->powered = false;
 }
 
@@ -2208,6 +2301,10 @@ static ssize_t ice40_dbg_cmd_write(struct file *file, const char __user *ubuf,
 			pr_err("config load failed\n");
 			goto out;
 		}
+	} else if (!strcmp(buf, "pm_qos_stat")) {
+		pr_info("pm_qos_stat: delay %d, vote %d, latency %d\n",
+				pm_qos_delay_ms, ihcd->pm_qos_voted,
+				ihcd->pm_qos_latency_us);
 	} else {
 		ret = -EINVAL;
 		goto out;
@@ -2257,6 +2354,12 @@ static int ice40_spi_probe(struct spi_device *spi)
 	struct ice40_hcd *ihcd;
 	int ret, i;
 
+	if (!uicc_card_present) {
+		pr_debug("UICC card is not inserted\n");
+		ret = -ENODEV;
+		goto out;
+	}
+
 	ihcd = devm_kzalloc(&spi->dev, sizeof(*ihcd), GFP_KERNEL);
 	if (!ihcd) {
 		pr_err("fail to allocate ihcd\n");
@@ -2289,9 +2392,18 @@ static int ice40_spi_probe(struct spi_device *spi)
 		goto out;
 	}
 
+	if (of_property_read_u32(ihcd->spi->dev.of_node, "qcom,pm-qos-latency",
+			&ihcd->pm_qos_latency_us))
+		ihcd->pm_qos_latency_us = 0;
+
 	spin_lock_init(&ihcd->lock);
 	INIT_LIST_HEAD(&ihcd->async_list);
 	INIT_WORK(&ihcd->async_work, ice40_async_work);
+
+	if (ihcd->pm_qos_latency_us)
+		INIT_DELAYED_WORK(&ihcd->ice40_pm_qos_work,
+				ice40_pm_qos_work_f);
+
 	mutex_init(&ihcd->wlock);
 	mutex_init(&ihcd->rlock);
 
@@ -2340,6 +2452,7 @@ static int ice40_spi_probe(struct spi_device *spi)
 	}
 	*((struct ice40_hcd **) ihcd->hcd->hcd_priv) = ihcd;
 
+	hcd_to_bus(ihcd->hcd)->skip_resume = true;
 	ret = usb_add_hcd(ihcd->hcd, 0, 0);
 
 	if (ret < 0) {
@@ -2369,6 +2482,10 @@ static int ice40_spi_probe(struct spi_device *spi)
 	device_init_wakeup(&spi->dev, 1);
 	pm_stay_awake(&spi->dev);
 
+	if (ihcd->pm_qos_latency_us)
+		pm_qos_add_request(&ihcd->ice40_pm_qos_req_dma,
+				PM_QOS_CPU_DMA_LATENCY, PM_QOS_DEFAULT_VALUE);
+
 	pr_debug("success\n");
 
 	return 0;
@@ -2394,6 +2511,8 @@ static int ice40_spi_remove(struct spi_device *spi)
 	debugfs_remove_recursive(ihcd->dbg_root);
 
 	usb_remove_hcd(hcd);
+	if (ihcd->pm_qos_latency_us)
+		pm_qos_remove_request(&ihcd->ice40_pm_qos_req_dma);
 	usb_put_hcd(hcd);
 	destroy_workqueue(ihcd->wq);
 	ice40_spi_power_off(ihcd);

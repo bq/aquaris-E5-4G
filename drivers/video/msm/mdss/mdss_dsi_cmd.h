@@ -39,6 +39,7 @@ struct dsi_buf {
 	int size;	/* size of buffer */
 	char *data;	/* buffer */
 	int len;	/* data length */
+	int read_cnt;	/* DSI read count */
 	dma_addr_t dmap; /* mapped dma addr */
 };
 
@@ -97,8 +98,10 @@ struct dsi_cmd_desc {
 #define CMD_REQ_RX      0x0001
 #define CMD_REQ_COMMIT  0x0002
 #define CMD_CLK_CTRL    0x0004
+#define CMD_REQ_UNICAST 0x0008
 #define CMD_REQ_NO_MAX_PKT_SIZE 0x0008
 #define CMD_REQ_LP_MODE 0x0010
+#define CMD_REQ_HS_MODE 0x0020
 
 struct dcs_cmd_req {
 	struct dsi_cmd_desc *cmds;

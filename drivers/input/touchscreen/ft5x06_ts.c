@@ -104,6 +104,7 @@
 #define FT5316_ID		0x0A
 #define FT5306I_ID		0x55
 #define FT6X06_ID		0x06
+#define FT6X36_ID		0x36
 
 #define FT_UPGRADE_AA		0xAA
 #define FT_UPGRADE_55		0x55
@@ -117,10 +118,22 @@
 #define FT_FW_FILE_SUB_MIN_VER(x) 0
 #define FT_FW_FILE_VENDOR_ID(x)	((x)->data[(x)->size - 1])
 
-#define FT_FW_CHECK(x)		\
+#define FT_FW_FILE_MAJ_VER_FT6X36(x)	((x)->data[0x10a])
+#define FT_FW_FILE_VENDOR_ID_FT6X36(x)	((x)->data[0x108])
+
+/**
+* Application data verification will be run before upgrade flow.
+* Firmware image stores some flags with negative and positive value
+* in corresponding addresses, we need pick them out do some check to
+* make sure the application data is valid.
+*/
+#define FT_FW_CHECK(x, ts_data) \
+	(ts_data->family_id == FT6X36_ID ? \
+	(((x)->data[0x104] ^ (x)->data[0x105]) == 0xFF \
+	&& ((x)->data[0x106] ^ (x)->data[0x107]) == 0xFF) : \
 	(((x)->data[(x)->size - 8] ^ (x)->data[(x)->size - 6]) == 0xFF \
-	&& (((x)->data[(x)->size - 7] ^ (x)->data[(x)->size - 5]) == 0xFF \
-	&& (((x)->data[(x)->size - 3] ^ (x)->data[(x)->size - 4]) == 0xFF)))
+	&& ((x)->data[(x)->size - 7] ^ (x)->data[(x)->size - 5]) == 0xFF \
+	&& ((x)->data[(x)->size - 3] ^ (x)->data[(x)->size - 4]) == 0xFF))
 
 #define FT_MAX_TRIES		5
 #define FT_RETRY_DLY		20
@@ -154,6 +167,10 @@
 #define FT_MAGIC_BLOADER_LZ4	0x6ffa
 #define FT_MAGIC_BLOADER_GZF_30	0x7ff4
 #define FT_MAGIC_BLOADER_GZF	0x7bf4
+
+#define PINCTRL_STATE_ACTIVE	"pmx_ts_active"
+#define PINCTRL_STATE_SUSPEND	"pmx_ts_suspend"
+#define PINCTRL_STATE_RELEASE	"pmx_ts_release"
 
 enum {
 	FT_BLOADER_VERSION_LZ4 = 0,
@@ -209,8 +226,9 @@ struct ft5x06_ts_data {
 	struct early_suspend early_suspend;
 #endif
 	struct pinctrl *ts_pinctrl;
-	struct pinctrl_state *gpio_state_active;
-	struct pinctrl_state *gpio_state_suspend;
+	struct pinctrl_state *pinctrl_state_active;
+	struct pinctrl_state *pinctrl_state_suspend;
+	struct pinctrl_state *pinctrl_state_release;
 };
 
 static int ft5x06_i2c_read(struct i2c_client *client, char *writebuf,
@@ -387,6 +405,80 @@ static irqreturn_t ft5x06_ts_interrupt(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
+static int ft5x06_gpio_configure(struct ft5x06_ts_data *data, bool on)
+{
+	int err = 0;
+
+	if (on) {
+		if (gpio_is_valid(data->pdata->irq_gpio)) {
+			err = gpio_request(data->pdata->irq_gpio,
+						"ft5x06_irq_gpio");
+			if (err) {
+				dev_err(&data->client->dev,
+					"irq gpio request failed");
+				goto err_irq_gpio_req;
+			}
+
+			err = gpio_direction_input(data->pdata->irq_gpio);
+			if (err) {
+				dev_err(&data->client->dev,
+					"set_direction for irq gpio failed\n");
+				goto err_irq_gpio_dir;
+			}
+		}
+
+		if (gpio_is_valid(data->pdata->reset_gpio)) {
+			err = gpio_request(data->pdata->reset_gpio,
+						"ft5x06_reset_gpio");
+			if (err) {
+				dev_err(&data->client->dev,
+					"reset gpio request failed");
+				goto err_irq_gpio_dir;
+			}
+
+			err = gpio_direction_output(data->pdata->reset_gpio, 0);
+			if (err) {
+				dev_err(&data->client->dev,
+				"set_direction for reset gpio failed\n");
+				goto err_reset_gpio_dir;
+			}
+			msleep(data->pdata->hard_rst_dly);
+			gpio_set_value_cansleep(data->pdata->reset_gpio, 1);
+		}
+
+		return 0;
+	} else {
+		if (gpio_is_valid(data->pdata->irq_gpio))
+			gpio_free(data->pdata->irq_gpio);
+		if (gpio_is_valid(data->pdata->reset_gpio)) {
+			/*
+			 * This is intended to save leakage current
+			 * only. Even if the call(gpio_direction_input)
+			 * fails, only leakage current will be more but
+			 * functionality will not be affected.
+			 */
+			err = gpio_direction_input(data->pdata->reset_gpio);
+			if (err) {
+				dev_err(&data->client->dev,
+					"unable to set direction for gpio "
+					"[%d]\n", data->pdata->irq_gpio);
+			}
+			gpio_free(data->pdata->reset_gpio);
+		}
+
+		return 0;
+	}
+
+err_reset_gpio_dir:
+	if (gpio_is_valid(data->pdata->reset_gpio))
+		gpio_free(data->pdata->reset_gpio);
+err_irq_gpio_dir:
+	if (gpio_is_valid(data->pdata->irq_gpio))
+		gpio_free(data->pdata->irq_gpio);
+err_irq_gpio_req:
+	return err;
+}
+
 static int ft5x06_power_on(struct ft5x06_ts_data *data, bool on)
 {
 	int rc;
@@ -506,63 +598,52 @@ static int ft5x06_ts_pinctrl_init(struct ft5x06_ts_data *ft5x06_data)
 	/* Get pinctrl if target uses pinctrl */
 	ft5x06_data->ts_pinctrl = devm_pinctrl_get(&(ft5x06_data->client->dev));
 	if (IS_ERR_OR_NULL(ft5x06_data->ts_pinctrl)) {
-		dev_dbg(&ft5x06_data->client->dev,
-			"Target does not use pinctrl\n");
 		retval = PTR_ERR(ft5x06_data->ts_pinctrl);
-		ft5x06_data->ts_pinctrl = NULL;
-		return retval;
-	}
-
-	ft5x06_data->gpio_state_active
-		= pinctrl_lookup_state(ft5x06_data->ts_pinctrl,
-			"pmx_ts_active");
-	if (IS_ERR_OR_NULL(ft5x06_data->gpio_state_active)) {
 		dev_dbg(&ft5x06_data->client->dev,
-			"Can not get ts default pinstate\n");
-		retval = PTR_ERR(ft5x06_data->gpio_state_active);
-		ft5x06_data->ts_pinctrl = NULL;
-		return retval;
+			"Target does not use pinctrl %d\n", retval);
+		goto err_pinctrl_get;
 	}
 
-	ft5x06_data->gpio_state_suspend
+	ft5x06_data->pinctrl_state_active
 		= pinctrl_lookup_state(ft5x06_data->ts_pinctrl,
-			"pmx_ts_suspend");
-	if (IS_ERR_OR_NULL(ft5x06_data->gpio_state_suspend)) {
+				PINCTRL_STATE_ACTIVE);
+	if (IS_ERR_OR_NULL(ft5x06_data->pinctrl_state_active)) {
+		retval = PTR_ERR(ft5x06_data->pinctrl_state_active);
 		dev_err(&ft5x06_data->client->dev,
-			"Can not get ts sleep pinstate\n");
-		retval = PTR_ERR(ft5x06_data->gpio_state_suspend);
-		ft5x06_data->ts_pinctrl = NULL;
-		return retval;
+			"Can not lookup %s pinstate %d\n",
+			PINCTRL_STATE_ACTIVE, retval);
+		goto err_pinctrl_lookup;
+	}
+
+	ft5x06_data->pinctrl_state_suspend
+		= pinctrl_lookup_state(ft5x06_data->ts_pinctrl,
+			PINCTRL_STATE_SUSPEND);
+	if (IS_ERR_OR_NULL(ft5x06_data->pinctrl_state_suspend)) {
+		retval = PTR_ERR(ft5x06_data->pinctrl_state_suspend);
+		dev_err(&ft5x06_data->client->dev,
+			"Can not lookup %s pinstate %d\n",
+			PINCTRL_STATE_SUSPEND, retval);
+		goto err_pinctrl_lookup;
+	}
+
+	ft5x06_data->pinctrl_state_release
+		= pinctrl_lookup_state(ft5x06_data->ts_pinctrl,
+			PINCTRL_STATE_RELEASE);
+	if (IS_ERR_OR_NULL(ft5x06_data->pinctrl_state_release)) {
+		retval = PTR_ERR(ft5x06_data->pinctrl_state_release);
+		dev_dbg(&ft5x06_data->client->dev,
+			"Can not lookup %s pinstate %d\n",
+			PINCTRL_STATE_RELEASE, retval);
 	}
 
 	return 0;
+
+err_pinctrl_lookup:
+	devm_pinctrl_put(ft5x06_data->ts_pinctrl);
+err_pinctrl_get:
+	ft5x06_data->ts_pinctrl = NULL;
+	return retval;
 }
-
-static int ft5x06_ts_pinctrl_select(struct ft5x06_ts_data *ft5x06_data,
-						bool on)
-{
-	struct pinctrl_state *pins_state;
-	int ret;
-
-	pins_state = on ? ft5x06_data->gpio_state_active
-		: ft5x06_data->gpio_state_suspend;
-	if (!IS_ERR_OR_NULL(pins_state)) {
-		ret = pinctrl_select_state(ft5x06_data->ts_pinctrl, pins_state);
-		if (ret) {
-			dev_err(&ft5x06_data->client->dev,
-				"can not set %s pins\n",
-				on ? "pmx_ts_active" : "pmx_ts_suspend");
-			return ret;
-		}
-	} else {
-		dev_err(&ft5x06_data->client->dev,
-			"not a valid '%s' pinstate\n",
-				on ? "pmx_ts_active" : "pmx_ts_suspend");
-	}
-
-	return 0;
-}
-
 
 #ifdef CONFIG_PM
 static int ft5x06_ts_suspend(struct device *dev)
@@ -579,11 +660,6 @@ static int ft5x06_ts_suspend(struct device *dev)
 	if (data->suspended) {
 		dev_info(dev, "Already in suspend state\n");
 		return 0;
-	}
-	if (data->ts_pinctrl) {
-		err = ft5x06_ts_pinctrl_select(data, false);
-		if (err < 0)
-			dev_err(dev, "Cannot get idle pinctrl state\n");
 	}
 
 	disable_irq(data->client->irq);
@@ -616,10 +692,40 @@ static int ft5x06_ts_suspend(struct device *dev)
 		}
 	}
 
+	if (data->ts_pinctrl) {
+		err = pinctrl_select_state(data->ts_pinctrl,
+					data->pinctrl_state_suspend);
+		if (err < 0)
+			dev_err(dev, "Cannot get suspend pinctrl state\n");
+	}
+
+	err = ft5x06_gpio_configure(data, false);
+	if (err < 0) {
+		dev_err(&data->client->dev,
+			"failed to put gpios in suspend state\n");
+		goto gpio_configure_fail;
+	}
+
 	data->suspended = true;
 
 	return 0;
 
+gpio_configure_fail:
+	if (data->ts_pinctrl) {
+		err = pinctrl_select_state(data->ts_pinctrl,
+					data->pinctrl_state_active);
+		if (err < 0)
+			dev_err(dev, "Cannot get active pinctrl state\n");
+	}
+	if (data->pdata->power_on) {
+		err = data->pdata->power_on(true);
+		if (err)
+			dev_err(dev, "power on failed");
+	} else {
+		err = ft5x06_power_on(data, true);
+		if (err)
+			dev_err(dev, "power on failed");
+	}
 pwr_off_fail:
 	if (gpio_is_valid(data->pdata->reset_gpio)) {
 		gpio_set_value_cansleep(data->pdata->reset_gpio, 0);
@@ -653,10 +759,19 @@ static int ft5x06_ts_resume(struct device *dev)
 			return err;
 		}
 	}
+
 	if (data->ts_pinctrl) {
-		err = ft5x06_ts_pinctrl_select(data, true);
+		err = pinctrl_select_state(data->ts_pinctrl,
+				data->pinctrl_state_active);
 		if (err < 0)
-			dev_err(dev, "Cannot get default pinctrl state\n");
+			dev_err(dev, "Cannot get active pinctrl state\n");
+	}
+
+	err = ft5x06_gpio_configure(data, true);
+	if (err < 0) {
+		dev_err(&data->client->dev,
+			"failed to put gpios in resue state\n");
+		goto err_gpio_configuration;
 	}
 
 	if (gpio_is_valid(data->pdata->reset_gpio)) {
@@ -672,6 +787,24 @@ static int ft5x06_ts_resume(struct device *dev)
 	data->suspended = false;
 
 	return 0;
+
+err_gpio_configuration:
+	if (data->ts_pinctrl) {
+		err = pinctrl_select_state(data->ts_pinctrl,
+					data->pinctrl_state_suspend);
+		if (err < 0)
+			dev_err(dev, "Cannot get suspend pinctrl state\n");
+	}
+	if (data->pdata->power_on) {
+		err = data->pdata->power_on(false);
+		if (err)
+			dev_err(dev, "power off failed");
+	} else {
+		err = ft5x06_power_on(data, false);
+		if (err)
+			dev_err(dev, "power off failed");
+	}
+	return err;
 }
 
 static const struct dev_pm_ops ft5x06_ts_pm_ops = {
@@ -793,7 +926,8 @@ static int ft5x06_fw_upgrade_start(struct i2c_client *client,
 	for (i = 0, j = 0; i < FT_UPGRADE_LOOP; i++) {
 		msleep(FT_EARSE_DLY_MS);
 		/* reset - write 0xaa and 0x55 to reset register */
-		if (ts_data->family_id == FT6X06_ID)
+		if (ts_data->family_id == FT6X06_ID
+			|| ts_data->family_id == FT6X36_ID)
 			reset_reg = FT_RST_CMD_REG2;
 		else
 			reset_reg = FT_RST_CMD_REG1;
@@ -1003,10 +1137,15 @@ static int ft5x06_fw_upgrade(struct device *dev, bool force)
 		goto rel_fw;
 	}
 
-	fw_file_maj = FT_FW_FILE_MAJ_VER(fw);
+	if (data->family_id == FT6X36_ID) {
+		fw_file_maj = FT_FW_FILE_MAJ_VER_FT6X36(fw);
+		fw_file_vendor_id = FT_FW_FILE_VENDOR_ID_FT6X36(fw);
+	} else {
+		fw_file_maj = FT_FW_FILE_MAJ_VER(fw);
+		fw_file_vendor_id = FT_FW_FILE_VENDOR_ID(fw);
+	}
 	fw_file_min = FT_FW_FILE_MIN_VER(fw);
 	fw_file_sub_min = FT_FW_FILE_SUB_MIN_VER(fw);
-	fw_file_vendor_id = FT_FW_FILE_VENDOR_ID(fw);
 
 	dev_info(dev, "Current firmware: %d.%d.%d", data->fw_ver[0],
 				data->fw_ver[1], data->fw_ver[2]);
@@ -1026,7 +1165,7 @@ static int ft5x06_fw_upgrade(struct device *dev, bool force)
 	}
 
 	/* start firmware upgrade */
-	if (FT_FW_CHECK(fw)) {
+	if (FT_FW_CHECK(fw, data)) {
 		rc = ft5x06_fw_upgrade_start(data->client, fw->data, fw->size);
 		if (rc < 0)
 			dev_err(dev, "update failed (%d). try later...\n", rc);
@@ -1535,7 +1674,7 @@ static int ft5x06_ts_probe(struct i2c_client *client,
 	data->tch_data_len = FT_TCH_LEN(pdata->num_max_touches);
 	data->tch_data = devm_kzalloc(&client->dev,
 				data->tch_data_len, GFP_KERNEL);
-	if (!data) {
+	if (!data->tch_data) {
 		dev_err(&client->dev, "Not enough memory\n");
 		return -ENOMEM;
 	}
@@ -1604,40 +1743,24 @@ static int ft5x06_ts_probe(struct i2c_client *client,
 
 	err = ft5x06_ts_pinctrl_init(data);
 	if (!err && data->ts_pinctrl) {
-		err = ft5x06_ts_pinctrl_select(data, true);
-		if (err < 0)
-			goto pwr_off;
-	}
-
-	if (gpio_is_valid(pdata->irq_gpio)) {
-		err = gpio_request(pdata->irq_gpio, "ft5x06_irq_gpio");
-		if (err) {
-			dev_err(&client->dev, "irq gpio request failed");
-			goto pwr_off;
-		}
-		err = gpio_direction_input(pdata->irq_gpio);
-		if (err) {
+		/*
+		 * Pinctrl handle is optional. If pinctrl handle is found
+		 * let pins to be configured in active state. If not
+		 * found continue further without error.
+		 */
+		err = pinctrl_select_state(data->ts_pinctrl,
+					data->pinctrl_state_active);
+		if (err < 0) {
 			dev_err(&client->dev,
-				"set_direction for irq gpio failed\n");
-			goto free_irq_gpio;
+				"failed to select pin to active state");
 		}
 	}
 
-	if (gpio_is_valid(pdata->reset_gpio)) {
-		err = gpio_request(pdata->reset_gpio, "ft5x06_reset_gpio");
-		if (err) {
-			dev_err(&client->dev, "reset gpio request failed");
-			goto free_irq_gpio;
-		}
-
-		err = gpio_direction_output(pdata->reset_gpio, 0);
-		if (err) {
-			dev_err(&client->dev,
-				"set_direction for reset gpio failed\n");
-			goto free_reset_gpio;
-		}
-		msleep(data->pdata->hard_rst_dly);
-		gpio_set_value_cansleep(data->pdata->reset_gpio, 1);
+	err = ft5x06_gpio_configure(data, true);
+	if (err < 0) {
+		dev_err(&client->dev,
+			"Failed to configure the gpios\n");
+		goto err_gpio_req;
 	}
 
 	/* make sure CTP already finish startup process */
@@ -1648,14 +1771,14 @@ static int ft5x06_ts_probe(struct i2c_client *client,
 	err = ft5x06_i2c_read(client, &reg_addr, 1, &reg_value, 1);
 	if (err < 0) {
 		dev_err(&client->dev, "version read failed");
-		goto free_reset_gpio;
+		goto free_gpio;
 	}
 
 	dev_info(&client->dev, "Device ID = 0x%x\n", reg_value);
 
 	if ((pdata->family_id != reg_value) && (!pdata->ignore_id_check)) {
 		dev_err(&client->dev, "%s:Unsupported controller\n", __func__);
-		goto free_reset_gpio;
+		goto free_gpio;
 	}
 
 	data->family_id = pdata->family_id;
@@ -1666,7 +1789,7 @@ static int ft5x06_ts_probe(struct i2c_client *client,
 				client->dev.driver->name, data);
 	if (err) {
 		dev_err(&client->dev, "request irq failed\n");
-		goto free_reset_gpio;
+		goto free_gpio;
 	}
 
 	err = device_create_file(&client->dev, &dev_attr_fw_name);
@@ -1785,23 +1908,23 @@ free_fw_name_sys:
 	device_remove_file(&client->dev, &dev_attr_fw_name);
 irq_free:
 	free_irq(client->irq, data);
-free_reset_gpio:
+free_gpio:
 	if (gpio_is_valid(pdata->reset_gpio))
 		gpio_free(pdata->reset_gpio);
-	if (data->ts_pinctrl) {
-		err = ft5x06_ts_pinctrl_select(data, false);
-		if (err < 0)
-			pr_err("Cannot get idle pinctrl state\n");
-	}
-free_irq_gpio:
 	if (gpio_is_valid(pdata->irq_gpio))
 		gpio_free(pdata->irq_gpio);
+err_gpio_req:
 	if (data->ts_pinctrl) {
-		err = ft5x06_ts_pinctrl_select(data, false);
-		if (err < 0)
-			pr_err("Cannot get idle pinctrl state\n");
+		if (IS_ERR_OR_NULL(data->pinctrl_state_release)) {
+			devm_pinctrl_put(data->ts_pinctrl);
+			data->ts_pinctrl = NULL;
+		} else {
+			err = pinctrl_select_state(data->ts_pinctrl,
+					data->pinctrl_state_release);
+			if (err)
+				pr_err("failed to select relase pinctrl state\n");
+		}
 	}
-pwr_off:
 	if (pdata->power_on)
 		pdata->power_on(false);
 	else
@@ -1844,9 +1967,15 @@ static int ft5x06_ts_remove(struct i2c_client *client)
 		gpio_free(data->pdata->irq_gpio);
 
 	if (data->ts_pinctrl) {
-		retval = ft5x06_ts_pinctrl_select(data, false);
-		if (retval < 0)
-			pr_err("Cannot get idle pinctrl state\n");
+		if (IS_ERR_OR_NULL(data->pinctrl_state_release)) {
+			devm_pinctrl_put(data->ts_pinctrl);
+			data->ts_pinctrl = NULL;
+		} else {
+			retval = pinctrl_select_state(data->ts_pinctrl,
+					data->pinctrl_state_release);
+			if (retval < 0)
+				pr_err("failed to select release pinctrl state\n");
+		}
 	}
 
 	if (data->pdata->power_on)

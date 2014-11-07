@@ -17,7 +17,7 @@
 
 #include "peripheral-loader.h"
 
-#define VDD_MSS_UV	1050000
+#define VDD_MSS_UV	1000000
 
 struct modem_data {
 	struct q6v5_data *q6;
@@ -30,6 +30,8 @@ struct modem_data {
 	void __iomem *rmb_base;
 	struct clk *xo;
 	struct pil_desc desc;
+	struct device mba_mem_dev;
+	struct dma_attrs attrs_dma;
 };
 
 extern struct pil_reset_ops pil_msa_mss_ops;
@@ -40,4 +42,5 @@ int pil_mss_reset_load_mba(struct pil_desc *pil);
 int pil_mss_make_proxy_votes(struct pil_desc *pil);
 void pil_mss_remove_proxy_votes(struct pil_desc *pil);
 int pil_mss_shutdown(struct pil_desc *pil);
+int pil_mss_deinit_image(struct pil_desc *pil);
 #endif

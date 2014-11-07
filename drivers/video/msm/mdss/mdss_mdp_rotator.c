@@ -23,6 +23,7 @@
 #include "mdss_mdp.h"
 #include "mdss_mdp_rotator.h"
 #include "mdss_fb.h"
+#include "mdss_debug.h"
 
 #define MAX_ROTATOR_SESSIONS 8
 
@@ -179,6 +180,7 @@ static int mdss_mdp_rotator_pipe_dequeue(struct mdss_mdp_rotator_session *rot)
 					       head);
 
 			rc = mdss_mdp_rotator_busy_wait(tmp);
+			mdss_mdp_smp_release(tmp->pipe);
 			list_del(&tmp->head);
 			if (rc) {
 				pr_err("no pipe attached to session=%d\n",
@@ -282,8 +284,9 @@ static int mdss_mdp_rotator_queue_sub(struct mdss_mdp_rotator_session *rot,
 		pr_err("unable to queue rot data\n");
 		goto error;
 	}
-
+	ATRACE_BEGIN("rotator_kickoff");
 	ret = mdss_mdp_rotator_kickoff(rot_ctl, rot, dst_data);
+	ATRACE_END("rotator_kickoff");
 
 	return ret;
 error:
@@ -433,6 +436,60 @@ static int __mdss_mdp_rotator_pipe_reserve(struct mdss_mdp_rotator_session *rot)
 	return ret;
 }
 
+int mdss_mdp_calc_dnsc_factor(struct mdp_overlay *req,
+			      struct mdss_mdp_rotator_session *rot)
+{
+	int ret = 0;
+	u16 src_w, src_h, dst_w, dst_h, bit;
+	src_w = req->src_rect.w;
+	src_h = req->src_rect.h;
+
+	if (rot->flags & MDP_ROT_90) {
+		dst_w = req->dst_rect.h;
+		dst_h = req->dst_rect.w;
+	} else {
+		dst_w = req->dst_rect.w;
+		dst_h = req->dst_rect.h;
+	}
+	rot->dnsc_factor_w = 0;
+	rot->dnsc_factor_h = 0;
+
+	if ((src_w != dst_w) || (src_h != dst_h)) {
+		if ((src_w % dst_w) || (src_h % dst_h)) {
+			ret = -EINVAL;
+			goto dnsc_err;
+		}
+		/*
+		 * Validate that the calculated downscale
+		 * factor is valid. Ensure that the factor
+		 * is a number with a single bit enabled,
+		 * no larger than 32 (2^5) as we support
+		 * only power of 2 downscaling up to 32.
+		 */
+		rot->dnsc_factor_w = src_w / dst_w;
+		bit = fls(rot->dnsc_factor_w);
+		if ((rot->dnsc_factor_w & ~BIT(bit - 1)) || (bit > 5)) {
+			ret = -EINVAL;
+			goto dnsc_err;
+		}
+		rot->dnsc_factor_h = src_h / dst_h;
+		bit = fls(rot->dnsc_factor_h);
+		if ((rot->dnsc_factor_h & ~BIT(bit - 1)) || (bit > 5)) {
+			ret = -EINVAL;
+			goto dnsc_err;
+		}
+	}
+
+dnsc_err:
+	if (ret) {
+		pr_err("Invalid rotator downscale ratio %dx%d->%dx%d\n",
+			src_w, src_h, dst_w, dst_h);
+		rot->dnsc_factor_w = 0;
+		rot->dnsc_factor_h = 0;
+	}
+	return ret;
+}
+
 int mdss_mdp_rotator_setup(struct msm_fb_data_type *mfd,
 			   struct mdp_overlay *req)
 {
@@ -440,6 +497,7 @@ int mdss_mdp_rotator_setup(struct msm_fb_data_type *mfd,
 	struct mdss_mdp_rotator_session *rot = NULL;
 	struct mdss_mdp_format_params *fmt;
 	u32 bwc_enabled;
+	bool format_changed = false;
 	int ret = 0;
 
 	mutex_lock(&rotator_lock);
@@ -467,12 +525,21 @@ int mdss_mdp_rotator_setup(struct msm_fb_data_type *mfd,
 		list_add(&rot->list, &mdp5_data->rot_proc_list);
 	} else if (req->id & MDSS_MDP_ROT_SESSION_MASK) {
 		rot = mdss_mdp_rotator_session_get(req->id);
-
 		if (!rot) {
 			pr_err("rotator session=%x not found\n", req->id);
 			ret = -ENODEV;
 			goto rot_err;
 		}
+
+		if (work_pending(&rot->commit_work)) {
+			mutex_unlock(&rotator_lock);
+			flush_work(&rot->commit_work);
+			mutex_lock(&rotator_lock);
+		}
+
+		if (rot->format != fmt->format)
+			format_changed = true;
+
 	} else {
 		pr_err("invalid rotator session id=%x\n", req->id);
 		ret = -EINVAL;
@@ -499,6 +566,20 @@ int mdss_mdp_rotator_setup(struct msm_fb_data_type *mfd,
 	rot->src_rect.w = req->src_rect.w;
 	rot->src_rect.h = req->src_rect.h;
 
+	if (mdp5_data->mdata->has_rot_dwnscale &&
+			mdss_mdp_calc_dnsc_factor(req, rot)) {
+		pr_err("Error calculating dnsc_factor\n");
+		ret = -EINVAL;
+		goto rot_err;
+	}
+
+	if ((req->flags & MDP_DEINTERLACE) &&
+			(rot->dnsc_factor_w || rot->dnsc_factor_h)) {
+		pr_err("Downscale not supported with interlaced content\n");
+		ret = -EINVAL;
+		goto rot_err;
+	}
+
 	if (req->flags & MDP_DEINTERLACE) {
 		rot->flags |= MDP_DEINTERLACE;
 		rot->src_rect.h /= 2;
@@ -518,79 +599,13 @@ int mdss_mdp_rotator_setup(struct msm_fb_data_type *mfd,
 	if (rot->flags & MDP_ROT_90)
 		swap(rot->dst.w, rot->dst.h);
 
-	if (rot->src_rect.w > MAX_MIXER_WIDTH) {
-		struct mdss_mdp_rotator_session *tmp;
-		u32 width;
-
-		if (rot->bwc_mode) {
-			pr_err("Unable to do split rotation with bwc set\n");
-			ret = -EINVAL;
-			goto rot_err;
-		}
-
-		width = rot->src_rect.w;
-
-		pr_debug("setting up split rotation src=%dx%d\n",
-			rot->src_rect.w, rot->src_rect.h);
-
-		if (width > (MAX_MIXER_WIDTH * 2)) {
-			pr_err("unsupported source width %d\n", width);
-			ret = -EOVERFLOW;
-			goto rot_err;
-		}
-
-		if (!rot->next) {
-			tmp = mdss_mdp_rotator_session_alloc();
-			if (!tmp) {
-				pr_err("unable to allocate rot dual session\n");
-				ret = -ENOMEM;
-				goto rot_err;
-			}
-			rot->next = tmp;
-		}
-		tmp = rot->next;
-
-		tmp->session_id = rot->session_id & ~MDSS_MDP_ROT_SESSION_MASK;
-		tmp->flags = rot->flags;
-		tmp->format = rot->format;
-		tmp->img_width = rot->img_width;
-		tmp->img_height = rot->img_height;
-		tmp->src_rect = rot->src_rect;
-
-		tmp->src_rect.w = width / 2;
-		width -= tmp->src_rect.w;
-		tmp->src_rect.x += width;
-
-		tmp->dst = rot->dst;
-		rot->src_rect.w = width;
-
-		if (rot->flags & MDP_ROT_90) {
-			/*
-			 * If rotated by 90 first half should be on top.
-			 * But if horizontally flipped should be on bottom.
-			 */
-			if (rot->flags & MDP_FLIP_LR)
-				rot->dst.y = tmp->src_rect.w;
-			else
-				tmp->dst.y = rot->src_rect.w;
-		} else {
-			/*
-			 * If not rotated, first half should be the left part
-			 * of the frame, unless horizontally flipped
-			 */
-			if (rot->flags & MDP_FLIP_LR)
-				rot->dst.x = tmp->src_rect.w;
-			else
-				tmp->dst.x = rot->src_rect.w;
-		}
-
-		tmp->params_changed++;
-	} else if (rot->next) {
-		mdss_mdp_rotator_finish(rot->next);
-		rot->next = NULL;
-	}
-
 	rot->params_changed++;
+
+	/* If the format changed, release the smp alloc */
+	if (format_changed && rot->pipe) {
+		mdss_mdp_rotator_busy_wait(rot);
+		mdss_mdp_smp_release(rot->pipe);
+	}
 
 	ret = __mdss_mdp_rotator_pipe_reserve(rot);
 	if (!ret && rot->next)
@@ -607,6 +622,14 @@ int mdss_mdp_rotator_setup(struct msm_fb_data_type *mfd,
 		if (rot && (req->id == MSMFB_NEW_REQUEST))
 			mdss_mdp_rotator_finish(rot);
 	}
+	/*
+	 * overwrite the src format for rotator to dst format
+	 * for use by the user. On subsequent set calls, the
+	 * user is expected to proivde the original src format
+	 */
+	req->src.format = mdss_mdp_get_rotator_dst_format(req->src.format,
+		req->flags & MDP_ROT_90, req->flags & MDP_BWC_EN);
+
 	mutex_unlock(&rotator_lock);
 	return ret;
 }
@@ -629,6 +652,12 @@ static int mdss_mdp_rotator_finish(struct mdss_mdp_rotator_session *rot)
 
 	rot_pipe = rot->pipe;
 	if (rot_pipe) {
+		if (work_pending(&rot->commit_work)) {
+			mutex_unlock(&rotator_lock);
+			cancel_work_sync(&rot->commit_work);
+			mutex_lock(&rotator_lock);
+		}
+
 		mdss_mdp_rotator_busy_wait(rot);
 		list_del(&rot->head);
 	}
@@ -692,41 +721,57 @@ int mdss_mdp_rotator_play(struct msm_fb_data_type *mfd,
 			    struct msmfb_overlay_data *req)
 {
 	struct mdss_mdp_rotator_session *rot;
-	struct mdss_overlay_private *mdp5_data = mfd_to_mdp5_data(mfd);
 	int ret;
 	u32 flgs;
+	struct mdss_mdp_data src_buf;
 
 	mutex_lock(&rotator_lock);
 	rot = mdss_mdp_rotator_session_get(req->id);
 	if (!rot) {
 		pr_err("invalid session id=%x\n", req->id);
 		ret = -ENOENT;
-		goto dst_buf_fail;
+		goto session_fail;
 	}
+
+	memset(&src_buf, 0, sizeof(struct mdss_mdp_data));
 
 	flgs = rot->flags & MDP_SECURE_OVERLAY_SESSION;
 
+	mdss_iommu_ctrl(1);
 	ret = mdss_mdp_rotator_busy_wait_ex(rot);
 	if (ret) {
 		pr_err("rotator busy wait error\n");
 		goto dst_buf_fail;
 	}
 
-	if (!mfd->panel_info->cont_splash_enabled)
-		mdss_iommu_attach(mdp5_data->mdata);
-
-	mdss_mdp_overlay_free_buf(&rot->src_buf);
-	ret = mdss_mdp_overlay_get_buf(mfd, &rot->src_buf, &req->data, 1, flgs);
+	ret = mdss_mdp_data_get(&src_buf, &req->data, 1, flgs);
 	if (ret) {
 		pr_err("src_data pmem error\n");
 		goto dst_buf_fail;
 	}
 
-	mdss_mdp_overlay_free_buf(&rot->dst_buf);
-	ret = mdss_mdp_overlay_get_buf(mfd, &rot->dst_buf,
-			&req->dst_data, 1, flgs);
+	ret = mdss_mdp_data_map(&src_buf);
+	if (ret) {
+		pr_err("unable to map source buffer\n");
+		mdss_mdp_data_free(&src_buf);
+		goto dst_buf_fail;
+	}
+	mdss_mdp_data_free(&rot->src_buf);
+	memcpy(&rot->src_buf, &src_buf, sizeof(struct mdss_mdp_data));
+
+	mdss_mdp_data_free(&rot->dst_buf);
+	ret = mdss_mdp_data_get(&rot->dst_buf, &req->dst_data, 1, flgs);
 	if (ret) {
 		pr_err("dst_data pmem error\n");
+		mdss_mdp_data_free(&rot->src_buf);
+		goto dst_buf_fail;
+	}
+
+	ret = mdss_mdp_data_map(&rot->dst_buf);
+	if (ret) {
+		pr_err("unable to map destination buffer\n");
+		mdss_mdp_data_free(&rot->dst_buf);
+		mdss_mdp_data_free(&rot->src_buf);
 		goto dst_buf_fail;
 	}
 
@@ -736,6 +781,8 @@ int mdss_mdp_rotator_play(struct msm_fb_data_type *mfd,
 		pr_err("rotator queue error session id=%x\n", req->id);
 
 dst_buf_fail:
+	mdss_iommu_ctrl(0);
+session_fail:
 	mutex_unlock(&rotator_lock);
 	return ret;
 }
@@ -747,8 +794,8 @@ int mdss_mdp_rotator_unset(int ndx)
 	mutex_lock(&rotator_lock);
 	rot = mdss_mdp_rotator_session_get(ndx);
 	if (rot) {
-		mdss_mdp_overlay_free_buf(&rot->src_buf);
-		mdss_mdp_overlay_free_buf(&rot->dst_buf);
+		mdss_mdp_data_free(&rot->src_buf);
+		mdss_mdp_data_free(&rot->dst_buf);
 
 		rot->pid = 0;
 		ret = mdss_mdp_rotator_finish(rot);

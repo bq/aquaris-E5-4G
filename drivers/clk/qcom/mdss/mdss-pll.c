@@ -29,6 +29,7 @@
 int mdss_pll_resource_enable(struct mdss_pll_resources *pll_res, bool enable)
 {
 	int rc = 0;
+	int changed = 0;
 	if (!pll_res) {
 		pr_err("Invalid input parameters\n");
 		return -EINVAL;
@@ -44,11 +45,27 @@ int mdss_pll_resource_enable(struct mdss_pll_resources *pll_res, bool enable)
 		return rc;
 	}
 
-	rc = mdss_pll_util_resource_enable(pll_res, enable);
-	if (rc)
-		pr_err("Resource update failed rc=%d\n", rc);
-	else
-		pll_res->resource_enable = enable;
+	if (enable) {
+		if (pll_res->resource_ref_cnt == 0)
+			changed++;
+		pll_res->resource_ref_cnt++;
+	} else {
+		if (pll_res->resource_ref_cnt) {
+			pll_res->resource_ref_cnt--;
+			if (pll_res->resource_ref_cnt == 0)
+				changed++;
+		} else {
+			pr_err("PLL Resources already OFF\n");
+		}
+	}
+
+	if (changed) {
+		rc = mdss_pll_util_resource_enable(pll_res, enable);
+		if (rc)
+			pr_err("Resource update failed rc=%d\n", rc);
+		else
+			pll_res->resource_enable = enable;
+	}
 
 	return rc;
 }
@@ -113,13 +130,24 @@ static int mdss_pll_resource_parse(struct platform_device *pdev,
 	if (!strcmp(compatible_stream, "qcom,mdss_dsi_pll_8916")) {
 		pll_res->pll_interface_type = MDSS_DSI_PLL_LPM;
 		pll_res->target_id = MDSS_PLL_TARGET_8916;
+	} else if (!strcmp(compatible_stream, "qcom,mdss_dsi_pll_8939")) {
+		pll_res->pll_interface_type = MDSS_DSI_PLL_LPM;
+		pll_res->target_id = MDSS_PLL_TARGET_8939;
+	} else if (!strcmp(compatible_stream, "qcom,mdss_dsi_pll_8909")) {
+		pll_res->pll_interface_type = MDSS_DSI_PLL_LPM;
+		pll_res->target_id = MDSS_PLL_TARGET_8909;
 	} else if (!strcmp(compatible_stream, "qcom,mdss_dsi_pll_8974")) {
 		pll_res->pll_interface_type = MDSS_DSI_PLL_HPM;
 		pll_res->target_id = MDSS_PLL_TARGET_8974;
+	} else if (!strcmp(compatible_stream, "qcom,mdss_dsi_pll_8994")) {
+		pll_res->pll_interface_type = MDSS_DSI_PLL_20NM;
+		pll_res->target_id = MDSS_PLL_TARGET_8994;
 	} else if (!strcmp(compatible_stream, "qcom,mdss_edp_pll")) {
 		pll_res->pll_interface_type = MDSS_EDP_PLL;
 	} else if (!strcmp(compatible_stream, "qcom,mdss_hdmi_pll")) {
 		pll_res->pll_interface_type = MDSS_HDMI_PLL;
+	} else if (!strcmp(compatible_stream, "qcom,mdss_hdmi_pll_8994")) {
+		pll_res->pll_interface_type = MDSS_HDMI_PLL_20NM;
 	} else {
 		goto err;
 	}
@@ -149,11 +177,16 @@ static int mdss_pll_clock_register(struct platform_device *pdev,
 	case MDSS_DSI_PLL_HPM:
 		rc = dsi_pll_clock_register_hpm(pdev, pll_res);
 		break;
+	case MDSS_DSI_PLL_20NM:
+		rc = dsi_pll_clock_register_20nm(pdev, pll_res);
+		break;
 	case MDSS_EDP_PLL:
 		rc = edp_pll_clock_register(pdev, pll_res);
 		break;
 	case MDSS_HDMI_PLL:
 		rc = hdmi_pll_clock_register(pdev, pll_res);
+	case MDSS_HDMI_PLL_20NM:
+		rc = hdmi_20nm_pll_clock_register(pdev, pll_res);
 		break;
 	case MDSS_UNKNOWN_PLL:
 	default:
@@ -173,6 +206,7 @@ static int mdss_pll_probe(struct platform_device *pdev)
 	const char *label;
 	struct resource *pll_base_reg;
 	struct resource *phy_base_reg;
+	struct resource *dynamic_pll_base_reg;
 	struct mdss_pll_resources *pll_res;
 
 	if (!pdev->dev.of_node) {
@@ -196,6 +230,13 @@ static int mdss_pll_probe(struct platform_device *pdev)
 	}
 	platform_set_drvdata(pdev, pll_res);
 
+	rc = of_property_read_u32(pdev->dev.of_node, "cell-index",
+			&pll_res->index);
+	if (rc) {
+		pr_err("Unable to get the cell-index rc=%d\n", rc);
+		pll_res->index = 0;
+	}
+
 	pll_base_reg = platform_get_resource_byname(pdev,
 						IORESOURCE_MEM, "pll_base");
 	if (!pll_base_reg) {
@@ -218,6 +259,25 @@ static int mdss_pll_probe(struct platform_device *pdev)
 		goto res_parse_error;
 	}
 
+	/*
+	 * DSI PLL 1 is leaking current whenever MDSS GDSC is toggled. Need to
+	 * map PLL1 registers along with the PLl0 so that we can manually turn
+	 * off PLL1.
+	 */
+	if (pll_res->pll_interface_type == MDSS_DSI_PLL_20NM) {
+		struct resource *pll_1_base_reg;
+		pll_1_base_reg = platform_get_resource_byname(pdev,
+				IORESOURCE_MEM, "pll_1_base");
+		if (pll_1_base_reg) {
+			pll_res->pll_1_base = ioremap(pll_1_base_reg->start,
+					resource_size(pll_1_base_reg));
+			if (!pll_res->pll_1_base)
+				pr_err("Unable to remap pll 1 base resources\n");
+		} else {
+			pr_err("Unable to get the pll 1 base resource\n");
+		}
+	}
+
 	phy_base_reg = platform_get_resource_byname(pdev,
 						IORESOURCE_MEM, "phy_base");
 	if (!phy_base_reg) {
@@ -234,6 +294,18 @@ static int mdss_pll_probe(struct platform_device *pdev)
 			pr_err("Unable to remap pll phy base resources\n");
 			rc = -ENOMEM;
 			goto phy_io_error;
+		}
+	}
+
+	dynamic_pll_base_reg = platform_get_resource_byname(pdev,
+					IORESOURCE_MEM, "dynamic_pll_base");
+	if (dynamic_pll_base_reg) {
+		pll_res->dyn_pll_base = ioremap(dynamic_pll_base_reg->start,
+				resource_size(dynamic_pll_base_reg));
+		if (!pll_res->dyn_pll_base) {
+			pr_err("Unable to remap dynamic pll base resources\n");
+			rc = -ENOMEM;
+			goto dyn_pll_io_error;
 		}
 	}
 
@@ -254,9 +326,14 @@ static int mdss_pll_probe(struct platform_device *pdev)
 clock_register_error:
 	mdss_pll_resource_deinit(pdev, pll_res);
 res_init_error:
+	if (pll_res->dyn_pll_base)
+		iounmap(pll_res->dyn_pll_base);
+dyn_pll_io_error:
 	if (pll_res->phy_base)
 		iounmap(pll_res->phy_base);
 phy_io_error:
+	if (pll_res->pll_1_base)
+		iounmap(pll_res->pll_1_base);
 	mdss_pll_resource_release(pdev, pll_res);
 res_parse_error:
 	iounmap(pll_res->pll_base);
@@ -287,7 +364,11 @@ static int mdss_pll_remove(struct platform_device *pdev)
 
 static const struct of_device_id mdss_pll_dt_match[] = {
 	{.compatible = "qcom,mdss_dsi_pll_8974"},
+	{.compatible = "qcom,mdss_dsi_pll_8994"},
+	{.compatible = "qcom,mdss_hdmi_pll_8994"},
 	{.compatible = "qcom,mdss_dsi_pll_8916"},
+	{.compatible = "qcom,mdss_dsi_pll_8939"},
+	{.compatible = "qcom,mdss_dsi_pll_8909"},
 	{.compatible = "qcom,mdss_edp_pll"},
 	{.compatible = "qcom,mdss_hdmi_pll"},
 	{}
@@ -314,7 +395,7 @@ static int __init mdss_pll_driver_init(void)
 
 	return rc;
 }
-fs_initcall(mdss_pll_driver_init);
+subsys_initcall(mdss_pll_driver_init);
 
 static void __exit mdss_pll_driver_deinit(void)
 {

@@ -50,6 +50,8 @@ struct f_rmnet {
 	struct list_head		cpkt_resp_q;
 	unsigned long			notify_count;
 	unsigned long			cpkts_len;
+	const struct usb_endpoint_descriptor *in_ep_desc_backup;
+	const struct usb_endpoint_descriptor *out_ep_desc_backup;
 };
 
 static unsigned int nr_rmnet_ports;
@@ -411,7 +413,8 @@ static int gport_rmnet_connect(struct f_rmnet *dev, unsigned intf)
 		}
 		break;
 	case USB_GADGET_XPORT_QTI:
-		ret = gqti_ctrl_connect(&dev->port, port_num, intf);
+		ret = gqti_ctrl_connect(&dev->port, port_num, intf, dxport,
+							USB_GADGET_RMNET);
 		if (ret) {
 			pr_err("%s: gqti_ctrl_connect failed: err:%d\n",
 					__func__, ret);
@@ -523,6 +526,8 @@ static int gport_rmnet_connect(struct f_rmnet *dev, unsigned intf)
 
 			return PTR_ERR(net);
 		}
+		gether_update_dl_max_pkts_per_xfer(&dev->gether_port, 10);
+		gether_update_dl_max_xfer_size(&dev->gether_port, 16384);
 		break;
 	case USB_GADGET_XPORT_NONE:
 		 break;
@@ -634,10 +639,16 @@ static void frmnet_suspend(struct usb_function *f)
 	struct f_rmnet *dev = func_to_rmnet(f);
 	unsigned		port_num;
 	enum transport_type	dxport = rmnet_ports[dev->port_num].data_xport;
+	bool			remote_wakeup_allowed;
 
-	pr_debug("%s: data xport: %s dev: %p portno: %d\n",
+	if (f->config->cdev->gadget->speed == USB_SPEED_SUPER)
+		remote_wakeup_allowed = f->func_wakeup_allowed;
+	else
+		remote_wakeup_allowed = f->config->cdev->gadget->remote_wakeup;
+
+	pr_debug("%s: data xport: %s dev: %p portno: %d remote_wakeup: %d\n",
 		__func__, xport_to_str(dxport),
-		dev, dev->port_num);
+		dev, dev->port_num, remote_wakeup_allowed);
 
 	usb_ep_fifo_flush(dev->notify);
 	frmnet_purge_responses(dev);
@@ -648,7 +659,23 @@ static void frmnet_suspend(struct usb_function *f)
 		break;
 	case USB_GADGET_XPORT_BAM2BAM:
 	case USB_GADGET_XPORT_BAM2BAM_IPA:
-		gbam_suspend(&dev->port, port_num, dxport);
+		if (remote_wakeup_allowed) {
+			gbam_suspend(&dev->port, port_num, dxport);
+		} else {
+			/*
+			 * When remote wakeup is disabled, IPA is disconnected
+			 * because it cannot send new data until the USB bus is
+			 * resumed. Endpoint descriptors info is saved before it
+			 * gets reset by the BAM disconnect API. This lets us
+			 * restore this info when the USB bus is resumed.
+			 */
+			dev->in_ep_desc_backup  = dev->port.in->desc;
+			dev->out_ep_desc_backup  = dev->port.out->desc;
+			pr_debug("in_ep_desc_bkup = %p, out_ep_desc_bkup = %p",
+			       dev->in_ep_desc_backup, dev->out_ep_desc_backup);
+			pr_debug("%s(): Disconnecting\n", __func__);
+			gbam_disconnect(&dev->port, port_num, dxport);
+		}
 		break;
 	case USB_GADGET_XPORT_HSIC:
 		break;
@@ -669,10 +696,18 @@ static void frmnet_resume(struct usb_function *f)
 	struct f_rmnet *dev = func_to_rmnet(f);
 	unsigned		port_num;
 	enum transport_type	dxport = rmnet_ports[dev->port_num].data_xport;
+	struct usb_gadget	*gadget = dev->cdev->gadget;
+	int  ret, src_connection_idx = 0, dst_connection_idx = 0;
+	bool remote_wakeup_allowed;
 
-	pr_debug("%s: data xport: %s dev: %p portno: %d\n",
+	if (f->config->cdev->gadget->speed == USB_SPEED_SUPER)
+		remote_wakeup_allowed = f->func_wakeup_allowed;
+	else
+		remote_wakeup_allowed = f->config->cdev->gadget->remote_wakeup;
+
+	pr_debug("%s: data xport: %s dev: %p portno: %d remote_wakeup: %d\n",
 		__func__, xport_to_str(dxport),
-		dev, dev->port_num);
+		dev, dev->port_num, remote_wakeup_allowed);
 
 	port_num = rmnet_ports[dev->port_num].data_xport_num;
 	switch (dxport) {
@@ -680,7 +715,30 @@ static void frmnet_resume(struct usb_function *f)
 		break;
 	case USB_GADGET_XPORT_BAM2BAM:
 	case USB_GADGET_XPORT_BAM2BAM_IPA:
-		gbam_resume(&dev->port, port_num, dxport);
+		if (remote_wakeup_allowed) {
+			gbam_resume(&dev->port, port_num, dxport);
+		} else {
+			dev->port.in->desc = dev->in_ep_desc_backup;
+			dev->port.out->desc = dev->out_ep_desc_backup;
+			pr_debug("%s(): Connecting\n", __func__);
+			src_connection_idx = usb_bam_get_connection_idx(
+				gadget->name, IPA_P_BAM, USB_TO_PEER_PERIPHERAL,
+				USB_BAM_DEVICE, port_num);
+			dst_connection_idx = usb_bam_get_connection_idx(
+				gadget->name, IPA_P_BAM, PEER_PERIPHERAL_TO_USB,
+				USB_BAM_DEVICE, port_num);
+			if (dst_connection_idx < 0 || src_connection_idx < 0) {
+				pr_err("%s: usb_bam_get_connection_idx failed\n",
+					__func__);
+				return;
+			}
+			ret = gbam_connect(&dev->port, port_num,
+				dxport, src_connection_idx, dst_connection_idx);
+			if (ret) {
+				pr_err("%s: gbam_connect failed: err:%d\n",
+					__func__, ret);
+			}
+		}
 		break;
 	case USB_GADGET_XPORT_HSIC:
 		break;
@@ -758,6 +816,7 @@ frmnet_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 				dev->port.out->desc = NULL;
 				return -EINVAL;
 		}
+		dev->port.gadget = dev->cdev->gadget;
 		ret = gport_rmnet_connect(dev, intf);
 	}
 

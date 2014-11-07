@@ -36,6 +36,7 @@
 		qcom,soft-vfloat-comp-disabled;
 		therm-bias-supply = <&pma8084_lvs2>;
 		qcom,thermal-mitigation = <1500 700 600 0>;
+		qcom,charging-disabled;
 	};
 };
 
@@ -56,6 +57,10 @@
 	status = "ok";
 };
 
+&pcie1 {
+	qcom,ep-wakeirq;
+};
+
 &mhi {
 	esoc-names = "mdm";
 	esoc-0 = <&mdm1>;
@@ -66,7 +71,7 @@
 	qcom,msm-bus,num-paths = <1>;
 	qcom,msm-bus,vectors-KBps =
 			<100 512 0 0>,
-			<100 512 625000000 625000000>;
+			<100 512 1200000000 1200000000>;
 };
 
 &usb3 {
@@ -93,5 +98,15 @@
 			qcom,msm-mi2s-tx-lines = <1>;
 			qcom,msm-mi2s-rx-lines = <2>;
 		};
+	};
+	qcom,boost-dynamic-controller {
+		compatible = "qcom,boost-dynamic-controller";
+		qcom,vph-threshold-adc_tm = <&pma8084_adc_tm>;
+		qcom,vph-vadc = <&pma8084_vadc>;
+		qcom,boost-dynamic-controller-vph-high-threshold-uv = <3700000>;
+		qcom,boost-dynamic-controller-vph-low-threshold-uv = <3650000>;
+		qcom,boost-dynamic-controller-boost-resource-type = "bbya";
+		qcom,boost-dynamic-controller-boost-resource-key = "bypa";
+		qcom,boost-dynamic-controller-boost-resource-id = <1>;
 	};
 };

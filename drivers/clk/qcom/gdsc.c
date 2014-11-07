@@ -33,6 +33,7 @@
 #define SW_OVERRIDE_MASK	BIT(2)
 #define HW_CONTROL_MASK		BIT(1)
 #define SW_COLLAPSE_MASK	BIT(0)
+#define GMEM_CLAMP_IO_MASK	BIT(0)
 
 /* Wait 2^n CXO cycles between all states. Here, n=2 (4 cycles). */
 #define EN_REST_WAIT_VAL	(0x2 << 20)
@@ -52,6 +53,8 @@ struct gdsc {
 	bool			toggle_logic;
 	bool			resets_asserted;
 	bool			root_en;
+	int			root_clk_idx;
+	void __iomem		*domain_addr;
 };
 
 static int gdsc_is_enabled(struct regulator_dev *rdev)
@@ -70,12 +73,20 @@ static int gdsc_enable(struct regulator_dev *rdev)
 	uint32_t regval;
 	int i, ret;
 
-	if (sc->root_en) {
-		for (i = 0; i < sc->clock_count; i++)
-			clk_prepare_enable(sc->clocks[i]);
-	}
+	if (sc->root_en)
+		clk_prepare_enable(sc->clocks[sc->root_clk_idx]);
 
 	if (sc->toggle_logic) {
+		if (sc->domain_addr) {
+			regval = readl_relaxed(sc->domain_addr);
+			regval &= ~GMEM_CLAMP_IO_MASK;
+			writel_relaxed(regval, sc->domain_addr);
+			/*
+			 * Make sure CLAMP_IO is de-asserted before continuing.
+			 */
+			wmb();
+		}
+
 		regval = readl_relaxed(sc->gdscr);
 		if (regval & HW_CONTROL_MASK) {
 			dev_warn(&rdev->dev, "Invalid enable while %s is under HW control\n",
@@ -99,11 +110,14 @@ static int gdsc_enable(struct regulator_dev *rdev)
 		}
 	} else {
 		for (i = 0; i < sc->clock_count; i++)
-			clk_reset(sc->clocks[i], CLK_RESET_DEASSERT);
+			if (likely(i != sc->root_clk_idx))
+				clk_reset(sc->clocks[i], CLK_RESET_DEASSERT);
 		sc->resets_asserted = false;
 	}
 
 	for (i = 0; i < sc->clock_count; i++) {
+		if (unlikely(i == sc->root_clk_idx))
+			continue;
 		if (sc->toggle_mem)
 			clk_set_flags(sc->clocks[i], CLKFLAG_RETAIN_MEM);
 		if (sc->toggle_periph)
@@ -128,6 +142,8 @@ static int gdsc_disable(struct regulator_dev *rdev)
 	int i, ret = 0;
 
 	for (i = sc->clock_count-1; i >= 0; i--) {
+		if (unlikely(i == sc->root_clk_idx))
+			continue;
 		if (sc->toggle_mem)
 			clk_set_flags(sc->clocks[i], CLKFLAG_NORETAIN_MEM);
 		if (sc->toggle_periph)
@@ -151,16 +167,21 @@ static int gdsc_disable(struct regulator_dev *rdev)
 		if (ret)
 			dev_err(&rdev->dev, "%s disable timed out: 0x%x\n",
 				sc->rdesc.name, regval);
+
+		if (sc->domain_addr) {
+			regval = readl_relaxed(sc->domain_addr);
+			regval |= GMEM_CLAMP_IO_MASK;
+			writel_relaxed(regval, sc->domain_addr);
+		}
 	} else {
 		for (i = sc->clock_count-1; i >= 0; i--)
-			clk_reset(sc->clocks[i], CLK_RESET_ASSERT);
+			if (likely(i != sc->root_clk_idx))
+				clk_reset(sc->clocks[i], CLK_RESET_ASSERT);
 		sc->resets_asserted = true;
 	}
 
-	if (sc->root_en) {
-		for (i = sc->clock_count-1; i >= 0; i--)
-			clk_disable_unprepare(sc->clocks[i]);
-	}
+	if (sc->root_en)
+		clk_disable_unprepare(sc->clocks[sc->root_clk_idx]);
 
 	return ret;
 }
@@ -281,6 +302,15 @@ static int gdsc_probe(struct platform_device *pdev)
 	if (sc->gdscr == NULL)
 		return -ENOMEM;
 
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
+							"domain_addr");
+	if (res) {
+		sc->domain_addr = devm_ioremap(&pdev->dev, res->start,
+							resource_size(res));
+		if (sc->domain_addr == NULL)
+			return -ENOMEM;
+	}
+
 	sc->clock_count = of_property_count_strings(pdev->dev.of_node,
 					    "clock-names");
 	if (sc->clock_count == -EINVAL) {
@@ -294,6 +324,8 @@ static int gdsc_probe(struct platform_device *pdev)
 			sizeof(struct clk *) * sc->clock_count, GFP_KERNEL);
 	if (!sc->clocks)
 		return -ENOMEM;
+
+	sc->root_clk_idx = -1;
 
 	sc->root_en = of_property_read_bool(pdev->dev.of_node,
 						"qcom,enable-root-clk");
@@ -310,6 +342,14 @@ static int gdsc_probe(struct platform_device *pdev)
 					clock_name);
 			return rc;
 		}
+
+		if (!strcmp(clock_name, "core_root_clk"))
+			sc->root_clk_idx = i;
+	}
+
+	if (sc->root_en && (sc->root_clk_idx == -1)) {
+		dev_err(&pdev->dev, "Failed to get root clock name\n");
+		return -EINVAL;
 	}
 
 	sc->rdesc.id = atomic_inc_return(&gdsc_count);

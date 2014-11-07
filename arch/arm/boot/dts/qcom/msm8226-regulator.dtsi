@@ -35,6 +35,7 @@
 		reg-names = "rbcpr", "rbcpr_clk", "efuse_addr";
 		interrupts = <0 15 0>;
 		regulator-name = "apc_corner";
+		qcom,cpr-fuse-corners = <3>;
 
 		qcom,pvs-fuse-redun-sel = <22 24 3 2 0>;
 		qcom,pvs-fuse = <22 6 5 0>;
@@ -524,4 +525,8 @@
 
 &pm8226_chg_otg {
 	regulator-name = "8226_smbbp_otg";
+};
+
+&pm8226_chg_chgr {
+	regulator-name = "flash_wa";
 };

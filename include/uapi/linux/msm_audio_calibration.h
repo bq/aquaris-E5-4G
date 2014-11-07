@@ -40,17 +40,20 @@
 							215, void *)
 #define AUDIO_SET_RTAC_CVP_CAL		_IOWR(CAL_IOCTL_MAGIC, \
 							216, void *)
-
+#define AUDIO_GET_RTAC_AFE_CAL		_IOWR(CAL_IOCTL_MAGIC, \
+							217, void *)
+#define AUDIO_SET_RTAC_AFE_CAL		_IOWR(CAL_IOCTL_MAGIC, \
+							218, void *)
 enum {
 	CVP_VOC_RX_TOPOLOGY_CAL_TYPE = 0,
 	CVP_VOC_TX_TOPOLOGY_CAL_TYPE,
-	CVP_VOCPROC_CAL_TYPE,
-	CVP_VOCVOL_CAL_TYPE,
-	CVS_VOCSTRM_CAL_TYPE,
+	CVP_VOCPROC_STATIC_CAL_TYPE,
+	CVP_VOCPROC_DYNAMIC_CAL_TYPE,
+	CVS_VOCSTRM_STATIC_CAL_TYPE,
 	CVP_VOCDEV_CFG_CAL_TYPE,
-	CVP_VOCPROC_COL_CAL_TYPE,
-	CVP_VOCVOL_COL_CAL_TYPE,
-	CVS_VOCSTRM_COL_CAL_TYPE,
+	CVP_VOCPROC_STATIC_COL_CAL_TYPE,
+	CVP_VOCPROC_DYNAMIC_COL_CAL_TYPE,
+	CVS_VOCSTRM_STATIC_COL_CAL_TYPE,
 
 	ADM_TOPOLOGY_CAL_TYPE,
 	ADM_CUST_TOPOLOGY_CAL_TYPE,
@@ -90,6 +93,10 @@ enum {
 	VERSION_0_0,
 };
 
+enum {
+	PER_VOCODER_CAL_BIT_MASK = 0x10000,
+};
+
 #define MAX_IOCTL_CMD_SIZE	512
 
 /* common structures */
@@ -103,6 +110,7 @@ struct audio_cal_header {
 
 struct audio_cal_type_header {
 	int32_t		version;
+	int32_t		buffer_number;
 };
 
 struct audio_cal_data {
@@ -175,6 +183,7 @@ struct audio_cal_info_adm_top {
 	/* RX_DEVICE or TX_DEVICE */
 	int32_t		path;
 	int32_t		app_type;
+	int32_t		sample_rate;
 };
 
 struct audio_cal_info_audproc {
@@ -240,16 +249,23 @@ enum msm_spkr_prot_states {
 	MSM_SPKR_PROT_NOT_CALIBRATED
 };
 
+enum msm_spkr_count {
+	SP_V2_SPKR_1,
+	SP_V2_SPKR_2,
+	SP_V2_NUM_MAX_SPKRS
+};
+
 struct audio_cal_info_spk_prot_cfg {
-	int32_t		r0;
-	int32_t		t0;
+	int32_t		r0[SP_V2_NUM_MAX_SPKRS];
+	int32_t		t0[SP_V2_NUM_MAX_SPKRS];
+	uint32_t	quick_calib_flag;
 	uint32_t	mode; /*0 - Start spk prot
 	1 - Start calib
 	2 - Disable spk prot*/
 };
 
 struct audio_cal_info_msm_spk_prot_status {
-	int32_t		r0;
+	int32_t		r0[SP_V2_NUM_MAX_SPKRS];
 	int32_t		status;
 };
 
@@ -320,6 +336,8 @@ struct audio_cal_col_data {
 
 struct audio_cal_info_voc_col {
 	int32_t				table_id;
+	int32_t				tx_acdb_id;
+	int32_t				rx_acdb_id;
 	struct audio_cal_col_data	data;
 };
 

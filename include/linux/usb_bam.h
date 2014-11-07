@@ -356,7 +356,7 @@ int usb_bam_disconnect_pipe(u8 idx);
 int get_bam2bam_connection_info(u8 idx,
 	unsigned long *usb_bam_handle, u32 *usb_bam_pipe_idx,
 	u32 *peer_pipe_idx, struct sps_mem_buffer *desc_fifo,
-	struct sps_mem_buffer *data_fifo);
+	struct sps_mem_buffer *data_fifo, enum usb_pipe_mem_type *mem_type);
 
 /**
  * Resets the USB BAM that has A2 pipes
@@ -412,6 +412,15 @@ void usb_bam_set_qdss_core(const char *qdss_core);
 */
 int usb_bam_get_connection_idx(const char *name, enum peer_bam client,
 	enum usb_bam_pipe_dir dir, enum usb_bam_mode bam_mode, u32 num);
+
+/**
+* return the usb controller bam type used for the supplied connection index
+*
+* @connection_idx - Connection index
+*
+* @return usb control bam type
+*/
+int usb_bam_get_bam_type(int connection_idx);
 
 /**
 * Indicates the type of connection the USB side of the connection is.
@@ -490,7 +499,7 @@ static inline int usb_bam_disconnect_pipe(u8 idx)
 static inline int get_bam2bam_connection_info(u8 idx,
 	unsigned long *usb_bam_handle, u32 *usb_bam_pipe_idx,
 	u32 *peer_pipe_idx, struct sps_mem_buffer *desc_fifo,
-	struct sps_mem_buffer *data_fifo)
+	struct sps_mem_buffer *data_fifo, enum usb_pipe_mem_type *mem_type)
 {
 	return -ENODEV;
 }
@@ -523,6 +532,11 @@ static inline void usb_bam_set_qdss_core(const char *qdss_core)
 static inline int usb_bam_get_connection_idx(const char *name,
 		enum peer_bam client, enum usb_bam_pipe_dir dir,
 		enum usb_bam_mode bam_mode, u32 num)
+{
+	return -ENODEV;
+}
+
+static inline int usb_bam_get_bam_type(int connection_idx)
 {
 	return -ENODEV;
 }

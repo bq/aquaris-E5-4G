@@ -702,11 +702,20 @@ static enum flash_area fwu_go_nogo(void)
 	unsigned char config_id[4];
 	unsigned char pkg_id[4];
 	char *strptr;
-	char *imagePR = kzalloc(sizeof(MAX_FIRMWARE_ID_LEN), GFP_KERNEL);
+	char *imagePR;
 	enum flash_area flash_area = NONE;
 	struct i2c_client *i2c_client = fwu->rmi4_data->i2c_client;
 	struct f01_device_status f01_device_status;
 	struct image_content *img = &fwu->image_content;
+
+	imagePR = kzalloc(sizeof(MAX_FIRMWARE_ID_LEN), GFP_KERNEL);
+	if (!imagePR) {
+		dev_err(&i2c_client->dev,
+			"%s: Failed to alloc mem for image pointer\n",
+			__func__);
+		flash_area = NONE;
+		return flash_area;
+	}
 
 	if (fwu->force_update) {
 		flash_area = UI_FIRMWARE;
@@ -1393,7 +1402,13 @@ static int fwu_do_read_config(void)
 
 	kfree(fwu->read_config_buf);
 	fwu->read_config_buf = kzalloc(fwu->config_size, GFP_KERNEL);
-
+	if (!fwu->read_config_buf) {
+		dev_err(&fwu->rmi4_data->i2c_client->dev,
+			"%s: Failed to alloc memory for config buffer\n",
+			__func__);
+		retval = -ENOMEM;
+		goto exit;
+	}
 	block_offset[1] |= (fwu->config_area << 5);
 
 	retval = fwu->fn_ptr->write(fwu->rmi4_data,

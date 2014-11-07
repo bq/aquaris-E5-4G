@@ -15,6 +15,7 @@
 
 #include <linux/clk.h>
 #include <linux/compiler.h>
+#include <linux/ipc_logging.h>
 #include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
 #include <linux/types.h>
@@ -36,9 +37,48 @@
 
 #define PCIE_MSI_NR_IRQS 256
 
-#define PCIE_DBG(x...) do {              \
+#define PCIE_LOG_PAGES (50)
+
+#define PCIE_DBG(dev, fmt, arg...) do {			 \
+	if ((dev) && (dev)->ipc_log_long)   \
+		ipc_log_string((dev)->ipc_log_long, \
+			"DBG1:%s: " fmt, __func__, arg); \
+	if ((dev) && (dev)->ipc_log)   \
+		ipc_log_string((dev)->ipc_log, "%s: " fmt, __func__, arg); \
 	if (msm_pcie_get_debug_mask())   \
-		pr_alert(x);              \
+		pr_alert("%s: " fmt, __func__, arg);              \
+	} while (0)
+
+#define PCIE_DBG2(dev, fmt, arg...) do {			 \
+	if ((dev) && (dev)->ipc_log)   \
+		ipc_log_string((dev)->ipc_log, "DBG2:%s: " fmt, __func__, arg);\
+	if (msm_pcie_get_debug_mask())   \
+		pr_alert("%s: " fmt, __func__, arg);              \
+	} while (0)
+
+#define PCIE_DBG3(dev, fmt, arg...) do {			 \
+	if ((dev) && (dev)->ipc_log)   \
+		ipc_log_string((dev)->ipc_log, "DBG3:%s: " fmt, __func__, arg);\
+	if (msm_pcie_get_debug_mask())   \
+		pr_alert("%s: " fmt, __func__, arg);              \
+	} while (0)
+
+#define PCIE_INFO(dev, fmt, arg...) do {			 \
+	if ((dev) && (dev)->ipc_log_long)   \
+		ipc_log_string((dev)->ipc_log_long, \
+			"INFO:%s: " fmt, __func__, arg); \
+	if ((dev) && (dev)->ipc_log)   \
+		ipc_log_string((dev)->ipc_log, "%s: " fmt, __func__, arg); \
+	pr_info("%s: " fmt, __func__, arg);  \
+	} while (0)
+
+#define PCIE_ERR(dev, fmt, arg...) do {			 \
+	if ((dev) && (dev)->ipc_log_long)   \
+		ipc_log_string((dev)->ipc_log_long, \
+			"ERR:%s: " fmt, __func__, arg); \
+	if ((dev) && (dev)->ipc_log)   \
+		ipc_log_string((dev)->ipc_log, "%s: " fmt, __func__, arg); \
+	pr_err("%s: " fmt, __func__, arg);  \
 	} while (0)
 
 #define PCIE_BUS_PRIV_DATA(pdev) \
@@ -50,7 +90,6 @@
 #define PM_GPIO                  0x4
 #define PM_VREG                  0x8
 #define PM_PIPE_CLK              0x10
-#define PM_EXPT                  0x80000000
 #define PM_ALL (PM_IRQ | PM_CLK | PM_GPIO | PM_VREG | PM_PIPE_CLK)
 
 #define PCIE_CONF_SPACE_DW		      1024
@@ -179,6 +218,7 @@ struct msm_pcie_dev_t {
 	DECLARE_BITMAP(msi_irq_in_use, PCIE_MSI_NR_IRQS);
 	uint32_t                     msi_gicm_addr;
 	uint32_t                     msi_gicm_base;
+	bool                         use_msi;
 
 	enum msm_pcie_link_status    link_status;
 	bool                         user_suspend;
@@ -193,21 +233,25 @@ struct msm_pcie_dev_t {
 	uint32_t                     n_fts;
 	bool                         ext_ref_clk;
 	uint32_t                     ep_latency;
+	bool                         ep_wakeirq;
 
 	uint32_t                     rc_idx;
 	bool                         enumerated;
 	struct work_struct	     handle_wake_work;
-	struct work_struct	     handle_linkdown_work;
-	int                          handling_linkdown;
-	bool                         recovery_pending;
 	struct mutex                 recovery_lock;
-	struct mutex                 linkdown_lock;
+	spinlock_t                   linkdown_lock;
+	spinlock_t                   wakeup_lock;
 	ulong                        linkdown_counter;
+	bool                         suspending;
 	ulong                        wake_counter;
+	ulong                        req_exit_l1_counter;
 	u32			     ep_shadow[PCIE_CONF_SPACE_DW];
 	u32                          rc_shadow[PCIE_CONF_SPACE_DW];
 	bool                         shadow_en;
 	struct msm_pcie_register_event *event_reg;
+	bool                         power_on;
+	void                         *ipc_log;
+	void                         *ipc_log_long;
 };
 
 extern int msm_pcie_enumerate(u32 rc_idx);
@@ -218,25 +262,10 @@ extern void msm_pcie_config_msi_controller(struct msm_pcie_dev_t *dev);
 extern int32_t msm_pcie_irq_init(struct msm_pcie_dev_t *dev);
 extern void msm_pcie_irq_deinit(struct msm_pcie_dev_t *dev);
 extern int msm_pcie_get_debug_mask(void);
+extern bool msm_pcie_confirm_linkup(struct msm_pcie_dev_t *dev,
+			bool check_sw_stts, bool check_ep);
 
 extern void pcie_phy_init(struct msm_pcie_dev_t *dev);
 extern bool pcie_phy_is_ready(struct msm_pcie_dev_t *dev);
-
-static inline bool msm_pcie_confirm_linkup(struct msm_pcie_dev_t *dev)
-{
-	if (dev->link_status != MSM_PCIE_LINK_ENABLED)
-		return false;
-
-	if (!(readl_relaxed(dev->dm_core + 0x80) & BIT(29)))
-		return false;
-
-	if (readl_relaxed(dev->dm_core) == PCIE_LINK_DOWN)
-		return false;
-
-	if (readl_relaxed(dev->conf) == PCIE_LINK_DOWN)
-		return false;
-
-	return true;
-}
 
 #endif

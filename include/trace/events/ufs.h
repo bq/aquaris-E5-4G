@@ -39,6 +39,26 @@ TRACE_EVENT(ufshcd_clk_gating,
 		__get_str(dev_name), __get_str(state))
 );
 
+TRACE_EVENT(ufshcd_hibern8_on_idle,
+
+	TP_PROTO(const char *dev_name, const char *state),
+
+	TP_ARGS(dev_name, state),
+
+	TP_STRUCT__entry(
+		__string(dev_name, dev_name)
+		__string(state, state)
+	),
+
+	TP_fast_assign(
+		__assign_str(dev_name, dev_name);
+		__assign_str(state, state);
+	),
+
+	TP_printk("%s: state changed to %s",
+		__get_str(dev_name), __get_str(state))
+);
+
 TRACE_EVENT(ufshcd_clk_scaling,
 
 	TP_PROTO(const char *dev_name, const char *state, const char *clk,
@@ -86,6 +106,46 @@ TRACE_EVENT(ufshcd_auto_bkops_state,
 	TP_printk("%s: auto bkops - %s",
 		__get_str(dev_name), __get_str(state))
 );
+
+DECLARE_EVENT_CLASS(ufshcd_profiling_template,
+	TP_PROTO(const char *dev_name, const char *profile_info, s64 time_us,
+		 int err),
+
+	TP_ARGS(dev_name, profile_info, time_us, err),
+
+	TP_STRUCT__entry(
+		__string(dev_name, dev_name)
+		__string(profile_info, profile_info)
+		__field(s64, time_us)
+		__field(int, err)
+	),
+
+	TP_fast_assign(
+		__assign_str(dev_name, dev_name);
+		__assign_str(profile_info, profile_info);
+		__entry->time_us = time_us;
+		__entry->err = err;
+	),
+
+	TP_printk("%s: %s: took %lld usecs, err %d",
+		__get_str(dev_name), __get_str(profile_info),
+		__entry->time_us, __entry->err)
+);
+
+DEFINE_EVENT(ufshcd_profiling_template, ufshcd_profile_hibern8,
+	TP_PROTO(const char *dev_name, const char *profile_info, s64 time_us,
+		 int err),
+	TP_ARGS(dev_name, profile_info, time_us, err));
+
+DEFINE_EVENT(ufshcd_profiling_template, ufshcd_profile_clk_gating,
+	TP_PROTO(const char *dev_name, const char *profile_info, s64 time_us,
+		 int err),
+	TP_ARGS(dev_name, profile_info, time_us, err));
+
+DEFINE_EVENT(ufshcd_profiling_template, ufshcd_profile_clk_scaling,
+	TP_PROTO(const char *dev_name, const char *profile_info, s64 time_us,
+		 int err),
+	TP_ARGS(dev_name, profile_info, time_us, err));
 
 DECLARE_EVENT_CLASS(ufshcd_template,
 	TP_PROTO(const char *dev_name, int err, s64 usecs,
@@ -143,6 +203,44 @@ DEFINE_EVENT(ufshcd_template, ufshcd_init,
 	     TP_PROTO(const char *dev_name, int err, s64 usecs,
 		      const char *dev_state, const char *link_state),
 	     TP_ARGS(dev_name, err, usecs, dev_state, link_state));
+
+TRACE_EVENT(ufshcd_command,
+	TP_PROTO(const char *dev_name, const char *str, unsigned int tag,
+			u32 doorbell, int transfer_len, u32 intr, u64 lba,
+			u8 opcode),
+
+	TP_ARGS(dev_name, str, tag, doorbell, transfer_len, intr, lba, opcode),
+
+	TP_STRUCT__entry(
+		__string(dev_name, dev_name)
+		__string(str, str)
+		__field(unsigned int, tag)
+		__field(u32, doorbell)
+		__field(int, transfer_len)
+		__field(u32, intr)
+		__field(u64, lba)
+		__field(u8, opcode)
+	),
+
+	TP_fast_assign(
+		__assign_str(dev_name, dev_name);
+		__assign_str(str, str);
+		__entry->tag = tag;
+		__entry->doorbell = doorbell;
+		__entry->transfer_len = transfer_len;
+		__entry->intr = intr;
+		__entry->lba = lba;
+		__entry->opcode = opcode;
+	),
+
+	TP_printk(
+		"%s: %s: tag: %u, DB: 0x%x, size: %d, IS: %u, LBA: %llu, opcode: 0x%x",
+		__get_str(str), __get_str(dev_name), __entry->tag,
+		__entry->doorbell, __entry->transfer_len,
+		__entry->intr, __entry->lba, (u32)__entry->opcode
+	)
+);
+
 #endif /* if !defined(_TRACE_UFS_H) || defined(TRACE_HEADER_MULTI_READ) */
 
 /* This part must be outside protection */

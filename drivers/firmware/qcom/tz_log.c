@@ -561,7 +561,7 @@ static void tzdbg_register_qsee_log_buf(void)
 	int ret = 0;
 
 	/* Create ION msm client */
-	g_ion_clnt = msm_ion_client_create(ION_HEAP_CARVEOUT_MASK, "qsee_log");
+	g_ion_clnt = msm_ion_client_create("qsee_log");
 	if (g_ion_clnt == NULL) {
 		pr_err("%s: Ion client cannot be created\n", __func__);
 		return;
@@ -586,9 +586,19 @@ static void tzdbg_register_qsee_log_buf(void)
 	req.phy_addr = (uint32_t)pa;
 	req.len = len;
 
-	/*  SCM_CALL  to register the log buffer */
-	ret = scm_call(SCM_SVC_TZSCHEDULER, 1,  &req, sizeof(req),
-		&resp, sizeof(resp));
+	if (!is_scm_armv8()) {
+		/*  SCM_CALL  to register the log buffer */
+		ret = scm_call(SCM_SVC_TZSCHEDULER, 1,  &req, sizeof(req),
+			&resp, sizeof(resp));
+	} else {
+		struct scm_desc desc = {0};
+		desc.args[0] = (uint32_t)pa;
+		desc.args[1] = len;
+		desc.arginfo = 0x22;
+		ret = scm_call2(SCM_QSEEOS_FNID(1, 6), &desc);
+		resp.result = desc.ret[0];
+	}
+
 	if (ret) {
 		pr_err("%s: scm_call to register log buffer failed\n",
 			__func__);
@@ -604,6 +614,13 @@ static void tzdbg_register_qsee_log_buf(void)
 
 	g_qsee_log =
 		(struct tzdbg_log_t *)ion_map_kernel(g_ion_clnt, g_ihandle);
+
+	if (IS_ERR(g_qsee_log)) {
+		pr_err("%s: Couldn't map ion buffer to kernel\n",
+			__func__);
+		goto err2;
+	}
+
 	g_qsee_log->log_pos.wrap = g_qsee_log->log_pos.offset = 0;
 	return;
 

@@ -222,12 +222,15 @@ static void hfi_process_session_error(
 	struct msm_vidc_cb_cmd_done cmd_done = {0};
 	cmd_done.device_id = device_id;
 	cmd_done.session_id = session->session_id;
+	cmd_done.status = hfi_map_err_status(pkt->event_data1);
 	dprintk(VIDC_INFO, "Received : SESSION_ERROR with event id : %d\n",
 		pkt->event_data1);
 	switch (pkt->event_data1) {
 	case HFI_ERR_SESSION_INVALID_SCALE_FACTOR:
 	case HFI_ERR_SESSION_UNSUPPORT_BUFFERTYPE:
 	case HFI_ERR_SESSION_UNSUPPORTED_SETTING:
+	case HFI_ERR_SESSION_UPSCALE_NOT_SUPPORTED:
+		cmd_done.status = VIDC_ERR_NONE;
 		dprintk(VIDC_INFO, "Non Fatal : HFI_EVENT_SESSION_ERROR\n");
 		break;
 	default:
@@ -447,11 +450,13 @@ static inline void copy_cap_prop(
 	case HFI_CAPABILITY_ENC_LTR_COUNT:
 		out = &sess_init_done->ltr_count;
 		break;
+
+	case HFI_CAPABILITY_CP_OUTPUT2_THRESH:
+		out = &sess_init_done->secure_output2_threshold;
+		break;
 	}
 
 	if (out) {
-		out->capability_type =
-			(enum hal_capability)in->capability_type;
 		out->min = in->min;
 		out->max = in->max;
 		out->step_size = in->step_size;
@@ -582,6 +587,11 @@ enum vidc_status hfi_process_sess_init_done_prop_read(
 			dprintk(VIDC_DBG, "prop->profile_count: %d\n",
 				prop->profile_count);
 			prop_count = prop->profile_count;
+			if (prop_count > MAX_PROFILE_COUNT) {
+				prop_count = MAX_PROFILE_COUNT;
+				dprintk(VIDC_WARN,
+					"prop count exceeds max profile count\n");
+			}
 			while (prop_count) {
 				ptr++;
 				prop_level = (struct hfi_profile_level *) ptr;
@@ -731,6 +741,12 @@ static void hfi_process_sess_get_prop_buf_req(
 	hfi_buf_req = (struct hfi_buffer_requirements *)
 		&prop->rg_property_data[1];
 
+	if (!hfi_buf_req) {
+		dprintk(VIDC_ERR, "%s - invalid buffer req pointer\n",
+			__func__);
+		return;
+	}
+
 	while (req_bytes) {
 		if ((hfi_buf_req->buffer_size) &&
 			((hfi_buf_req->buffer_count_min > hfi_buf_req->
@@ -874,6 +890,11 @@ static void hfi_process_session_init_done(
 	struct msm_vidc_cb_cmd_done cmd_done = {0};
 	struct vidc_hal_session_init_done session_init_done;
 
+	if (!session) {
+		dprintk(VIDC_ERR, "%s - invalid session\n", __func__);
+		return;
+	}
+
 	memset(&session_init_done, 0, sizeof(struct
 				vidc_hal_session_init_done));
 	dprintk(VIDC_DBG, "RECEIVED: SESSION_INIT_DONE[%p]\n", session);
@@ -892,12 +913,10 @@ static void hfi_process_session_init_done(
 	if (!cmd_done.status) {
 		cmd_done.status = hfi_process_sess_init_done_prop_read(
 			pkt, &session_init_done);
-	} else if (session) {
-		dprintk(VIDC_INFO,
-			"Sess init failed: Deleting session: 0x%p 0x%p\n",
+	} else {
+		dprintk(VIDC_WARN,
+			"Sess init failed: 0x%p, 0x%p\n",
 			session->session_id, session);
-		list_del(&session->list);
-		kfree(session);
 	}
 	cmd_done.size = sizeof(struct vidc_hal_session_init_done);
 	callback(SESSION_INIT_DONE, &cmd_done);
@@ -978,6 +997,10 @@ static void hfi_process_session_etb_done(msm_vidc_callback callback,
 		(ion_phys_addr_t)pkt->extra_data_buffer;
 	data_done.input_done.status =
 		hfi_map_err_status(pkt->error_type);
+
+	trace_msm_v4l2_vidc_buffer_event_end("ETB",
+		(u32)pkt->packet_buffer, -1, -1,
+		 pkt->filled_len, pkt->offset);
 	callback(SESSION_ETB_DONE, &data_done);
 }
 
@@ -1077,6 +1100,13 @@ static void hfi_process_session_ftb_done(msm_vidc_callback callback,
 		else if (pkt->stream_id == 1)
 			data_done.output_done.buffer_type = HAL_BUFFER_OUTPUT2;
 		}
+	trace_msm_v4l2_vidc_buffer_event_end("FTB",
+		(u32)data_done.output_done.packet_buffer1,
+		(((u64)data_done.output_done.timestamp_hi) << 32)
+		+ ((u64)data_done.output_done.timestamp_lo),
+		data_done.output_done.alloc_len1,
+		data_done.output_done.filled_len1,
+		data_done.output_done.offset1);
 	callback(SESSION_FTB_DONE, &data_done);
 }
 
@@ -1156,10 +1186,11 @@ static void hfi_process_session_rel_buf_done(msm_vidc_callback callback,
 {
 	struct msm_vidc_cb_cmd_done cmd_done = {0};
 
-	if (!pkt || pkt->size !=
+	if (!pkt || pkt->size <
 		sizeof(struct
 			   hfi_msg_session_release_buffers_done_packet)) {
-		dprintk(VIDC_ERR, "bad packet/packet size\n");
+		dprintk(VIDC_ERR, "bad packet/packet size %d\n",
+			pkt ? pkt->size : 0);
 		return;
 	}
 	dprintk(VIDC_DBG, "RECEIVED:SESSION_RELEASE_BUFFER_DONE[%p]\n",
@@ -1221,6 +1252,14 @@ static void hfi_process_session_abort_done(msm_vidc_callback callback,
 	cmd_done.size = 0;
 
 	callback(SESSION_ABORT_DONE, &cmd_done);
+}
+
+static void hfi_process_sys_idle(msm_vidc_callback callback,
+		u32 device_id, struct hfi_msg_sys_idle_packet *pkt)
+{
+	struct msm_vidc_cb_cmd_done cmd_done = {0};
+	cmd_done.device_id = device_id;
+	callback(SYS_IDLE, &cmd_done);
 }
 
 static void hfi_process_session_get_seq_hdr_done(msm_vidc_callback callback,
@@ -1413,6 +1452,9 @@ u32 hfi_process_msg_packet(msm_vidc_callback callback, u32 device_id,
 			(session_pkt_func_def)hfi_process_session_abort_done;
 		break;
 	case HFI_MSG_SYS_IDLE:
+		sys_pkt_func =
+			(sys_pkt_func_def)hfi_process_sys_idle;
+		break;
 	case HFI_MSG_SYS_PC_PREP_DONE:
 		break;
 	default:

@@ -53,6 +53,8 @@
 #define MSM_CAMERA_SUBDEV_STROBE_FLASH 12
 #define MSM_CAMERA_SUBDEV_BUF_MNGR     13
 #define MSM_CAMERA_SUBDEV_SENSOR_INIT  14
+#define MSM_CAMERA_SUBDEV_OIS          15
+#define MSM_CAMERA_SUBDEV_FLASH        16
 
 #define MSM_MAX_CAMERA_SENSORS  5
 
@@ -187,6 +189,7 @@ struct msm_v4l2_format_data {
 enum smmu_attach_mode {
 	NON_SECURE_MODE,
 	SECURE_MODE,
+	MAX_PROTECTION_MODE,
 };
 
 struct msm_camera_smmu_attach_type {

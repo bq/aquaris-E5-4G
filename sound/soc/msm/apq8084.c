@@ -23,15 +23,16 @@
 #include <linux/pm_runtime.h>
 #include <linux/slimbus/slimbus.h>
 #include <soc/qcom/subsystem_notif.h>
+#include <soc/qcom/liquid_dock.h>
 #include <sound/core.h>
 #include <sound/soc.h>
 #include <sound/soc-dapm.h>
 #include <sound/pcm.h>
 #include <sound/jack.h>
 #include <sound/q6afe-v2.h>
+#include <sound/q6core.h>
 #include <sound/pcm_params.h>
 #include "qdsp6v2/msm-pcm-routing-v2.h"
-#include "qdsp6v2/q6core.h"
 #include "../codecs/wcd9xxx-common.h"
 #include "../codecs/wcd9320.h"
 #include "../codecs/wcd9330.h"
@@ -47,9 +48,14 @@ static int mi2s_rx_bit_format = SNDRV_PCM_FORMAT_S16_LE;
 
 #define SAMPLING_RATE_8KHZ 8000
 #define SAMPLING_RATE_16KHZ 16000
+#define SAMPLING_RATE_32KHZ   32000
+#define SAMPLING_RATE_44DOT1KHZ 44100
 #define SAMPLING_RATE_48KHZ 48000
 #define SAMPLING_RATE_96KHZ 96000
+#define SAMPLING_RATE_128KHZ   128000
+#define SAMPLING_RATE_176DOT4KHZ  176400
 #define SAMPLING_RATE_192KHZ 192000
+
 
 static int apq8084_auxpcm_rate = 8000;
 #define LO_1_SPK_AMP	0x1
@@ -249,6 +255,7 @@ enum {
 	SLIM_3_RX_2 = 168, /* External echo-cancellation ref */
 	SLIM_3_TX_1 = 169, /* HDMI RX */
 	SLIM_3_TX_2 = 170, /* HDMI RX */
+	SLIM_4_RX_1 = 171, /* In-call music delivery2 */
 	SLIM_6_TX_1 = 163, /* In-call recording RX */
 	SLIM_6_TX_2 = 164, /* In-call recording RX */
 	SLIM_6_RX_1 = 165, /* In-call music delivery TX */
@@ -384,6 +391,23 @@ static void apq8084_liquid_ext_spk_power_amp_enable(u32 on)
 			on ? "Enable" : "Disable");
 }
 
+static void apq8084_liquid_route_aud_dock_dev(void)
+{
+	struct apq8084_liquid_dock_dev *dock_dev = apq8084_liquid_dock_dev;
+	struct snd_soc_dapm_context *dapm = dock_dev->dapm;
+
+	mutex_lock(&dapm->codec->mutex);
+
+	/* Turn off external amp to turn off liquid spkr */
+	if ((apq8084_ext_spk_pamp & LO_1_SPK_AMP) &&
+		(apq8084_ext_spk_pamp & LO_3_SPK_AMP) &&
+		(apq8084_ext_spk_pamp & LO_2_SPK_AMP) &&
+		(apq8084_ext_spk_pamp & LO_4_SPK_AMP))
+		apq8084_liquid_ext_spk_power_amp_enable(0);
+
+	mutex_unlock(&dapm->codec->mutex);
+}
+
 static void apq8084_liquid_docking_irq_work(struct work_struct *work)
 {
 	struct apq8084_liquid_dock_dev *dock_dev =
@@ -419,14 +443,71 @@ static irqreturn_t apq8084_liquid_docking_irq_handler(int irq, void *dev)
 	return IRQ_HANDLED;
 }
 
+static int apq8084_liquid_dock_notify_handler(struct notifier_block *this,
+					unsigned long dock_event,
+					void *unused)
+{
+	int err = 0;
+
+	/* plug in docking speaker+plug in device OR unplug one of them */
+	u32 dock_plug_irq_flags = IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING |
+					IRQF_SHARED;
+
+	if (dock_event) {
+		err = gpio_request(apq8084_liquid_dock_dev->dock_plug_gpio,
+					   "dock-plug-det-irq");
+		if (err) {
+			pr_err("%s: fail request dock-plug-det-irq err = %d\n",
+				__func__, err);
+			goto exit;
+		}
+
+		apq8084_liquid_dock_dev->dock_plug_det =
+			gpio_get_value(apq8084_liquid_dock_dev->dock_plug_gpio);
+		if (apq8084_liquid_dock_dev->dock_plug_det)
+			apq8084_liquid_route_aud_dock_dev();
+		apq8084_liquid_dock_dev->dock_plug_irq =
+			gpio_to_irq(apq8084_liquid_dock_dev->dock_plug_gpio);
+
+		err = request_irq(apq8084_liquid_dock_dev->dock_plug_irq,
+				  apq8084_liquid_docking_irq_handler,
+				  dock_plug_irq_flags,
+				  "liquid_dock_plug_irq",
+				  apq8084_liquid_dock_dev);
+		if (err < 0) {
+			pr_err("%s: Request Irq Failed err = %d\n",
+				__func__, err);
+			goto out;
+		}
+
+		INIT_WORK(
+			&apq8084_liquid_dock_dev->irq_work,
+			apq8084_liquid_docking_irq_work);
+	} else {
+		if (apq8084_liquid_dock_dev->dock_plug_gpio)
+			gpio_free(apq8084_liquid_dock_dev->dock_plug_gpio);
+
+		if (apq8084_liquid_dock_dev->dock_plug_irq)
+			free_irq(apq8084_liquid_dock_dev->dock_plug_irq,
+				 apq8084_liquid_dock_dev);
+	}
+	return NOTIFY_OK;
+
+out:
+	gpio_free(apq8084_liquid_dock_dev->dock_plug_gpio);
+exit:
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block apq8084_liquid_docking_notifier = {
+	.notifier_call  = apq8084_liquid_dock_notify_handler,
+};
+
 static int apq8084_liquid_init_docking(struct snd_soc_dapm_context *dapm)
 {
 	int ret = 0;
 	int dock_plug_gpio = 0;
 
-	/* plug in docking speaker+plug in device OR unplug one of them */
-	u32 dock_plug_irq_flags = IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING |
-					IRQF_SHARED;
 	dock_plug_gpio = of_get_named_gpio(spdev->dev.of_node,
 					   "qcom,dock-plug-det-irq", 0);
 
@@ -440,45 +521,10 @@ static int apq8084_liquid_init_docking(struct snd_soc_dapm_context *dapm)
 		}
 
 		apq8084_liquid_dock_dev->dock_plug_gpio = dock_plug_gpio;
-
-		ret = gpio_request(apq8084_liquid_dock_dev->dock_plug_gpio,
-					   "dock-plug-det-irq");
-		if (ret) {
-			pr_err("%s:failed request apq8084_liquid_dock_plug_gpio.\n",
-				__func__);
-			ret = -EINVAL;
-			goto out;
-		}
-
-		apq8084_liquid_dock_dev->dock_plug_det =
-			gpio_get_value(apq8084_liquid_dock_dev->dock_plug_gpio);
-		apq8084_liquid_dock_dev->dock_plug_irq =
-			gpio_to_irq(apq8084_liquid_dock_dev->dock_plug_gpio);
-
 		apq8084_liquid_dock_dev->dapm = dapm;
 
-		ret = request_irq(apq8084_liquid_dock_dev->dock_plug_irq,
-				  apq8084_liquid_docking_irq_handler,
-				  dock_plug_irq_flags,
-				  "liquid_dock_plug_irq",
-				  apq8084_liquid_dock_dev);
-		if (ret < 0) {
-			pr_err("%s: Request Irq Failed err = %d\n",
-				__func__, ret);
-			goto out2;
-		}
-
-		INIT_WORK(
-			&apq8084_liquid_dock_dev->irq_work,
-			apq8084_liquid_docking_irq_work);
+		register_liquid_dock_notify(&apq8084_liquid_docking_notifier);
 	}
-	return 0;
-
-out2:
-	gpio_free(apq8084_liquid_dock_dev->dock_plug_gpio);
-out:
-	kfree(apq8084_liquid_dock_dev);
-	apq8084_liquid_dock_dev = NULL;
 exit:
 	return ret;
 }
@@ -780,12 +826,23 @@ static char const *slim0_rx_sample_rate_text[] = {"KHZ_48", "KHZ_96",
 static const char *const proxy_rx_ch_text[] = {"One", "Two", "Three", "Four",
 					      "Five", "Six", "Seven", "Eight"};
 
-static char const *hdmi_rx_sample_rate_text[] = {"KHZ_48", "KHZ_96",
-						 "KHZ_192"};
+static char const *hdmi_rx_sample_rate_text[] = {"KHZ_32", "KHZ_44_1", "KHZ_48",
+						 "KHZ_96", "KHZ_128",
+						 "KHZ_176_4", "KHZ_192"};
 
 static const char * const slim1_tx_ch_text[] = {"One", "Two"};
 static const char * const slim3_rx_ch_text[] = {"One", "Two"};
 static const char *const slim1_rate_text[] = {"8000", "16000", "48000"};
+
+enum {
+	HDMI_RATE_32KHZ = 0,
+	HDMI_RATE_44DOT1KHZ,
+	HDMI_RATE_48KHZ,
+	HDMI_RATE_96KHZ,
+	HDMI_RATE_128KHZ,
+	HDMI_RATE_176DOT4KHZ,
+	HDMI_RATE_192KHZ
+};
 
 static int slim0_rx_sample_rate_get(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
@@ -1043,21 +1100,31 @@ static int hdmi_rx_sample_rate_get(struct snd_kcontrol *kcontrol,
 
 	switch (hdmi_rx_sample_rate) {
 	case SAMPLING_RATE_192KHZ:
-		sample_rate_val = 2;
+		sample_rate_val = HDMI_RATE_192KHZ;
 		break;
-
+	case SAMPLING_RATE_176DOT4KHZ:
+		sample_rate_val = HDMI_RATE_176DOT4KHZ;
+		break;
+	case SAMPLING_RATE_128KHZ:
+		sample_rate_val = HDMI_RATE_128KHZ;
+		break;
 	case SAMPLING_RATE_96KHZ:
-		sample_rate_val = 1;
+		sample_rate_val = HDMI_RATE_96KHZ;
 		break;
-
+	case SAMPLING_RATE_44DOT1KHZ:
+		sample_rate_val = HDMI_RATE_44DOT1KHZ;
+		break;
+	case SAMPLING_RATE_32KHZ:
+		sample_rate_val = HDMI_RATE_32KHZ;
+		break;
 	case SAMPLING_RATE_48KHZ:
 	default:
-		sample_rate_val = 0;
+		sample_rate_val = HDMI_RATE_48KHZ;
 		break;
 	}
 	ucontrol->value.integer.value[0] = sample_rate_val;
 	pr_debug("%s: hdmi_rx_sample_rate = %d\n", __func__,
-				hdmi_rx_sample_rate);
+		  hdmi_rx_sample_rate);
 	return 0;
 }
 
@@ -1065,20 +1132,32 @@ static int hdmi_rx_sample_rate_put(struct snd_kcontrol *kcontrol,
 				   struct snd_ctl_elem_value *ucontrol)
 {
 	pr_debug("%s: ucontrol value = %ld\n", __func__,
-			ucontrol->value.integer.value[0]);
+		 ucontrol->value.integer.value[0]);
 	switch (ucontrol->value.integer.value[0]) {
-	case 2:
+	case HDMI_RATE_192KHZ:
 		hdmi_rx_sample_rate = SAMPLING_RATE_192KHZ;
 		break;
-	case 1:
+	case HDMI_RATE_176DOT4KHZ:
+		hdmi_rx_sample_rate = SAMPLING_RATE_176DOT4KHZ;
+		break;
+	case HDMI_RATE_128KHZ:
+		hdmi_rx_sample_rate = SAMPLING_RATE_128KHZ;
+		break;
+	case HDMI_RATE_96KHZ:
 		hdmi_rx_sample_rate = SAMPLING_RATE_96KHZ;
 		break;
-	case 0:
+	case HDMI_RATE_44DOT1KHZ:
+		hdmi_rx_sample_rate = SAMPLING_RATE_44DOT1KHZ;
+		break;
+	case HDMI_RATE_32KHZ:
+		hdmi_rx_sample_rate = SAMPLING_RATE_32KHZ;
+		break;
+	case HDMI_RATE_48KHZ:
 	default:
 		hdmi_rx_sample_rate = SAMPLING_RATE_48KHZ;
 	}
 	pr_debug("%s: hdmi_rx_sample_rate = %d\n", __func__,
-			hdmi_rx_sample_rate);
+		 hdmi_rx_sample_rate);
 	return 0;
 }
 
@@ -1792,6 +1871,23 @@ static int msm_slim_3_tx_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 	return 0;
 }
 
+static int msm_slim_4_rx_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
+					    struct snd_pcm_hw_params *params)
+{
+	struct snd_interval *rate = hw_param_interval(params,
+						SNDRV_PCM_HW_PARAM_RATE);
+
+	struct snd_interval *channels = hw_param_interval(params,
+						SNDRV_PCM_HW_PARAM_CHANNELS);
+
+	rate->min = rate->max = 48000;
+	channels->min = channels->max = 1;
+
+	pr_debug("%s() channels->min %u channels->max %u\n", __func__,
+		 channels->min, channels->max);
+	return 0;
+}
+
 static int msm_slim_6_tx_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 					    struct snd_pcm_hw_params *params)
 {
@@ -1866,7 +1962,7 @@ static const struct soc_enum msm_snd_enum[] = {
 	SOC_ENUM_SINGLE_EXT(2, rx_bit_format_text),
 	SOC_ENUM_SINGLE_EXT(3, slim0_rx_sample_rate_text),
 	SOC_ENUM_SINGLE_EXT(8, proxy_rx_ch_text),
-	SOC_ENUM_SINGLE_EXT(3, hdmi_rx_sample_rate_text),
+	SOC_ENUM_SINGLE_EXT(7, hdmi_rx_sample_rate_text),
 	SOC_ENUM_SINGLE_EXT(2, slim1_tx_ch_text),
 	SOC_ENUM_SINGLE_EXT(3, slim1_rate_text),
 	SOC_ENUM_SINGLE_EXT(3, slim3_rx_ch_text),
@@ -2203,12 +2299,19 @@ static int msm_audrx_init(struct snd_soc_pcm_runtime *rtd)
 		tomtom_register_ext_clk_cb(msm_snd_enable_codec_ext_clk,
 					   msm_snd_get_ext_clk_cnt,
 					   rtd->codec);
-		err = tomtom_enable_cpe(rtd->codec);
+
+		err = msm_snd_enable_codec_ext_clk(rtd->codec, 1, false);
 		if (IS_ERR_VALUE(err)) {
-			pr_err("%s: Failed to enable cpe, err = 0x%x\n",
+			pr_err("%s: Failed to enable mclk, err = 0x%x\n",
 				__func__, err);
-			/* Don't fail card registraion if CPE failed */
-			err = 0;
+			goto out;
+		}
+		tomtom_enable_qfuse_sensing(rtd->codec);
+		err = msm_snd_enable_codec_ext_clk(rtd->codec, 0, false);
+		if (IS_ERR_VALUE(err)) {
+			pr_err("%s: Failed to disable mclk, err = 0x%x\n",
+				__func__, err);
+			goto out;
 		}
 	} else
 		taiko_event_register(apq8084_codec_event_cb, rtd->codec);
@@ -2546,6 +2649,27 @@ end:
 	return ret;
 }
 
+static int apq8084_slimbus_4_hw_params(struct snd_pcm_substream *substream,
+				       struct snd_pcm_hw_params *params)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	int ret = 0;
+	unsigned int rx_ch = SLIM_4_RX_1;
+
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		pr_debug("%s: SLIMBUS_4_RX -> MDM TX shared ch %d\n",
+			 __func__, rx_ch);
+
+		ret = snd_soc_dai_set_channel_map(cpu_dai, 0, 0, 1, &rx_ch);
+		if (ret < 0) {
+			pr_err("%s: Erorr %d setting SLIM_4 RX channel map\n",
+				__func__, ret);
+		}
+	}
+	return ret;
+}
+
 static int apq8084_slimbus_6_hw_params(struct snd_pcm_substream *substream,
 				       struct snd_pcm_hw_params *params)
 {
@@ -2601,6 +2725,12 @@ static struct snd_soc_ops apq8084_slimbus_2_be_ops = {
 static struct snd_soc_ops apq8084_slimbus_3_be_ops = {
 	.startup = apq8084_snd_startup,
 	.hw_params = apq8084_slimbus_3_hw_params,
+	.shutdown = apq8084_snd_shudown,
+};
+
+static struct snd_soc_ops apq8084_slimbus_4_be_ops = {
+	.startup = apq8084_snd_startup,
+	.hw_params = apq8084_slimbus_4_hw_params,
 	.shutdown = apq8084_snd_shudown,
 };
 
@@ -3257,6 +3387,37 @@ static struct snd_soc_dai_link apq8084_common_dai_links[] = {
 		 /* this dai link has playback support */
 		.be_id = MSM_FRONTEND_DAI_MULTIMEDIA16,
 	},
+	{
+		.name = "APQ8084 Media9",
+		.stream_name = "MultiMedia9",
+		.cpu_dai_name   = "MultiMedia9",
+		.platform_name  = "msm-pcm-dsp.0",
+		.dynamic = 1,
+		.async_ops = ASYNC_DPCM_SND_SOC_PREPARE,
+		.codec_dai_name = "snd-soc-dummy-dai",
+		.codec_name = "snd-soc-dummy",
+		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
+			    SND_SOC_DPCM_TRIGGER_POST},
+		.ignore_suspend = 1,
+		/* this dainlink has playback support */
+		.ignore_pmdown_time = 1,
+		.be_id = MSM_FRONTEND_DAI_MULTIMEDIA9,
+	},
+	{
+		.name = "VoWLAN",
+		.stream_name = "VoWLAN",
+		.cpu_dai_name   = "VoWLAN",
+		.platform_name  = "msm-pcm-voice",
+		.dynamic = 1,
+		.trigger = {SND_SOC_DPCM_TRIGGER_POST,
+			    SND_SOC_DPCM_TRIGGER_POST},
+		.ignore_suspend = 1,
+		/* this dainlink has playback support */
+		.ignore_pmdown_time = 1,
+		.codec_dai_name = "snd-soc-dummy-dai",
+		.codec_name = "snd-soc-dummy",
+		.be_id = MSM_FRONTEND_DAI_VOWLAN,
+	},
 };
 
 static struct snd_soc_dai_link apq8084_tomtom_fe_dai_links[] = {
@@ -3628,13 +3789,13 @@ static struct snd_soc_dai_link apq8084_tomtom_be_dai_links[] = {
 		.stream_name = "Slimbus4 Playback",
 		.cpu_dai_name = "msm-dai-q6-dev.16392",
 		.platform_name = "msm-pcm-routing",
-		.codec_name = "tomtom_codec",
-		.codec_dai_name	= "tomtom_rx1",
+		.codec_name = "msm-stub-codec.1",
+		.codec_dai_name	= "msm-stub-rx",
 		.no_pcm = 1,
 		.async_ops = ASYNC_DPCM_SND_SOC_PREPARE,
 		.be_id = MSM_BACKEND_DAI_SLIMBUS_4_RX,
-		.be_hw_params_fixup = msm_slim_0_rx_be_hw_params_fixup,
-		.ops = &apq8084_be_ops,
+		.be_hw_params_fixup = msm_slim_4_rx_be_hw_params_fixup,
+		.ops = &apq8084_slimbus_4_be_ops,
 		/* this dai link has playback support */
 		.ignore_pmdown_time = 1,
 		.ignore_suspend = 1,
@@ -3745,13 +3906,13 @@ static struct snd_soc_dai_link apq8084_taiko_be_dai_links[] = {
 		.stream_name = "Slimbus4 Playback",
 		.cpu_dai_name = "msm-dai-q6-dev.16392",
 		.platform_name = "msm-pcm-routing",
-		.codec_name = "taiko_codec",
-		.codec_dai_name	= "taiko_rx1",
+		.codec_name = "msm-stub-codec.1",
+		.codec_dai_name	= "msm-stub-rx",
 		.no_pcm = 1,
 		.async_ops = ASYNC_DPCM_SND_SOC_PREPARE,
 		.be_id = MSM_BACKEND_DAI_SLIMBUS_4_RX,
-		.be_hw_params_fixup = msm_slim_0_rx_be_hw_params_fixup,
-		.ops = &apq8084_be_ops,
+		.be_hw_params_fixup = msm_slim_4_rx_be_hw_params_fixup,
+		.ops = &apq8084_slimbus_4_be_ops,
 		/* this dai link has playback support */
 		.ignore_pmdown_time = 1,
 		.ignore_suspend = 1,
@@ -4035,6 +4196,11 @@ static struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 	const struct of_device_id *match;
 
 	match = of_match_node(apq8084_asoc_machine_of_match, dev->of_node);
+	if (!match) {
+		dev_err(dev, "%s: No DT match found for sound card\n",
+			__func__);
+		return NULL;
+	}
 
 	if (!strcmp(match->data, "tomtom_codec")) {
 		card = &snd_soc_card_tomtom_apq8084;
@@ -4144,6 +4310,12 @@ static int apq8084_asoc_machine_probe(struct platform_device *pdev)
 
 	match = of_match_node(apq8084_asoc_machine_of_match,
 			      pdev->dev.of_node);
+	if (!match) {
+		dev_err(&pdev->dev, "%s: No DT match found for sound card\n",
+			__func__);
+		ret = -EINVAL;
+		goto err;
+	}
 	if (!strcmp(match->data, "tomtom_codec"))
 		mclk_freq_prop_name = "qcom,tomtom-mclk-clk-freq";
 	else
@@ -4295,14 +4467,8 @@ static int apq8084_asoc_machine_remove(struct platform_device *pdev)
 	if (gpio_is_valid(ext_spk_amp_gpio))
 		gpio_free(ext_spk_amp_gpio);
 
+	unregister_liquid_dock_notify(&apq8084_liquid_docking_notifier);
 	if (apq8084_liquid_dock_dev != NULL) {
-		if (apq8084_liquid_dock_dev->dock_plug_gpio)
-			gpio_free(apq8084_liquid_dock_dev->dock_plug_gpio);
-
-		if (apq8084_liquid_dock_dev->dock_plug_irq)
-			free_irq(apq8084_liquid_dock_dev->dock_plug_irq,
-				 apq8084_liquid_dock_dev);
-
 		kfree(apq8084_liquid_dock_dev);
 		apq8084_liquid_dock_dev = NULL;
 	}

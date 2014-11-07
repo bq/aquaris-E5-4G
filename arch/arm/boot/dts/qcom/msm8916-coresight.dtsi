@@ -20,6 +20,7 @@
 		interrupt-names = "byte-cntr-irq";
 
 		qcom,memory-size = <0x100000>;
+		qcom,tmc-flush-powerdown;
 
 		coresight-id = <0>;
 		coresight-name = "coresight-tmc-etr";
@@ -40,8 +41,11 @@
 		coresight-name = "coresight-tpiu";
 		coresight-nr-inports = <1>;
 
-		qcom,nidnt;
 		qcom,nidnthw;
+		qcom,nidnt-swduart;
+		qcom,nidnt-swdtrc;
+		qcom,nidnt-jtag;
+		qcom,nidnt-spmi;
 		nidnt-gpio = <38>;
 		nidnt-gpio-polarity = <1>;
 
@@ -49,11 +53,11 @@
 		interrupt-names = "nidnt-irq";
 
 		vdd-supply = <&pm8916_l11>;
-		qcom,vdd-voltage-level = <2800000 2950000>;
+		qcom,vdd-voltage-level = <2950000 2950000>;
 		qcom,vdd-current-level = <15000 400000>;
 
 		vdd-io-supply = <&pm8916_l12>;
-		qcom,vdd-io-voltage-level = <1800000 2950000>;
+		qcom,vdd-io-voltage-level = <2950000 2950000>;
 		qcom,vdd-io-current-level = <200 50000>;
 		clocks = <&clock_rpm clk_qdss_clk>,
 			 <&clock_rpm clk_qdss_a_clk>;
@@ -89,6 +93,9 @@
 		coresight-child-ports = <0>;
 		coresight-default-sink;
 		coresight-ctis = <&cti0 &cti8>;
+
+		qcom,tmc-flush-powerdown;
+
 		clocks = <&clock_rpm clk_qdss_clk>,
 			 <&clock_rpm clk_qdss_a_clk>;
 		clock-names = "core_clk", "core_a_clk";
@@ -121,6 +128,9 @@
 		coresight-outports = <0>;
 		coresight-child-list = <&funnel_in0>;
 		coresight-child-ports = <4>;
+
+		qcom,funnel-save-restore;
+
 		clocks = <&clock_rpm clk_qdss_clk>,
 			 <&clock_rpm clk_qdss_a_clk>;
 		clock-names = "core_clk", "core_a_clk";
@@ -201,8 +211,8 @@
 		coresight-outports = <0>;
 		coresight-child-list = <&funnel_apss>;
 		coresight-child-ports = <0>;
+		coresight-etm-cpu = <&CPU0>;
 
-		qcom,round-robin;
 		clocks = <&clock_rpm clk_qdss_clk>,
 			 <&clock_rpm clk_qdss_a_clk>;
 		clock-names = "core_clk", "core_a_clk";
@@ -219,12 +229,11 @@
 		coresight-outports = <0>;
 		coresight-child-list = <&funnel_apss>;
 		coresight-child-ports = <1>;
+		coresight-etm-cpu = <&CPU1>;
 
-		qcom,round-robin;
 		clocks = <&clock_rpm clk_qdss_clk>,
 			 <&clock_rpm clk_qdss_a_clk>;
 		clock-names = "core_clk", "core_a_clk";
-
 	};
 
 	etm2: etm@85e000 {
@@ -238,8 +247,8 @@
 		coresight-outports = <0>;
 		coresight-child-list = <&funnel_apss>;
 		coresight-child-ports = <2>;
+		coresight-etm-cpu = <&CPU2>;
 
-		qcom,round-robin;
 		clocks = <&clock_rpm clk_qdss_clk>,
 			 <&clock_rpm clk_qdss_a_clk>;
 		clock-names = "core_clk", "core_a_clk";
@@ -256,8 +265,8 @@
 		coresight-outports = <0>;
 		coresight-child-list = <&funnel_apss>;
 		coresight-child-ports = <3>;
+		coresight-etm-cpu = <&CPU3>;
 
-		qcom,round-robin;
 		clocks = <&clock_rpm clk_qdss_clk>,
 			 <&clock_rpm clk_qdss_a_clk>;
 		clock-names = "core_clk", "core_a_clk";
@@ -421,9 +430,13 @@
 		coresight-id = <26>;
 		coresight-name = "coresight-cti-cpu0";
 		coresight-nr-inports = <0>;
+		coresight-cti-cpu = <&CPU0>;
+
 		clocks = <&clock_rpm clk_qdss_clk>,
 			 <&clock_rpm clk_qdss_a_clk>;
 		clock-names = "core_clk", "core_a_clk";
+
+		qcom,cti-save;
 	};
 
 	cti_cpu1: cti@859000 {
@@ -434,9 +447,13 @@
 		coresight-id = <27>;
 		coresight-name = "coresight-cti-cpu1";
 		coresight-nr-inports = <0>;
+		coresight-cti-cpu = <&CPU1>;
+
 		clocks = <&clock_rpm clk_qdss_clk>,
 			 <&clock_rpm clk_qdss_a_clk>;
 		clock-names = "core_clk", "core_a_clk";
+
+		qcom,cti-save;
 	};
 
 	cti_cpu2: cti@85a000 {
@@ -447,9 +464,13 @@
 		coresight-id = <28>;
 		coresight-name = "coresight-cti-cpu2";
 		coresight-nr-inports = <0>;
+		coresight-cti-cpu = <&CPU2>;
+
 		clocks = <&clock_rpm clk_qdss_clk>,
 			 <&clock_rpm clk_qdss_a_clk>;
 		clock-names = "core_clk", "core_a_clk";
+
+		qcom,cti-save;
 	};
 
 	cti_cpu3: cti@85b000 {
@@ -460,9 +481,13 @@
 		coresight-id = <29>;
 		coresight-name = "coresight-cti-cpu3";
 		coresight-nr-inports = <0>;
+		coresight-cti-cpu = <&CPU3>;
+
 		clocks = <&clock_rpm clk_qdss_clk>,
 			 <&clock_rpm clk_qdss_a_clk>;
 		clock-names = "core_clk", "core_a_clk";
+
+		qcom,cti-save;
 	};
 
 	cti_video_cpu0: cti@830000 {
@@ -518,7 +543,7 @@
 	};
 
 	fuse: fuse@5e01c {
-		compatible = "arm,coresight-fuse";
+		compatible = "arm,coresight-fuse-v2";
 		reg = <0x5e01c 0x8>,
 		      <0x58040 0x4>,
 		      <0x5e00c 0x4>;
@@ -549,7 +574,7 @@
 
 	qpdi: qpdi@1941000 {
 		compatible = "qcom,coresight-qpdi";
-		reg = <1941000 0x4>;
+		reg = <0x1941000 0x4>;
 		reg-names = "qpdi-base";
 
 		coresight-id = <36>;
@@ -557,11 +582,11 @@
 		coresight-nr-inports = <0>;
 
 		vdd-supply = <&pm8916_l11>;
-		qcom,vdd-voltage-level = <2800000 2950000>;
+		qcom,vdd-voltage-level = <2950000 2950000>;
 		qcom,vdd-current-level = <15000 400000>;
 
 		vdd-io-supply = <&pm8916_l12>;
-		qcom,vdd-io-voltage-level = <1800000 2950000>;
+		qcom,vdd-io-voltage-level = <2950000 2950000>;
 		qcom,vdd-io-current-level = <200 50000>;
 	};
 };

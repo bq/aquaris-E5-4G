@@ -31,10 +31,15 @@
 			interrupt-names = "kpdpwr", "resin";
 			qcom,pon-dbc-delay = <15625>;
 			qcom,system-reset;
+			qcom,clear-warm-reset;
 
 			qcom,pon_1 {
 				qcom,pon-type = <0>;
+				qcom,support-reset = <1>;
 				qcom,pull-up = <1>;
+				qcom,s1-timer = <10256>;
+				qcom,s2-timer = <2000>;
+				qcom,s2-type = <1>;
 				linux,code = <116>;
 			};
 
@@ -132,6 +137,7 @@
 			qcom,adc-bit-resolution = <15>;
 			qcom,adc-vdd-reference = <1800>;
 			qcom,vadc-poll-eoc;
+			qcom,pmic-revid = <&pm8916_revid>;
 
 			chan@8 {
 				label = "die_temp";
@@ -191,6 +197,7 @@
 			qcom,adc-bit-resolution = <15>;
 			qcom,adc-vdd-reference = <1800>;
 			qcom,adc_tm-vadc = <&pm8916_vadc>;
+			qcom,pmic-revid = <&pm8916_revid>;
 		};
 
 		pm8916_chg: qcom,charger {
@@ -201,18 +208,18 @@
 
 			qcom,vddmax-mv = <4200>;
 			qcom,vddsafe-mv = <4200>;
-			qcom,vinmin-mv = <4200>;
+			qcom,vinmin-mv = <4308>;
 			qcom,ibatsafe-ma = <1440>;
-			qcom,thermal-mitigation = <1500 700 600 325>;
+			qcom,thermal-mitigation = <1440 720 630 0>;
 			qcom,cool-bat-decidegc = <100>;
 			qcom,warm-bat-decidegc = <450>;
 			qcom,cool-bat-mv = <4100>;
 			qcom,warm-bat-mv = <4100>;
 			qcom,ibatmax-warm-ma = <360>;
 			qcom,ibatmax-cool-ma = <360>;
-			qcom,batt-hot-percentage = <35>;
-			qcom,batt-cold-percentage = <70>;
-			qcom,tchg-mins = <152>;
+			qcom,batt-hot-percentage = <25>;
+			qcom,batt-cold-percentage = <80>;
+			qcom,tchg-mins = <232>;
 			qcom,resume-soc = <99>;
 			qcom,chg-vadc = <&pm8916_vadc>;
 			qcom,chg-adc_tm = <&pm8916_adc_tm>;
@@ -270,9 +277,13 @@
 			qcom,low-soc-calculate-soc-ms = <5000>;
 			qcom,calculate-soc-ms = <20000>;
 			qcom,volatge-soc-timeout-ms = <60000>;
-			qcom,low-voltage-threshold = <3420000>;
+			qcom,low-voltage-threshold = <3450000>;
 			qcom,s3-ocv-tolerence-uv = <1200>;
+			qcom,s2-fifo-length = <5>;
+			qcom,low-soc-fifo-length = <2>;
 			qcom,bms-vadc = <&pm8916_vadc>;
+			qcom,bms-adc_tm = <&pm8916_adc_tm>;
+			qcom,pmic-revid = <&pm8916_revid>;
 
 			qcom,force-s3-on-suspend;
 			qcom,force-s2-in-charging;
@@ -529,6 +540,7 @@
 			reg-names = "qpnp-lpg-channel-base";
 			qcom,channel-id = <0>;
 			qcom,supported-sizes = <6>, <9>;
+			#pwm-cells = <2>;
 		};
 
 		pm8916_vib: qcom,vibrator@c000 {
@@ -605,6 +617,20 @@
 					  "ear_cnp_int",
 					  "hphr_cnp_int",
 					  "hphl_cnp_int";
+		};
+
+		pm8916_bcm: qpnp-buck-current-monitor@1800 {
+			compatible = "qcom,qpnp-buck-current-monitor";
+			reg = <0x1800 0x100>;
+			interrupts = <1 0x18 0>, <1 0x18 1>;
+			interrupt-names = "iwarning", "icritical";
+			qcom,enable-current-monitor;
+			qcom,icrit-init-threshold-pc = <90>;
+			qcom,iwarn-init-threshold-pc = <70>;
+			qcom,icrit-polling-delay-msec = <1000>;
+			qcom,iwarn-polling-delay-msec = <2000>;
+
+			status = "disabled";
 		};
 	};
 };

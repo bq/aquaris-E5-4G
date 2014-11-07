@@ -39,6 +39,7 @@
 #include <linux/usb_bam.h>
 #include <asm/cacheflush.h>
 #include <soc/qcom/memory_dump.h>
+#include <soc/qcom/jtag.h>
 
 #include "coresight-priv.h"
 
@@ -123,9 +124,20 @@ enum tmc_etr_out_mode {
 	TMC_ETR_OUT_MODE_USB,
 };
 
+static const char * const str_tmc_etr_out_mode[] = {
+	[TMC_ETR_OUT_MODE_NONE]	= "none",
+	[TMC_ETR_OUT_MODE_MEM]		= "mem",
+	[TMC_ETR_OUT_MODE_USB]		= "usb",
+};
+
 enum tmc_etr_mem_type {
 	TMC_ETR_MEM_TYPE_CONTIG,
 	TMC_ETR_MEM_TYPE_SG,
+};
+
+static const char * const str_tmc_etr_mem_type[] = {
+	[TMC_ETR_MEM_TYPE_CONTIG]	= "contig",
+	[TMC_ETR_MEM_TYPE_SG]		= "sg",
 };
 
 enum tmc_mem_intf_width {
@@ -198,6 +210,8 @@ struct tmc_drvdata {
 	enum tmc_etr_mem_type	memtype;
 	uint32_t		delta_bottom;
 	int			sg_blk_num;
+	bool			notify;
+	struct notifier_block	jtag_save_blk;
 };
 
 static void tmc_wait_for_flush(struct tmc_drvdata *drvdata)
@@ -244,6 +258,46 @@ static void tmc_flush_and_stop(struct tmc_drvdata *drvdata)
 	tmc_wait_for_ready(drvdata);
 }
 
+static int tmc_flush_on_powerdown(struct notifier_block *this,
+				  unsigned long event, void *ptr)
+{
+	struct tmc_drvdata *drvdata = container_of(this, struct tmc_drvdata,
+						   jtag_save_blk);
+	int count;
+	uint8_t stopbit;
+	unsigned long flags;
+	uint32_t ffcr;
+
+	spin_lock_irqsave(&drvdata->spinlock, flags);
+	/*
+	 * Current implementation performs flush operation on all TMC devices
+	 * that are enabled irrespective of the current sink.
+	 */
+	if (!drvdata->enable)
+		goto out;
+	ffcr = tmc_readl(drvdata, TMC_FFCR);
+	stopbit = BVAL(ffcr, 12);
+	/* Do not stop trace on flush */
+	ffcr = ffcr & ~BIT(12);
+	tmc_writel(drvdata, ffcr, TMC_FFCR);
+	/* Generate manual flush */
+	ffcr = ffcr | BIT(6);
+	tmc_writel(drvdata, ffcr, TMC_FFCR);
+	/* Ensure flush completes */
+	for (count = TIMEOUT_US; BVAL(tmc_readl(drvdata, TMC_FFCR), 6) != 0
+				&& count > 0; count--)
+		udelay(1);
+	if (count == 0)
+		pr_warn_ratelimited("timeout flushing TMC, TMC_FFCR: %#x\n",
+				    tmc_readl(drvdata, TMC_FFCR));
+	/* Restore stop trace on flush bit */
+	ffcr = ffcr | (stopbit << 12);
+	tmc_writel(drvdata, ffcr, TMC_FFCR);
+out:
+	spin_unlock_irqrestore(&drvdata->spinlock, flags);
+	return NOTIFY_DONE;
+}
+
 static void __tmc_enable(struct tmc_drvdata *drvdata)
 {
 	tmc_writel(drvdata, 0x1, TMC_CTL);
@@ -252,6 +306,49 @@ static void __tmc_enable(struct tmc_drvdata *drvdata)
 static void __tmc_disable(struct tmc_drvdata *drvdata)
 {
 	tmc_writel(drvdata, 0x0, TMC_CTL);
+}
+
+static void tmc_etr_sg_tbl_free(uint32_t *vaddr, uint32_t size, uint32_t ents)
+{
+	uint32_t i = 0, pte_n = 0, last_pte;
+	uint32_t *virt_st_tbl, *virt_pte;
+	void *virt_blk;
+	phys_addr_t phys_pte;
+	int total_ents = DIV_ROUND_UP(size, PAGE_SIZE);
+	int ents_per_blk = PAGE_SIZE/sizeof(uint32_t);
+
+	virt_st_tbl = vaddr;
+
+	while (i < total_ents) {
+		last_pte = ((i + ents_per_blk) > total_ents) ?
+			   total_ents : (i + ents_per_blk);
+		while (i < last_pte) {
+			virt_pte = virt_st_tbl + pte_n;
+
+			/* Do not go beyond number of entries allocated */
+			if (i == ents) {
+				free_page((unsigned long)virt_st_tbl);
+				return;
+			}
+
+			phys_pte = TMC_ETR_SG_ENT_TO_BLK(*virt_pte);
+			virt_blk = phys_to_virt(phys_pte);
+
+			if ((last_pte - i) > 1) {
+				free_page((unsigned long)virt_blk);
+				pte_n++;
+			} else if (last_pte == total_ents) {
+				free_page((unsigned long)virt_blk);
+				free_page((unsigned long)virt_st_tbl);
+			} else {
+				free_page((unsigned long)virt_st_tbl);
+				virt_st_tbl = (uint32_t *)virt_blk;
+				pte_n = 0;
+				break;
+			}
+			i++;
+		}
+	}
 }
 
 static void tmc_etr_sg_tbl_flush(uint32_t *vaddr, uint32_t size)
@@ -326,8 +423,9 @@ static void tmc_etr_sg_tbl_flush(uint32_t *vaddr, uint32_t size)
  * b. ents_per_blk = 4
  */
 
-static int tmc_etr_sg_tbl_alloc(struct tmc_drvdata *drvdata, uint32_t size)
+static int tmc_etr_sg_tbl_alloc(struct tmc_drvdata *drvdata)
 {
+	int ret;
 	uint32_t i = 0, last_pte;
 	uint32_t *virt_pgdir, *virt_st_tbl;
 	void *virt_pte;
@@ -345,8 +443,10 @@ static int tmc_etr_sg_tbl_alloc(struct tmc_drvdata *drvdata, uint32_t size)
 			   total_ents : (i + ents_per_blk);
 		while (i < last_pte) {
 			virt_pte = (void *)get_zeroed_page(GFP_KERNEL);
-			if (!virt_pte)
-				return -ENOMEM;
+			if (!virt_pte) {
+				ret = -ENOMEM;
+				goto err;
+			}
 
 			if ((last_pte - i) > 1) {
 				*virt_st_tbl =
@@ -369,48 +469,15 @@ static int tmc_etr_sg_tbl_alloc(struct tmc_drvdata *drvdata, uint32_t size)
 	drvdata->paddr = virt_to_phys(virt_pgdir);
 
 	/* Flush the dcache before proceeding */
-	tmc_etr_sg_tbl_flush((uint32_t *)drvdata->vaddr, size);
+	tmc_etr_sg_tbl_flush((uint32_t *)drvdata->vaddr, drvdata->size);
 
 	dev_dbg(drvdata->dev, "%s: table starts at %#lx, total entries %d\n",
 		__func__, (unsigned long)drvdata->paddr, total_ents);
 
 	return 0;
-}
-
-static void tmc_etr_sg_tbl_free(uint32_t *vaddr, uint32_t size)
-{
-	uint32_t i = 0, pte_n = 0, last_pte;
-	uint32_t *virt_st_tbl, *virt_pte;
-	void *virt_blk;
-	phys_addr_t phys_pte;
-	int total_ents = DIV_ROUND_UP(size, PAGE_SIZE);
-	int ents_per_blk = PAGE_SIZE/sizeof(uint32_t);
-
-	virt_st_tbl = vaddr;
-
-	while (i < total_ents) {
-		last_pte = ((i + ents_per_blk) > total_ents) ?
-			   total_ents : (i + ents_per_blk);
-		while (i < last_pte) {
-			virt_pte = virt_st_tbl + pte_n;
-			phys_pte = TMC_ETR_SG_ENT_TO_BLK(*virt_pte);
-			virt_blk = phys_to_virt(phys_pte);
-
-			if ((last_pte - i) > 1) {
-				free_page((unsigned long)virt_blk);
-				pte_n++;
-			} else if (last_pte == total_ents) {
-				free_page((unsigned long)virt_blk);
-				free_page((unsigned long)virt_st_tbl);
-			} else {
-				free_page((unsigned long)virt_st_tbl);
-				virt_st_tbl = (uint32_t *)virt_blk;
-				pte_n = 0;
-				break;
-			}
-			i++;
-		}
-	}
+err:
+	tmc_etr_sg_tbl_free(virt_pgdir, drvdata->size, i);
+	return ret;
 }
 
 static void tmc_etr_sg_mem_reset(uint32_t *vaddr, uint32_t size)
@@ -459,7 +526,8 @@ static void tmc_etr_fill_usb_bam_data(struct tmc_drvdata *drvdata)
 				    &bamdata->dest_pipe_idx,
 				    &bamdata->src_pipe_idx,
 				    &bamdata->desc_fifo,
-				    &bamdata->data_fifo);
+				    &bamdata->data_fifo,
+				    NULL);
 }
 
 static void __tmc_etr_enable_to_bam(struct tmc_drvdata *drvdata)
@@ -667,7 +735,7 @@ static int tmc_etr_alloc_mem(struct tmc_drvdata *drvdata)
 				goto err;
 			}
 		} else {
-			ret = tmc_etr_sg_tbl_alloc(drvdata, drvdata->size);
+			ret = tmc_etr_sg_tbl_alloc(drvdata);
 			if (ret)
 				goto err;
 		}
@@ -691,7 +759,8 @@ static void tmc_etr_free_mem(struct tmc_drvdata *drvdata)
 					  drvdata->vaddr, drvdata->paddr);
 		else
 			tmc_etr_sg_tbl_free((uint32_t *)drvdata->vaddr,
-					    drvdata->size);
+				drvdata->size,
+				DIV_ROUND_UP(drvdata->size, PAGE_SIZE));
 	       drvdata->vaddr = 0;
 	       drvdata->paddr = 0;
 	}
@@ -947,7 +1016,6 @@ static void __tmc_etb_dump(struct tmc_drvdata *drvdata)
 	char *hdr;
 	char *bufp;
 	uint32_t read_data;
-	int i;
 
 	hdr = drvdata->buf - PAGE_SIZE;
 	if (MSM_DUMP_MAJOR(msm_dump_table_version()) == 1)
@@ -968,16 +1036,22 @@ static void __tmc_etb_dump(struct tmc_drvdata *drvdata)
 
 	bufp = drvdata->buf;
 	while (1) {
-		for (i = 0; i < memwords; i++) {
-			read_data = tmc_readl_no_log(drvdata, TMC_RRD);
-			if (read_data == 0xFFFFFFFF)
-				goto out;
-			memcpy(bufp, &read_data, BYTES_PER_WORD);
-			bufp += BYTES_PER_WORD;
+		read_data = tmc_readl_no_log(drvdata, TMC_RRD);
+		if (read_data == 0xFFFFFFFF)
+			goto out;
+		if ((bufp - drvdata->buf) >= drvdata->size) {
+			dev_err(drvdata->dev, "ETF-ETB end marker missing\n");
+			goto out;
 		}
+		memcpy(bufp, &read_data, BYTES_PER_WORD);
+		bufp += BYTES_PER_WORD;
 	}
 
 out:
+	if ((bufp - drvdata->buf) % (memwords * BYTES_PER_WORD))
+		dev_dbg(drvdata->dev, "ETF-ETB data is not %lx bytes aligned\n",
+			(unsigned long) memwords * BYTES_PER_WORD);
+
 	if (drvdata->aborting) {
 		if (MSM_DUMP_MAJOR(msm_dump_table_version()) == 1)
 			*(uint32_t *)(hdr + TMC_ETFETB_DUMP_MAGIC_OFF) =
@@ -1388,7 +1462,7 @@ static void tmc_etr_sg_compute_read(struct tmc_drvdata *drvdata, loff_t *ppos,
 	uint32_t blk_num, sg_tbl_num, blk_num_loc, read_off;
 	uint32_t *virt_pte, *virt_st_tbl;
 	void *virt_blk;
-	phys_addr_t phys_pte;
+	phys_addr_t phys_pte = 0;
 	int total_ents = DIV_ROUND_UP(drvdata->size, PAGE_SIZE);
 	int ents_per_blk = PAGE_SIZE/sizeof(uint32_t);
 
@@ -1449,8 +1523,8 @@ static void tmc_etr_sg_compute_read(struct tmc_drvdata *drvdata, loff_t *ppos,
 	}
 
 	dev_dbg_ratelimited(drvdata->dev,
-	"%s: read at %p, phys %p len %zu blk %d, rel blk %d RWP blk %d\n",
-	 __func__, *bufpp, (void *)phys_pte, *len, blk_num, blk_num_rel,
+	"%s: read at %p, phys %pa len %zu blk %d, rel blk %d RWP blk %d\n",
+	 __func__, *bufpp, &phys_pte, *len, blk_num, blk_num_rel,
 	drvdata->sg_blk_num);
 }
 
@@ -1800,8 +1874,7 @@ static ssize_t tmc_etr_show_out_mode(struct device *dev,
 	struct tmc_drvdata *drvdata = dev_get_drvdata(dev->parent);
 
 	return scnprintf(buf, PAGE_SIZE, "%s\n",
-			 drvdata->out_mode == TMC_ETR_OUT_MODE_MEM ?
-			 "mem" : "usb");
+			str_tmc_etr_out_mode[drvdata->out_mode]);
 }
 
 static ssize_t tmc_etr_store_out_mode(struct device *dev,
@@ -1819,7 +1892,7 @@ static ssize_t tmc_etr_store_out_mode(struct device *dev,
 		return -EINVAL;
 
 	mutex_lock(&drvdata->usb_lock);
-	if (!strcmp(str, "mem")) {
+	if (!strcmp(str, str_tmc_etr_out_mode[TMC_ETR_OUT_MODE_MEM])) {
 		if (drvdata->out_mode == TMC_ETR_OUT_MODE_MEM)
 			goto out;
 
@@ -1839,7 +1912,7 @@ static ssize_t tmc_etr_store_out_mode(struct device *dev,
 
 		tmc_etr_bam_disable(drvdata);
 		usb_qdss_close(drvdata->usbch);
-	} else if (!strcmp(str, "usb")) {
+	} else if (!strcmp(str, str_tmc_etr_out_mode[TMC_ETR_OUT_MODE_USB])) {
 		if (drvdata->out_mode == TMC_ETR_OUT_MODE_USB)
 			goto out;
 
@@ -1879,6 +1952,22 @@ err0:
 }
 static DEVICE_ATTR(out_mode, S_IRUGO | S_IWUSR, tmc_etr_show_out_mode,
 		   tmc_etr_store_out_mode);
+
+static ssize_t tmc_etr_show_available_out_modes(struct device *dev,
+				      struct device_attribute *attr, char *buf)
+{
+	ssize_t len = 0;
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(str_tmc_etr_out_mode); i++)
+		len += scnprintf(buf + len, PAGE_SIZE - len, "%s ",
+				str_tmc_etr_out_mode[i]);
+
+	len += scnprintf(buf + len, PAGE_SIZE - len, "\n");
+	return len;
+}
+static DEVICE_ATTR(available_out_modes, S_IRUGO,
+			tmc_etr_show_available_out_modes, NULL);
 
 static ssize_t tmc_etr_show_byte_cntr_value(struct device *dev,
 					struct device_attribute *attr,
@@ -1962,8 +2051,7 @@ static ssize_t tmc_etr_show_mem_type(struct device *dev,
 	struct tmc_drvdata *drvdata = dev_get_drvdata(dev->parent);
 
 	return scnprintf(buf, PAGE_SIZE, "%s\n",
-			 drvdata->mem_type == TMC_ETR_MEM_TYPE_CONTIG ?
-			 "contig" : "sg");
+			str_tmc_etr_mem_type[drvdata->mem_type]);
 }
 
 static ssize_t tmc_etr_store_mem_type(struct device *dev,
@@ -1980,9 +2068,10 @@ static ssize_t tmc_etr_store_mem_type(struct device *dev,
 		return -EINVAL;
 
 	mutex_lock(&drvdata->usb_lock);
-	if (!strcmp(str, "contig")) {
+	if (!strcmp(str, str_tmc_etr_mem_type[TMC_ETR_MEM_TYPE_CONTIG])) {
 		drvdata->mem_type = TMC_ETR_MEM_TYPE_CONTIG;
-	} else if (!strcmp(str, "sg") && drvdata->sg_enable) {
+	} else if (!strcmp(str, str_tmc_etr_mem_type[TMC_ETR_MEM_TYPE_SG])
+		&& drvdata->sg_enable) {
 		drvdata->mem_type = TMC_ETR_MEM_TYPE_SG;
 	} else {
 		mutex_unlock(&drvdata->usb_lock);
@@ -1995,6 +2084,28 @@ static ssize_t tmc_etr_store_mem_type(struct device *dev,
 static DEVICE_ATTR(mem_type, S_IRUGO | S_IWUSR,
 		   tmc_etr_show_mem_type, tmc_etr_store_mem_type);
 
+static ssize_t tmc_etr_show_available_mem_types(struct device *dev,
+				     struct device_attribute *attr,
+				     char *buf)
+{
+	struct tmc_drvdata *drvdata = dev_get_drvdata(dev->parent);
+	ssize_t len = 0;
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(str_tmc_etr_mem_type); i++) {
+		if (i == TMC_ETR_MEM_TYPE_SG && !drvdata->sg_enable)
+			continue;
+
+		len += scnprintf(buf + len, PAGE_SIZE - len, "%s ",
+			str_tmc_etr_mem_type[i]);
+	}
+
+	len += scnprintf(buf + len, PAGE_SIZE - len, "\n");
+	return len;
+}
+static DEVICE_ATTR(available_mem_types, S_IRUGO,
+		tmc_etr_show_available_mem_types, NULL);
+
 static struct attribute *tmc_attrs[] = {
 	&dev_attr_trigger_cntr.attr,
 	NULL,
@@ -2006,9 +2117,11 @@ static struct attribute_group tmc_attr_grp = {
 
 static struct attribute *tmc_etr_attrs[] = {
 	&dev_attr_out_mode.attr,
+	&dev_attr_available_out_modes.attr,
 	&dev_attr_byte_cntr_value.attr,
 	&dev_attr_mem_size.attr,
 	&dev_attr_mem_type.attr,
+	&dev_attr_available_mem_types.attr,
 	NULL,
 };
 
@@ -2409,6 +2522,10 @@ static int tmc_probe(struct platform_device *pdev)
 			if (IS_ERR(drvdata->cti_reset))
 				dev_err(dev, "failed to get reset cti\n");
 		}
+
+		drvdata->notify = of_property_read_bool(pdev->dev.of_node,
+						"qcom,tmc-flush-powerdown");
+
 	}
 
 	desc = devm_kzalloc(dev, sizeof(*desc), GFP_KERNEL);
@@ -2466,6 +2583,18 @@ static int tmc_probe(struct platform_device *pdev)
 	if (ret)
 		goto err3;
 
+	if (drvdata->notify) {
+		drvdata->jtag_save_blk.notifier_call = tmc_flush_on_powerdown;
+		drvdata->jtag_save_blk.priority = 1;
+		ret = msm_jtag_save_register(&drvdata->jtag_save_blk);
+		if (ret) {
+			dev_err(dev,
+				"Jtag save notifier register failed:%d\n",
+				ret);
+			drvdata->notify = false;
+		}
+	}
+
 	dev_info(dev, "TMC initialized\n");
 	return 0;
 err3:
@@ -2482,6 +2611,8 @@ static int tmc_remove(struct platform_device *pdev)
 {
 	struct tmc_drvdata *drvdata = platform_get_drvdata(pdev);
 
+	if (drvdata->notify)
+		msm_jtag_save_unregister(&drvdata->jtag_save_blk);
 	tmc_etr_byte_cntr_exit(drvdata);
 	misc_deregister(&drvdata->miscdev);
 	coresight_unregister(drvdata->csdev);
