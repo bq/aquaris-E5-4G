@@ -1184,7 +1184,7 @@ static int ipmmu_probe(struct platform_device *pdev)
 			       dev_name(&pdev->dev), mmu);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "failed to request IRQ %d\n", irq);
-		return irq;
+		return ret;
 	}
 
 	ipmmu_device_reset(mmu);
@@ -1221,7 +1221,6 @@ static int ipmmu_remove(struct platform_device *pdev)
 
 static struct platform_driver ipmmu_driver = {
 	.driver = {
-		.owner = THIS_MODULE,
 		.name = "ipmmu-vmsa",
 	},
 	.probe = ipmmu_probe,

@@ -106,10 +106,7 @@ enum {
  */
 #define IS_CARD_RX_RCVD(adapter) (adapter->cmd_resp_received || \
 				adapter->event_received || \
-				((adapter->iface_type != MWIFIEX_USB) && \
-				adapter->data_received) || \
-				((adapter->iface_type == MWIFIEX_USB) && \
-				!skb_queue_empty(&adapter->usb_rx_data_q)))
+				adapter->data_received)
 
 #define MWIFIEX_TYPE_CMD				1
 #define MWIFIEX_TYPE_DATA				0
@@ -690,13 +687,13 @@ struct mwifiex_if_ops {
 	void (*cleanup_mpa_buf) (struct mwifiex_adapter *);
 	int (*cmdrsp_complete) (struct mwifiex_adapter *, struct sk_buff *);
 	int (*event_complete) (struct mwifiex_adapter *, struct sk_buff *);
-	int (*data_complete) (struct mwifiex_adapter *);
 	int (*init_fw_port) (struct mwifiex_adapter *);
 	int (*dnld_fw) (struct mwifiex_adapter *, struct mwifiex_fw_image *);
 	void (*card_reset) (struct mwifiex_adapter *);
 	void (*fw_dump)(struct mwifiex_adapter *);
 	int (*clean_pcie_ring) (struct mwifiex_adapter *adapter);
 	void (*iface_work)(struct work_struct *work);
+	void (*submit_rem_rx_urbs)(struct mwifiex_adapter *adapter);
 };
 
 struct mwifiex_adapter {
@@ -767,7 +764,6 @@ struct mwifiex_adapter {
 	spinlock_t scan_pending_q_lock;
 	/* spin lock for RX processing routine */
 	spinlock_t rx_proc_lock;
-	struct sk_buff_head usb_rx_data_q;
 	u32 scan_processing;
 	u16 region_code;
 	struct mwifiex_802_11d_domain_reg domain_reg;
@@ -845,6 +841,9 @@ struct mwifiex_adapter {
 	u8 curr_mem_idx;
 	bool scan_chan_gap_enabled;
 	struct sk_buff_head rx_data_q;
+	struct mwifiex_chan_stats *chan_stats;
+	u32 num_in_chan_stats;
+	int survey_idx;
 };
 
 int mwifiex_init_lock_list(struct mwifiex_adapter *adapter);
@@ -1031,7 +1030,8 @@ void mwifiex_set_11ac_ba_params(struct mwifiex_private *priv);
 int mwifiex_cmd_802_11_scan_ext(struct mwifiex_private *priv,
 				struct host_cmd_ds_command *cmd,
 				void *data_buf);
-int mwifiex_ret_802_11_scan_ext(struct mwifiex_private *priv);
+int mwifiex_ret_802_11_scan_ext(struct mwifiex_private *priv,
+				struct host_cmd_ds_command *resp);
 int mwifiex_handle_event_ext_scan_report(struct mwifiex_private *priv,
 					 void *buf);
 

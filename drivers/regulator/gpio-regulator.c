@@ -322,8 +322,10 @@ static int gpio_regulator_probe(struct platform_device *pdev)
 	cfg.driver_data = drvdata;
 	cfg.of_node = np;
 
-	if (config->enable_gpio >= 0)
+	if (gpio_is_valid(config->enable_gpio)) {
 		cfg.ena_gpio = config->enable_gpio;
+		cfg.ena_gpio_initialized = true;
+	}
 	cfg.ena_gpio_invert = !config->enable_high;
 	if (config->enabled_at_boot) {
 		if (config->enable_high)
@@ -388,7 +390,6 @@ static struct platform_driver gpio_regulator_driver = {
 	.remove		= gpio_regulator_remove,
 	.driver		= {
 		.name		= "gpio-regulator",
-		.owner		= THIS_MODULE,
 		.of_match_table = of_match_ptr(regulator_gpio_of_match),
 	},
 };

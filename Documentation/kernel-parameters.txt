@@ -1369,6 +1369,10 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 			Formats: { "ima" | "ima-ng" }
 			Default: "ima-ng"
 
+	ima_template_fmt=
+	                [IMA] Define a custom template format.
+			Format: { "field1|...|fieldN" }
+
 	ima.ahash_minsize= [IMA] Minimum file size for asynchronous hash usage
 			Format: <min_file_size>
 			Set the minimal file size for using asynchronous hash.
@@ -2943,6 +2947,12 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 			quiescent states.  Units are jiffies, minimum
 			value is one, and maximum value is HZ.
 
+	rcutree.kthread_prio= 	 [KNL,BOOT]
+			Set the SCHED_FIFO priority of the RCU
+			per-CPU kthreads (rcuc/N). This value is also
+			used for the priority of the RCU boost threads
+			(rcub/N). Valid values are 1-99.
+
 	rcutree.rcu_nocb_leader_stride= [KNL]
 			Set the number of NOCB kthread groups, which
 			defaults to the square root of the number of
@@ -3091,6 +3101,15 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 			Set timeout in jiffies for RCU task stall warning
 			messages.  Disable with a value less than or equal
 			to zero.
+
+	rcupdate.rcu_self_test= [KNL]
+			Run the RCU early boot self tests
+
+	rcupdate.rcu_self_test_bh= [KNL]
+			Run the RCU bh early boot self tests
+
+	rcupdate.rcu_self_test_sched= [KNL]
+			Run the RCU sched early boot self tests
 
 	rdinit=		[KNL]
 			Format: <full_path>
@@ -3414,6 +3433,13 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 			Ignore sysrq setting - this boot parameter will
 			neutralize any effect of /proc/sys/kernel/sysrq.
 			Useful for debugging.
+
+	tcpmhash_entries= [KNL,NET]
+			Set the number of tcp_metrics_hash slots.
+			Default value is 8192 or 16384 depending on total
+			ram pages. This is used to specify the TCP metrics
+			cache size. See Documentation/networking/ip-sysctl.txt
+			"tcp_no_metrics_save" section for more details.
 
 	tdfx=		[HW,DRM]
 

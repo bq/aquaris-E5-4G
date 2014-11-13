@@ -452,7 +452,7 @@ int cvm_oct_common_init(struct net_device *dev)
 		mac = of_get_mac_address(priv->of_node);
 
 	if (mac)
-		memcpy(dev->dev_addr, mac, ETH_ALEN);
+		ether_addr_copy(dev->dev_addr, mac);
 	else
 		eth_hw_addr_random(dev);
 
@@ -877,7 +877,6 @@ static struct platform_driver cvm_oct_driver = {
 	.probe		= cvm_oct_probe,
 	.remove		= cvm_oct_remove,
 	.driver		= {
-		.owner	= THIS_MODULE,
 		.name	= KBUILD_MODNAME,
 		.of_match_table = cvm_oct_match,
 	},

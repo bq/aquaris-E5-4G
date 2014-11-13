@@ -44,10 +44,10 @@
 #include <linux/slab.h>
 #include <linux/prefetch.h>
 #include <linux/pinctrl/consumer.h>
-#ifdef CONFIG_STMMAC_DEBUG_FS
+#ifdef CONFIG_DEBUG_FS
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
-#endif /* CONFIG_STMMAC_DEBUG_FS */
+#endif /* CONFIG_DEBUG_FS */
 #include <linux/net_tstamp.h>
 #include "stmmac_ptp.h"
 #include "stmmac.h"
@@ -116,7 +116,7 @@ MODULE_PARM_DESC(chain_mode, "To use chain instead of ring mode");
 
 static irqreturn_t stmmac_interrupt(int irq, void *dev_id);
 
-#ifdef CONFIG_STMMAC_DEBUG_FS
+#ifdef CONFIG_DEBUG_FS
 static int stmmac_init_fs(struct net_device *dev);
 static void stmmac_exit_fs(void);
 #endif
@@ -191,14 +191,8 @@ static void stmmac_clk_csr_set(struct stmmac_priv *priv)
 
 static void print_pkt(unsigned char *buf, int len)
 {
-	int j;
-	pr_debug("len = %d byte, buf addr: 0x%p", len, buf);
-	for (j = 0; j < len; j++) {
-		if ((j % 16) == 0)
-			pr_debug("\n %03x:", j);
-		pr_debug(" %02x", buf[j]);
-	}
-	pr_debug("\n");
+	pr_debug("len = %d byte, buf addr: 0x%p\n", len, buf);
+	print_hex_dump_bytes("", DUMP_PREFIX_OFFSET, buf, len);
 }
 
 /* minimum number of free TX descriptors required to wake up TX process */
@@ -276,6 +270,7 @@ static void stmmac_eee_ctrl_timer(unsigned long arg)
 bool stmmac_eee_init(struct stmmac_priv *priv)
 {
 	char *phy_bus_name = priv->plat->phy_bus_name;
+	unsigned long flags;
 	bool ret = false;
 
 	/* Using PCS we cannot dial with the phy registers at this stage
@@ -300,6 +295,7 @@ bool stmmac_eee_init(struct stmmac_priv *priv)
 			 * changed).
 			 * In that case the driver disable own timers.
 			 */
+			spin_lock_irqsave(&priv->lock, flags);
 			if (priv->eee_active) {
 				pr_debug("stmmac: disable EEE\n");
 				del_timer_sync(&priv->eee_ctrl_timer);
@@ -307,9 +303,11 @@ bool stmmac_eee_init(struct stmmac_priv *priv)
 							     tx_lpi_timer);
 			}
 			priv->eee_active = 0;
+			spin_unlock_irqrestore(&priv->lock, flags);
 			goto out;
 		}
 		/* Activate the EEE and start timers */
+		spin_lock_irqsave(&priv->lock, flags);
 		if (!priv->eee_active) {
 			priv->eee_active = 1;
 			init_timer(&priv->eee_ctrl_timer);
@@ -325,9 +323,10 @@ bool stmmac_eee_init(struct stmmac_priv *priv)
 		/* Set HW EEE according to the speed */
 		priv->hw->mac->set_eee_pls(priv->hw, priv->phydev->link);
 
-		pr_debug("stmmac: Energy-Efficient Ethernet initialized\n");
-
 		ret = true;
+		spin_unlock_irqrestore(&priv->lock, flags);
+
+		pr_debug("stmmac: Energy-Efficient Ethernet initialized\n");
 	}
 out:
 	return ret;
@@ -760,12 +759,12 @@ static void stmmac_adjust_link(struct net_device *dev)
 	if (new_state && netif_msg_link(priv))
 		phy_print_status(phydev);
 
+	spin_unlock_irqrestore(&priv->lock, flags);
+
 	/* At this stage, it could be needed to setup the EEE or adjust some
 	 * MAC related HW registers.
 	 */
 	priv->eee_enabled = stmmac_eee_init(priv);
-
-	spin_unlock_irqrestore(&priv->lock, flags);
 }
 
 /**
@@ -959,12 +958,12 @@ static void stmmac_clear_descriptors(struct stmmac_priv *priv)
 }
 
 static int stmmac_init_rx_buffers(struct stmmac_priv *priv, struct dma_desc *p,
-				  int i)
+				  int i, gfp_t flags)
 {
 	struct sk_buff *skb;
 
 	skb = __netdev_alloc_skb(priv->dev, priv->dma_buf_sz + NET_IP_ALIGN,
-				 GFP_KERNEL);
+				 flags);
 	if (!skb) {
 		pr_err("%s: Rx init fails; skb is NULL\n", __func__);
 		return -ENOMEM;
@@ -1006,7 +1005,7 @@ static void stmmac_free_rx_buffers(struct stmmac_priv *priv, int i)
  * and allocates the socket buffers. It suppors the chained and ring
  * modes.
  */
-static int init_dma_desc_rings(struct net_device *dev)
+static int init_dma_desc_rings(struct net_device *dev, gfp_t flags)
 {
 	int i;
 	struct stmmac_priv *priv = netdev_priv(dev);
@@ -1041,7 +1040,7 @@ static int init_dma_desc_rings(struct net_device *dev)
 		else
 			p = priv->dma_rx + i;
 
-		ret = stmmac_init_rx_buffers(priv, p, i);
+		ret = stmmac_init_rx_buffers(priv, p, i, flags);
 		if (ret)
 			goto err_init_rx_buffers;
 
@@ -1647,11 +1646,6 @@ static int stmmac_hw_setup(struct net_device *dev)
 	struct stmmac_priv *priv = netdev_priv(dev);
 	int ret;
 
-	ret = init_dma_desc_rings(dev);
-	if (ret < 0) {
-		pr_err("%s: DMA descriptors initialization failed\n", __func__);
-		return ret;
-	}
 	/* DMA initialization and SW reset */
 	ret = stmmac_init_dma_engine(priv);
 	if (ret < 0) {
@@ -1688,7 +1682,7 @@ static int stmmac_hw_setup(struct net_device *dev)
 	if (ret && ret != -EOPNOTSUPP)
 		pr_warn("%s: failed PTP initialisation\n", __func__);
 
-#ifdef CONFIG_STMMAC_DEBUG_FS
+#ifdef CONFIG_DEBUG_FS
 	ret = stmmac_init_fs(dev);
 	if (ret < 0)
 		pr_warn("%s: failed debugFS registration\n", __func__);
@@ -1704,10 +1698,6 @@ static int stmmac_hw_setup(struct net_device *dev)
 		priv->hw->dma->dump_regs(priv->ioaddr);
 	}
 	priv->tx_lpi_timer = STMMAC_DEFAULT_TWT_LS;
-
-	priv->eee_enabled = stmmac_eee_init(priv);
-
-	stmmac_init_tx_coalesce(priv);
 
 	if ((priv->use_riwt) && (priv->hw->dma->rx_watchdog)) {
 		priv->rx_riwt = MAX_DMA_RIWT;
@@ -1761,11 +1751,19 @@ static int stmmac_open(struct net_device *dev)
 		goto dma_desc_error;
 	}
 
+	ret = init_dma_desc_rings(dev, GFP_KERNEL);
+	if (ret < 0) {
+		pr_err("%s: DMA descriptors initialization failed\n", __func__);
+		goto init_error;
+	}
+
 	ret = stmmac_hw_setup(dev);
 	if (ret < 0) {
 		pr_err("%s: Hw setup failed\n", __func__);
 		goto init_error;
 	}
+
+	stmmac_init_tx_coalesce(priv);
 
 	if (priv->phydev)
 		phy_start(priv->phydev);
@@ -1866,7 +1864,7 @@ static int stmmac_release(struct net_device *dev)
 
 	netif_carrier_off(dev);
 
-#ifdef CONFIG_STMMAC_DEBUG_FS
+#ifdef CONFIG_DEBUG_FS
 	stmmac_exit_fs();
 #endif
 
@@ -1894,7 +1892,10 @@ static netdev_tx_t stmmac_xmit(struct sk_buff *skb, struct net_device *dev)
 	unsigned int nopaged_len = skb_headlen(skb);
 	unsigned int enh_desc = priv->plat->enh_desc;
 
+	spin_lock(&priv->tx_lock);
+
 	if (unlikely(stmmac_tx_avail(priv) < nfrags + 1)) {
+		spin_unlock(&priv->tx_lock);
 		if (!netif_queue_stopped(dev)) {
 			netif_stop_queue(dev);
 			/* This is a hard error, log it. */
@@ -1902,8 +1903,6 @@ static netdev_tx_t stmmac_xmit(struct sk_buff *skb, struct net_device *dev)
 		}
 		return NETDEV_TX_BUSY;
 	}
-
-	spin_lock(&priv->tx_lock);
 
 	if (priv->tx_path_in_lpi_mode)
 		stmmac_disable_eee_mode(priv);
@@ -2025,6 +2024,7 @@ static netdev_tx_t stmmac_xmit(struct sk_buff *skb, struct net_device *dev)
 	return NETDEV_TX_OK;
 
 dma_map_err:
+	spin_unlock(&priv->tx_lock);
 	dev_err(priv->device, "Tx dma map failed\n");
 	dev_kfree_skb(skb);
 	priv->dev->stats.tx_dropped++;
@@ -2281,9 +2281,7 @@ static void stmmac_set_rx_mode(struct net_device *dev)
 {
 	struct stmmac_priv *priv = netdev_priv(dev);
 
-	spin_lock(&priv->lock);
 	priv->hw->mac->set_filter(priv->hw, dev);
-	spin_unlock(&priv->lock);
 }
 
 /**
@@ -2453,7 +2451,7 @@ static int stmmac_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 	return ret;
 }
 
-#ifdef CONFIG_STMMAC_DEBUG_FS
+#ifdef CONFIG_DEBUG_FS
 static struct dentry *stmmac_fs_dir;
 static struct dentry *stmmac_rings_status;
 static struct dentry *stmmac_dma_cap;
@@ -2638,7 +2636,7 @@ static void stmmac_exit_fs(void)
 	debugfs_remove(stmmac_dma_cap);
 	debugfs_remove(stmmac_fs_dir);
 }
-#endif /* CONFIG_STMMAC_DEBUG_FS */
+#endif /* CONFIG_DEBUG_FS */
 
 static const struct net_device_ops stmmac_netdev_ops = {
 	.ndo_open = stmmac_open,
@@ -2887,6 +2885,7 @@ error_clk_get:
 
 	return ERR_PTR(ret);
 }
+EXPORT_SYMBOL_GPL(stmmac_dvr_probe);
 
 /**
  * stmmac_dvr_remove
@@ -2916,8 +2915,8 @@ int stmmac_dvr_remove(struct net_device *ndev)
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(stmmac_dvr_remove);
 
-#ifdef CONFIG_PM
 int stmmac_suspend(struct net_device *ndev)
 {
 	struct stmmac_priv *priv = netdev_priv(ndev);
@@ -2950,7 +2949,7 @@ int stmmac_suspend(struct net_device *ndev)
 		stmmac_set_mac(priv->ioaddr, false);
 		pinctrl_pm_select_sleep_state(priv->device);
 		/* Disable clock in case of PWM is off */
-		clk_disable_unprepare(priv->stmmac_clk);
+		clk_disable(priv->stmmac_clk);
 	}
 	spin_unlock_irqrestore(&priv->lock, flags);
 
@@ -2959,6 +2958,7 @@ int stmmac_suspend(struct net_device *ndev)
 	priv->oldduplex = -1;
 	return 0;
 }
+EXPORT_SYMBOL_GPL(stmmac_suspend);
 
 int stmmac_resume(struct net_device *ndev)
 {
@@ -2982,7 +2982,7 @@ int stmmac_resume(struct net_device *ndev)
 	} else {
 		pinctrl_pm_select_default_state(priv->device);
 		/* enable the clk prevously disabled */
-		clk_prepare_enable(priv->stmmac_clk);
+		clk_enable(priv->stmmac_clk);
 		/* reset the phy so that it's ready */
 		if (priv->mii)
 			stmmac_mdio_reset(priv->mii);
@@ -2990,7 +2990,9 @@ int stmmac_resume(struct net_device *ndev)
 
 	netif_device_attach(ndev);
 
+	init_dma_desc_rings(ndev, GFP_ATOMIC);
 	stmmac_hw_setup(ndev);
+	stmmac_init_tx_coalesce(priv);
 
 	napi_enable(&priv->napi);
 
@@ -3003,37 +3005,7 @@ int stmmac_resume(struct net_device *ndev)
 
 	return 0;
 }
-#endif /* CONFIG_PM */
-
-/* Driver can be configured w/ and w/ both PCI and Platf drivers
- * depending on the configuration selected.
- */
-static int __init stmmac_init(void)
-{
-	int ret;
-
-	ret = stmmac_register_platform();
-	if (ret)
-		goto err;
-	ret = stmmac_register_pci();
-	if (ret)
-		goto err_pci;
-	return 0;
-err_pci:
-	stmmac_unregister_platform();
-err:
-	pr_err("stmmac: driver registration failed\n");
-	return ret;
-}
-
-static void __exit stmmac_exit(void)
-{
-	stmmac_unregister_platform();
-	stmmac_unregister_pci();
-}
-
-module_init(stmmac_init);
-module_exit(stmmac_exit);
+EXPORT_SYMBOL_GPL(stmmac_resume);
 
 #ifndef MODULE
 static int __init stmmac_cmdline_opt(char *str)
