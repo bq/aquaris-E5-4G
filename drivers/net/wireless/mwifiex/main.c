@@ -28,6 +28,11 @@ const char driver_version[] = "mwifiex " VERSION " (%s) ";
 static char *cal_data_cfg;
 module_param(cal_data_cfg, charp, 0);
 
+static unsigned short driver_mode;
+module_param(driver_mode, ushort, 0);
+MODULE_PARM_DESC(driver_mode,
+		 "station=0x1(default), ap-sta=0x3, station-p2p=0x5, ap-sta-p2p=0x7");
+
 /*
  * This function registers the device and performs all the necessary
  * initializations.
@@ -449,6 +454,11 @@ static void mwifiex_fw_dpc(const struct firmware *firmware, void *context)
 		goto err_init_fw;
 	}
 
+	if (driver_mode) {
+		driver_mode &= MWIFIEX_DRIVER_MODE_BITMASK;
+		driver_mode |= MWIFIEX_DRIVER_MODE_STA;
+	}
+
 	rtnl_lock();
 	/* Create station interface by default */
 	wdev = mwifiex_add_virtual_intf(adapter->wiphy, "mlan%d",
@@ -457,6 +467,28 @@ static void mwifiex_fw_dpc(const struct firmware *firmware, void *context)
 		dev_err(adapter->dev, "cannot create default STA interface\n");
 		rtnl_unlock();
 		goto err_add_intf;
+	}
+
+	if (driver_mode & MWIFIEX_DRIVER_MODE_UAP) {
+		wdev = mwifiex_add_virtual_intf(adapter->wiphy, "uap%d",
+						NL80211_IFTYPE_AP, NULL, NULL);
+		if (IS_ERR(wdev)) {
+			dev_err(adapter->dev, "cannot create AP interface\n");
+			rtnl_unlock();
+			goto err_add_intf;
+		}
+	}
+
+	if (driver_mode & MWIFIEX_DRIVER_MODE_P2P) {
+		wdev = mwifiex_add_virtual_intf(adapter->wiphy, "p2p%d",
+						NL80211_IFTYPE_P2P_CLIENT, NULL,
+						NULL);
+		if (IS_ERR(wdev)) {
+			dev_err(adapter->dev,
+				"cannot create p2p client interface\n");
+			rtnl_unlock();
+			goto err_add_intf;
+		}
 	}
 	rtnl_unlock();
 
@@ -629,6 +661,13 @@ mwifiex_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	 * MSDU lifetime expiry.
 	 */
 	__net_timestamp(skb);
+
+	if (ISSUPP_TDLS_ENABLED(priv->adapter->fw_cap_info) &&
+	    priv->bss_type == MWIFIEX_BSS_TYPE_STA &&
+	    !ether_addr_equal_unaligned(priv->cfg_bssid, skb->data)) {
+		if (priv->adapter->auto_tdls && priv->check_tdls_tx)
+			mwifiex_tdls_check_tx(priv, skb);
+	}
 
 	mwifiex_queue_tx_pkt(priv, skb);
 
