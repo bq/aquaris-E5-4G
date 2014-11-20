@@ -258,6 +258,7 @@ static int dw8250_probe_of(struct uart_port *p,
 	struct uart_8250_port *up = up_to_u8250p(p);
 	u32			val;
 	bool has_ucv = true;
+	int id;
 
 	if (of_device_is_compatible(np, "cavium,octeon-3860-uart")) {
 #ifdef __BIG_ENDIAN
@@ -290,8 +291,21 @@ static int dw8250_probe_of(struct uart_port *p,
 	if (has_ucv)
 		dw8250_setup_port(up);
 
+	/* if we have a valid fifosize, try hooking up DMA here */
+	if (p->fifosize) {
+		up->dma = &data->dma;
+
+		up->dma->rxconf.src_maxburst = p->fifosize / 4;
+		up->dma->txconf.dst_maxburst = p->fifosize / 4;
+	}
+
 	if (!of_property_read_u32(np, "reg-shift", &val))
 		p->regshift = val;
+
+	/* get index of serial line, if found in DT aliases */
+	id = of_alias_get_id(np, "serial");
+	if (id >= 0)
+		p->line = id;
 
 	/* clock got configured through clk api, all done */
 	if (p->uartclk)
@@ -543,7 +557,6 @@ MODULE_DEVICE_TABLE(acpi, dw8250_acpi_match);
 static struct platform_driver dw8250_platform_driver = {
 	.driver = {
 		.name		= "dw-apb-uart",
-		.owner		= THIS_MODULE,
 		.pm		= &dw8250_pm_ops,
 		.of_match_table	= dw8250_of_match,
 		.acpi_match_table = ACPI_PTR(dw8250_acpi_match),

@@ -731,9 +731,11 @@ static int bcm_sysport_tx_poll(struct napi_struct *napi, int budget)
 		napi_complete(napi);
 		/* re-enable TX interrupt */
 		intrl2_1_mask_clear(ring->priv, BIT(ring->index));
+
+		return 0;
 	}
 
-	return 0;
+	return budget;
 }
 
 static void bcm_sysport_tx_reclaim_all(struct bcm_sysport_priv *priv)
@@ -1962,7 +1964,6 @@ static struct platform_driver bcm_sysport_driver = {
 	.remove	= bcm_sysport_remove,
 	.driver =  {
 		.name = "brcm-systemport",
-		.owner = THIS_MODULE,
 		.of_match_table = bcm_sysport_of_match,
 		.pm = &bcm_sysport_pm_ops,
 	},

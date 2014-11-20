@@ -43,12 +43,13 @@
 static int create_composite_quirk(struct snd_usb_audio *chip,
 				  struct usb_interface *iface,
 				  struct usb_driver *driver,
-				  const struct snd_usb_audio_quirk *quirk)
+				  const struct snd_usb_audio_quirk *quirk_comp)
 {
 	int probed_ifnum = get_iface_desc(iface->altsetting)->bInterfaceNumber;
+	const struct snd_usb_audio_quirk *quirk;
 	int err;
 
-	for (quirk = quirk->data; quirk->ifnum >= 0; ++quirk) {
+	for (quirk = quirk_comp->data; quirk->ifnum >= 0; ++quirk) {
 		iface = usb_ifnum_to_if(chip->dev, quirk->ifnum);
 		if (!iface)
 			continue;
@@ -58,9 +59,17 @@ static int create_composite_quirk(struct snd_usb_audio *chip,
 		err = snd_usb_create_quirk(chip, iface, driver, quirk);
 		if (err < 0)
 			return err;
-		if (quirk->ifnum != probed_ifnum)
+	}
+
+	for (quirk = quirk_comp->data; quirk->ifnum >= 0; ++quirk) {
+		iface = usb_ifnum_to_if(chip->dev, quirk->ifnum);
+		if (!iface)
+			continue;
+		if (quirk->ifnum != probed_ifnum &&
+		    !usb_interface_claimed(iface))
 			usb_driver_claim_interface(driver, iface, (void *)-1L);
 	}
+
 	return 0;
 }
 
@@ -1146,6 +1155,20 @@ void snd_usb_ctl_msg_quirk(struct usb_device *dev, unsigned int pipe,
 	if ((le16_to_cpu(dev->descriptor.idVendor) == 0x23ba) &&
 	    (requesttype & USB_TYPE_MASK) == USB_TYPE_CLASS)
 		mdelay(20);
+
+	/* Marantz/Denon devices with USB DAC functionality need a delay
+	 * after each class compliant request
+	 */
+	if ((le16_to_cpu(dev->descriptor.idVendor) == 0x154e) &&
+	    (requesttype & USB_TYPE_MASK) == USB_TYPE_CLASS) {
+
+		switch (le16_to_cpu(dev->descriptor.idProduct)) {
+		case 0x3005: /* Marantz HD-DAC1 */
+		case 0x3006: /* Marantz SA-14S1 */
+			mdelay(20);
+			break;
+		}
+	}
 }
 
 /*

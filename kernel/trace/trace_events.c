@@ -461,7 +461,7 @@ static void remove_event_file_dir(struct ftrace_event_file *file)
 
 	if (dir) {
 		spin_lock(&dir->d_lock);	/* probably unneeded */
-		list_for_each_entry(child, &dir->d_subdirs, d_u.d_child) {
+		list_for_each_entry(child, &dir->d_subdirs, d_child) {
 			if (child->d_inode)	/* probably unneeded */
 				child->d_inode->i_private = NULL;
 		}
@@ -918,7 +918,7 @@ static int f_show(struct seq_file *m, void *v)
 	case FORMAT_HEADER:
 		seq_printf(m, "name: %s\n", ftrace_event_name(call));
 		seq_printf(m, "ID: %d\n", call->event.type);
-		seq_printf(m, "format:\n");
+		seq_puts(m, "format:\n");
 		return 0;
 
 	case FORMAT_FIELD_SEPERATOR:
@@ -1988,7 +1988,7 @@ event_enable_print(struct seq_file *m, unsigned long ip,
 		   ftrace_event_name(data->file->event_call));
 
 	if (data->count == -1)
-		seq_printf(m, ":unlimited\n");
+		seq_puts(m, ":unlimited\n");
 	else
 		seq_printf(m, ":count=%ld\n", data->count);
 

@@ -220,9 +220,6 @@ void tlb_gather_mmu(struct mmu_gather *tlb, struct mm_struct *mm, unsigned long 
 	/* Is it from 0 to ~0? */
 	tlb->fullmm     = !(start | (end+1));
 	tlb->need_flush_all = 0;
-	tlb->start	= start;
-	tlb->end	= end;
-	tlb->need_flush = 0;
 	tlb->local.next = NULL;
 	tlb->local.nr   = 0;
 	tlb->local.max  = ARRAY_SIZE(tlb->__pages);
@@ -257,8 +254,6 @@ static void tlb_flush_mmu_free(struct mmu_gather *tlb)
 
 void tlb_flush_mmu(struct mmu_gather *tlb)
 {
-	if (!tlb->need_flush)
-		return;
 	tlb_flush_mmu_tlbonly(tlb);
 	tlb_flush_mmu_free(tlb);
 }
@@ -293,7 +288,7 @@ int __tlb_remove_page(struct mmu_gather *tlb, struct page *page)
 {
 	struct mmu_gather_batch *batch;
 
-	VM_BUG_ON(!tlb->need_flush);
+	VM_BUG_ON(!tlb->end);
 
 	batch = tlb->active;
 	batch->pages[batch->nr++] = page;
@@ -359,8 +354,6 @@ void tlb_table_flush(struct mmu_gather *tlb)
 void tlb_remove_table(struct mmu_gather *tlb, void *table)
 {
 	struct mmu_table_batch **batch = &tlb->batch;
-
-	tlb->need_flush = 1;
 
 	/*
 	 * When there's less then two users of this mm there cannot be a
@@ -1187,20 +1180,8 @@ again:
 	arch_leave_lazy_mmu_mode();
 
 	/* Do the actual TLB flush before dropping ptl */
-	if (force_flush) {
-		unsigned long old_end;
-
-		/*
-		 * Flush the TLB just for the previous segment,
-		 * then update the range to be the remaining
-		 * TLB range.
-		 */
-		old_end = tlb->end;
-		tlb->end = addr;
+	if (force_flush)
 		tlb_flush_mmu_tlbonly(tlb);
-		tlb->start = addr;
-		tlb->end = old_end;
-	}
 	pte_unmap_unlock(start_pte, ptl);
 
 	/*
@@ -2642,7 +2623,7 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 		return VM_FAULT_SIGBUS;
 
 	/* Use the zero-page for reads */
-	if (!(flags & FAULT_FLAG_WRITE)) {
+	if (!(flags & FAULT_FLAG_WRITE) && !mm_forbids_zeropage(mm)) {
 		entry = pte_mkspecial(pfn_pte(my_zero_pfn(address),
 						vma->vm_page_prot));
 		page_table = pte_offset_map_lock(mm, pmd, address, &ptl);

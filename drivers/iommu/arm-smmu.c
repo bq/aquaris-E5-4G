@@ -1652,6 +1652,7 @@ static const struct iommu_ops arm_smmu_ops = {
 	.detach_dev	= arm_smmu_detach_dev,
 	.map		= arm_smmu_map,
 	.unmap		= arm_smmu_unmap,
+	.map_sg		= default_iommu_map_sg,
 	.iova_to_phys	= arm_smmu_iova_to_phys,
 	.add_device	= arm_smmu_add_device,
 	.remove_device	= arm_smmu_remove_device,
@@ -2062,7 +2063,6 @@ static int arm_smmu_device_remove(struct platform_device *pdev)
 
 static struct platform_driver arm_smmu_driver = {
 	.driver	= {
-		.owner		= THIS_MODULE,
 		.name		= "arm-smmu",
 		.of_match_table	= of_match_ptr(arm_smmu_of_match),
 	},

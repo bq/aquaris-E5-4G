@@ -389,6 +389,7 @@ struct inode *ceph_alloc_inode(struct super_block *sb)
 	ci->i_version = 0;
 	ci->i_time_warp_seq = 0;
 	ci->i_ceph_flags = 0;
+	ci->i_ordered_count = 0;
 	atomic_set(&ci->i_release_count, 1);
 	atomic_set(&ci->i_complete_count, 0);
 	ci->i_symlink = NULL;
@@ -845,7 +846,8 @@ static int fill_inode(struct inode *inode,
 	    (issued & CEPH_CAP_FILE_EXCL) == 0 &&
 	    !__ceph_dir_is_complete(ci)) {
 		dout(" marking %p complete (empty)\n", inode);
-		__ceph_dir_set_complete(ci, atomic_read(&ci->i_release_count));
+		__ceph_dir_set_complete(ci, atomic_read(&ci->i_release_count),
+					ci->i_ordered_count);
 	}
 
 	/* were we issued a capability? */
@@ -967,7 +969,7 @@ static struct dentry *splice_dentry(struct dentry *dn, struct inode *in,
 	/* dn must be unhashed */
 	if (!d_unhashed(dn))
 		d_drop(dn);
-	realdn = d_materialise_unique(dn, in);
+	realdn = d_splice_alias(in, dn);
 	if (IS_ERR(realdn)) {
 		pr_err("splice_dentry error %ld %p inode %p ino %llx.%llx\n",
 		       PTR_ERR(realdn), dn, in, ceph_vinop(in));
@@ -1186,28 +1188,26 @@ retry_lookup:
 			struct inode *olddir = req->r_old_dentry_dir;
 			BUG_ON(!olddir);
 
-			dout(" src %p '%.*s' dst %p '%.*s'\n",
+			dout(" src %p '%pd' dst %p '%pd'\n",
 			     req->r_old_dentry,
-			     req->r_old_dentry->d_name.len,
-			     req->r_old_dentry->d_name.name,
-			     dn, dn->d_name.len, dn->d_name.name);
+			     req->r_old_dentry,
+			     dn, dn);
 			dout("fill_trace doing d_move %p -> %p\n",
 			     req->r_old_dentry, dn);
 
 			d_move(req->r_old_dentry, dn);
-			dout(" src %p '%.*s' dst %p '%.*s'\n",
+			dout(" src %p '%pd' dst %p '%pd'\n",
 			     req->r_old_dentry,
-			     req->r_old_dentry->d_name.len,
-			     req->r_old_dentry->d_name.name,
-			     dn, dn->d_name.len, dn->d_name.name);
+			     req->r_old_dentry,
+			     dn, dn);
 
 			/* ensure target dentry is invalidated, despite
 			   rehashing bug in vfs_rename_dir */
 			ceph_invalidate_dentry_lease(dn);
 
 			/* d_move screws up sibling dentries' offsets */
-			ceph_dir_clear_complete(dir);
-			ceph_dir_clear_complete(olddir);
+			ceph_dir_clear_ordered(dir);
+			ceph_dir_clear_ordered(olddir);
 
 			dout("dn %p gets new offset %lld\n", req->r_old_dentry,
 			     ceph_dentry(req->r_old_dentry)->offset);
@@ -1219,6 +1219,7 @@ retry_lookup:
 		if (!rinfo->head->is_target) {
 			dout("fill_trace null dentry\n");
 			if (dn->d_inode) {
+				ceph_dir_clear_ordered(dir);
 				dout("d_delete %p\n", dn);
 				d_delete(dn);
 			} else {
@@ -1235,7 +1236,7 @@ retry_lookup:
 
 		/* attach proper inode */
 		if (!dn->d_inode) {
-			ceph_dir_clear_complete(dir);
+			ceph_dir_clear_ordered(dir);
 			ihold(in);
 			dn = splice_dentry(dn, in, &have_lease);
 			if (IS_ERR(dn)) {
@@ -1265,7 +1266,7 @@ retry_lookup:
 		BUG_ON(!dir);
 		BUG_ON(ceph_snap(dir) != CEPH_SNAPDIR);
 		dout(" linking snapped dir %p to dn %p\n", in, dn);
-		ceph_dir_clear_complete(dir);
+		ceph_dir_clear_ordered(dir);
 		ihold(in);
 		dn = splice_dentry(dn, in, NULL);
 		if (IS_ERR(dn)) {
@@ -1399,7 +1400,7 @@ retry_lookup:
 			/* reorder parent's d_subdirs */
 			spin_lock(&parent->d_lock);
 			spin_lock_nested(&dn->d_lock, DENTRY_D_LOCK_NESTED);
-			list_move(&dn->d_u.d_child, &parent->d_subdirs);
+			list_move(&dn->d_child, &parent->d_subdirs);
 			spin_unlock(&dn->d_lock);
 			spin_unlock(&parent->d_lock);
 		}

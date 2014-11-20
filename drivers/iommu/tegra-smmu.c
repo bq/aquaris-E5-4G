@@ -955,6 +955,7 @@ static const struct iommu_ops smmu_iommu_ops = {
 	.detach_dev	= smmu_iommu_detach_dev,
 	.map		= smmu_iommu_map,
 	.unmap		= smmu_iommu_unmap,
+	.map_sg		= default_iommu_map_sg,
 	.iova_to_phys	= smmu_iommu_iova_to_phys,
 	.pgsize_bitmap	= SMMU_IOMMU_PGSIZES,
 };
@@ -1269,7 +1270,6 @@ static struct platform_driver tegra_smmu_driver = {
 	.probe		= tegra_smmu_probe,
 	.remove		= tegra_smmu_remove,
 	.driver = {
-		.owner	= THIS_MODULE,
 		.name	= "tegra-smmu",
 		.pm	= &tegra_smmu_pm_ops,
 		.of_match_table = tegra_smmu_of_match,

@@ -54,6 +54,12 @@ config ARCH_USE_CMPXCHG_LOCKREF
 config ARCH_HAS_FAST_MULTIPLIER
 	bool
 
+config FLEX_ARRAY
+	bool
+
+config RHASHTABLE
+	bool
+
 config CRC_CCITT
 	tristate "CRC-CCITT functions"
 	help
@@ -186,6 +192,9 @@ config CRC64_ECMA
 	  This option provides CRC64 ECMA function. Drivers may select this
 	  when they need to do cyclic redundancy check according to the CRC64
 	  ECMA algorithm.
+
+config HALFMD4
+	bool
 
 config AUDIT_GENERIC
 	bool

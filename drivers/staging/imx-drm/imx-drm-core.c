@@ -24,12 +24,11 @@
 #include <drm/drm_crtc_helper.h>
 #include <drm/drm_gem_cma_helper.h>
 #include <drm/drm_fb_cma_helper.h>
+#include <drm/drm_plane_helper.h>
 
 #include "imx-drm.h"
 
 #define MAX_CRTC	4
-
-struct imx_drm_crtc;
 
 struct imx_drm_component {
 	struct device_node *of_node;
@@ -632,7 +631,8 @@ static int imx_drm_platform_probe(struct platform_device *pdev)
 				continue;
 			}
 
-			component_match_add(&pdev->dev, &match, compare_of, remote);
+			component_match_add(&pdev->dev, &match, compare_of,
+					    remote);
 			of_node_put(remote);
 		}
 		of_node_put(port);
@@ -691,7 +691,6 @@ static struct platform_driver imx_drm_pdrv = {
 	.probe		= imx_drm_platform_probe,
 	.remove		= imx_drm_platform_remove,
 	.driver		= {
-		.owner	= THIS_MODULE,
 		.name	= "imx-drm",
 		.pm	= &imx_drm_pm_ops,
 		.of_match_table = imx_drm_dt_ids,

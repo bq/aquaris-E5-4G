@@ -369,8 +369,7 @@ int arch_setup_msi_irqs(struct pci_dev *pdev, int nvec, int type)
 
 	if (type == PCI_CAP_ID_MSI && nvec > 1)
 		return 1;
-	msi_vecs = min(nvec, ZPCI_MSI_VEC_MAX);
-	msi_vecs = min_t(unsigned int, msi_vecs, CONFIG_PCI_NR_MSI);
+	msi_vecs = min_t(unsigned int, nvec, zdev->max_msi);
 
 	/* Allocate adapter summary indicator bit */
 	rc = -EIO;
@@ -448,9 +447,9 @@ void arch_teardown_msi_irqs(struct pci_dev *pdev)
 	/* Release MSI interrupts */
 	list_for_each_entry(msi, &pdev->msi_list, list) {
 		if (msi->msi_attrib.is_msix)
-			default_msix_mask_irq(msi, 1);
+			__msix_mask_irq(msi, 1);
 		else
-			default_msi_mask_irq(msi, 1, 1);
+			__msi_mask_irq(msi, 1, 1);
 		irq_set_msi_desc(msi->irq, NULL);
 		irq_free_desc(msi->irq);
 		msi->msg.address_lo = 0;
@@ -474,7 +473,8 @@ static void zpci_map_resources(struct zpci_dev *zdev)
 		len = pci_resource_len(pdev, i);
 		if (!len)
 			continue;
-		pdev->resource[i].start = (resource_size_t) pci_iomap(pdev, i, 0);
+		pdev->resource[i].start =
+			(resource_size_t __force) pci_iomap(pdev, i, 0);
 		pdev->resource[i].end = pdev->resource[i].start + len - 1;
 	}
 }
@@ -489,7 +489,8 @@ static void zpci_unmap_resources(struct zpci_dev *zdev)
 		len = pci_resource_len(pdev, i);
 		if (!len)
 			continue;
-		pci_iounmap(pdev, (void *) pdev->resource[i].start);
+		pci_iounmap(pdev, (void __iomem __force *)
+			    pdev->resource[i].start);
 	}
 }
 

@@ -117,8 +117,6 @@ void __of_attach_node(struct device_node *np)
 
 	np->child = NULL;
 	np->sibling = np->parent->child;
-	np->allnext = np->parent->allnext;
-	np->parent->allnext = np;
 	np->parent->child = np;
 	of_node_clear_flag(np, OF_DETACHED);
 }
@@ -153,17 +151,6 @@ void __of_detach_node(struct device_node *np)
 	parent = np->parent;
 	if (WARN_ON(!parent))
 		return;
-
-	if (of_allnodes == np)
-		of_allnodes = np->allnext;
-	else {
-		struct device_node *prev;
-		for (prev = of_allnodes;
-		     prev->allnext != np;
-		     prev = prev->allnext)
-			;
-		prev->allnext = np->allnext;
-	}
 
 	if (parent->child == np)
 		parent->child = np->sibling;
@@ -247,7 +234,7 @@ void of_node_release(struct kobject *kobj)
  * @allocflags:	Allocation flags (typically pass GFP_KERNEL)
  *
  * Copy a property by dynamically allocating the memory of both the
- * property stucture and the property name & contents. The property's
+ * property structure and the property name & contents. The property's
  * flags have the OF_DYNAMIC bit set so that we can differentiate between
  * dynamically allocated properties and not.
  * Returns the newly allocated property or NULL on out of memory error.
