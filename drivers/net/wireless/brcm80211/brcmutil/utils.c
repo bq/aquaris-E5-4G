@@ -292,4 +292,20 @@ void brcmu_dbg_hex_dump(const void *data, size_t size, const char *fmt, ...)
 	print_hex_dump_bytes("", DUMP_PREFIX_OFFSET, data, size);
 }
 EXPORT_SYMBOL(brcmu_dbg_hex_dump);
+
+/* Produce a human-readable string for boardrev */
+char *brcmu_boardrev_str(u32 brev, char *buf)
+{
+	char c;
+
+	if (brev < 0x100) {
+		snprintf(buf, 8, "%d.%d", (brev & 0xf0) >> 4, brev & 0xf);
+	} else {
+		c = (brev & 0xf000) == 0x1000 ? 'P' : 'A';
+		snprintf(buf, 8, "%c%03x", c, brev & 0xfff);
+	}
+	return buf;
+}
+EXPORT_SYMBOL(brcmu_boardrev_str);
+
 #endif				/* defined(DEBUG) */
