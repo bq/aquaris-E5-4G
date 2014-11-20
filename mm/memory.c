@@ -229,16 +229,20 @@ void tlb_gather_mmu(struct mmu_gather *tlb, struct mm_struct *mm, unsigned long 
 #ifdef CONFIG_HAVE_RCU_TABLE_FREE
 	tlb->batch = NULL;
 #endif
+	__tlb_reset_range(tlb);
 }
 
 static void tlb_flush_mmu_tlbonly(struct mmu_gather *tlb)
 {
-	tlb->need_flush = 0;
+	if (!tlb->end)
+		return;
+
 	tlb_flush(tlb);
 	mmu_notifier_invalidate_range(tlb->mm, tlb->start, tlb->end);
 #ifdef CONFIG_HAVE_RCU_TABLE_FREE
 	tlb_table_flush(tlb);
 #endif
+	__tlb_reset_range(tlb);
 }
 
 static void tlb_flush_mmu_free(struct mmu_gather *tlb)
