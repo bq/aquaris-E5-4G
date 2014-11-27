@@ -82,6 +82,7 @@ struct ocfs2_inode_info
 	tid_t i_datasync_tid;
 
 	wait_queue_head_t append_dio_wq;
+	struct dquot *i_dquot[MAXQUOTAS];
 };
 
 /*
