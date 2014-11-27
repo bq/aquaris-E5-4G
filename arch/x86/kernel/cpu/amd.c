@@ -566,6 +566,17 @@ static void init_amd_k8(struct cpuinfo_x86 *c)
 
 	if (!c->x86_model_id[0])
 		strcpy(c->x86_model_id, "Hammer");
+
+#ifdef CONFIG_SMP
+	/*
+	 * Disable TLB flush filter by setting HWCR.FFDIS on K8
+	 * bit 6 of msr C001_0015
+	 *
+	 * Errata 63 for SH-B3 steppings
+	 * Errata 122 for all steppings (F+ have it disabled by default)
+	 */
+	msr_set_bit(MSR_K7_HWCR, 6);
+#endif
 }
 
 static void init_amd_gh(struct cpuinfo_x86 *c)
@@ -635,18 +646,6 @@ static void init_amd_bd(struct cpuinfo_x86 *c)
 static void init_amd(struct cpuinfo_x86 *c)
 {
 	u32 dummy;
-
-#ifdef CONFIG_SMP
-	/*
-	 * Disable TLB flush filter by setting HWCR.FFDIS on K8
-	 * bit 6 of msr C001_0015
-	 *
-	 * Errata 63 for SH-B3 steppings
-	 * Errata 122 for all steppings (F+ have it disabled by default)
-	 */
-	if (c->x86 == 0xf)
-		msr_set_bit(MSR_K7_HWCR, 6);
-#endif
 
 	early_init_amd(c);
 
@@ -731,59 +730,10 @@ static unsigned int amd_size_cache(struct cpuinfo_x86 *c, unsigned int size)
 }
 #endif
 
-static void cpu_detect_tlb_amd(struct cpuinfo_x86 *c)
-{
-	u32 ebx, eax, ecx, edx;
-	u16 mask = 0xfff;
-
-	if (c->x86 < 0xf)
-		return;
-
-	if (c->extended_cpuid_level < 0x80000006)
-		return;
-
-	cpuid(0x80000006, &eax, &ebx, &ecx, &edx);
-
-	tlb_lld_4k[ENTRIES] = (ebx >> 16) & mask;
-	tlb_lli_4k[ENTRIES] = ebx & mask;
-
-	/*
-	 * K8 doesn't have 2M/4M entries in the L2 TLB so read out the L1 TLB
-	 * characteristics from the CPUID function 0x80000005 instead.
-	 */
-	if (c->x86 == 0xf) {
-		cpuid(0x80000005, &eax, &ebx, &ecx, &edx);
-		mask = 0xff;
-	}
-
-	/* Handle DTLB 2M and 4M sizes, fall back to L1 if L2 is disabled */
-	if (!((eax >> 16) & mask))
-		tlb_lld_2m[ENTRIES] = (cpuid_eax(0x80000005) >> 16) & 0xff;
-	else
-		tlb_lld_2m[ENTRIES] = (eax >> 16) & mask;
-
-	/* a 4M entry uses two 2M entries */
-	tlb_lld_4m[ENTRIES] = tlb_lld_2m[ENTRIES] >> 1;
-
-	/* Handle ITLB 2M and 4M sizes, fall back to L1 if L2 is disabled */
-	if (!(eax & mask)) {
-		/* Erratum 658 */
-		if (c->x86 == 0x15 && c->x86_model <= 0x1f) {
-			tlb_lli_2m[ENTRIES] = 1024;
-		} else {
-			cpuid(0x80000005, &eax, &ebx, &ecx, &edx);
-			tlb_lli_2m[ENTRIES] = eax & 0xff;
-		}
-	} else
-		tlb_lli_2m[ENTRIES] = eax & mask;
-
-	tlb_lli_4m[ENTRIES] = tlb_lli_2m[ENTRIES] >> 1;
-}
-
 static const struct cpu_dev amd_cpu_dev = {
 	.c_vendor	= "AMD",
 	.c_ident	= { "AuthenticAMD" },
-#ifdef CONFIG_X86_32
+#ifdef CONFIG_X86_MODEL_TABLE
 	.legacy_models = {
 		{ .family = 4, .model_names =
 		  {
@@ -796,10 +746,11 @@ static const struct cpu_dev amd_cpu_dev = {
 		  }
 		},
 	},
+#endif
+#ifdef CONFIG_X86_32
 	.legacy_cache_size = amd_size_cache,
 #endif
 	.c_early_init   = early_init_amd,
-	.c_detect_tlb	= cpu_detect_tlb_amd,
 	.c_bsp_init	= bsp_init_amd,
 	.c_init		= init_amd,
 	.c_x86_vendor	= X86_VENDOR_AMD,

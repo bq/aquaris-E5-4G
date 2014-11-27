@@ -42,6 +42,7 @@
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/usb.h>
+#include <linux/ktime.h>
 
 #include <media/lirc.h>
 #include <media/lirc_dev.h>
@@ -111,7 +112,7 @@ struct sasem_context {
 	} tx;
 
 	/* for dealing with repeat codes (wish there was a toggle bit!) */
-	struct timeval presstime;
+	ktime_t presstime;
 	char lastcode[8];
 	int codesaved;
 };
@@ -488,7 +489,7 @@ static int ir_open(void *data)
 	/* prevent races with disconnect */
 	mutex_lock(&disconnect_lock);
 
-	context = (struct sasem_context *) data;
+	context = data;
 
 	mutex_lock(&context->ctx_lock);
 
@@ -530,7 +531,7 @@ static void ir_close(void *data)
 {
 	struct sasem_context *context;
 
-	context = (struct sasem_context *)data;
+	context = data;
 	if (!context) {
 		pr_err("%s: no context for device\n", __func__);
 		return;
@@ -571,9 +572,8 @@ static void incoming_packet(struct sasem_context *context,
 {
 	int len = urb->actual_length;
 	unsigned char *buf = urb->transfer_buffer;
-	long ms;
-	struct timeval tv;
-	int i;
+	u64 ns;
+	ktime_t kt;
 
 	if (len != 8) {
 		dev_warn(&context->dev->dev,
@@ -582,12 +582,8 @@ static void incoming_packet(struct sasem_context *context,
 		return;
 	}
 
-	if (debug) {
-		printk(KERN_INFO "Incoming data: ");
-		for (i = 0; i < 8; ++i)
-			printk(KERN_CONT "%02x ", buf[i]);
-		printk(KERN_CONT "\n");
-	}
+	if (debug)
+		dev_info(&context->dev->dev, "Incoming data: %*ph\n", len, buf);
 
 	/*
 	 * Lirc could deal with the repeat code, but we really need to block it
@@ -595,9 +591,8 @@ static void incoming_packet(struct sasem_context *context,
 	 */
 
 	/* get the time since the last button press */
-	do_gettimeofday(&tv);
-	ms = (tv.tv_sec - context->presstime.tv_sec) * 1000 +
-	     (tv.tv_usec - context->presstime.tv_usec) / 1000;
+	kt = ktime_get();
+	ns = ktime_to_ns(ktime_sub(kt, context->presstime));
 
 	if (memcmp(buf, "\x08\0\0\0\0\0\0\0", 8) == 0) {
 		/*
@@ -611,10 +606,9 @@ static void incoming_packet(struct sasem_context *context,
 		 *   in that time and then get a false repeat of the previous
 		 *   press but it is long enough for a genuine repeat
 		 */
-		if ((ms < 250) && (context->codesaved != 0)) {
+		if ((ns < 250 * NSEC_PER_MSEC) && (context->codesaved != 0)) {
 			memcpy(buf, &context->lastcode, 8);
-			context->presstime.tv_sec = tv.tv_sec;
-			context->presstime.tv_usec = tv.tv_usec;
+			context->presstime = kt;
 		}
 	} else {
 		/* save the current valid code for repeats */
@@ -624,8 +618,7 @@ static void incoming_packet(struct sasem_context *context,
 		 * just for safety reasons
 		 */
 		context->codesaved = 1;
-		context->presstime.tv_sec = tv.tv_sec;
-		context->presstime.tv_usec = tv.tv_usec;
+		context->presstime = kt;
 	}
 
 	lirc_buffer_write(context->driver->rbuf, buf);

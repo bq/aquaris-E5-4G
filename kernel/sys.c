@@ -91,6 +91,12 @@
 #ifndef SET_TSC_CTL
 # define SET_TSC_CTL(a)		(-EINVAL)
 #endif
+#ifndef MPX_ENABLE_MANAGEMENT
+# define MPX_ENABLE_MANAGEMENT(a)	(-EINVAL)
+#endif
+#ifndef MPX_DISABLE_MANAGEMENT
+# define MPX_DISABLE_MANAGEMENT(a)	(-EINVAL)
+#endif
 
 /*
  * this is where the system-wide overflow UID and GID are defined, for
@@ -1139,7 +1145,7 @@ SYSCALL_DEFINE1(newuname, struct new_utsname __user *, name)
 	return errno;
 }
 
-#ifdef __ARCH_WANT_SYS_OLD_UNAME
+#if defined(__ARCH_WANT_SYS_OLD_UNAME) && defined(CONFIG_OBSOLETE_SYSCALLS)
 /*
  * Old cruft
  */
@@ -1195,7 +1201,7 @@ SYSCALL_DEFINE1(olduname, struct oldold_utsname __user *, name)
 		error = -EFAULT;
 	return error ? -EFAULT : 0;
 }
-#endif
+#endif /* __ARCH_WANT_SYS_OLD_UNAME && CONFIG_OBSOLETE_SYSCALLS */
 
 SYSCALL_DEFINE2(sethostname, char __user *, name, int, len)
 {
@@ -2202,6 +2208,12 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 		else
 			me->mm->def_flags &= ~VM_NOHUGEPAGE;
 		up_write(&me->mm->mmap_sem);
+		break;
+	case PR_MPX_ENABLE_MANAGEMENT:
+		error = MPX_ENABLE_MANAGEMENT(me);
+		break;
+	case PR_MPX_DISABLE_MANAGEMENT:
+		error = MPX_DISABLE_MANAGEMENT(me);
 		break;
 	default:
 		error = -EINVAL;

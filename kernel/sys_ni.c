@@ -159,6 +159,17 @@ cond_syscall(sys_uselib);
 cond_syscall(sys_fadvise64);
 cond_syscall(sys_fadvise64_64);
 cond_syscall(sys_madvise);
+cond_syscall(sys_adjtimex);
+cond_syscall(compat_sys_adjtimex);
+cond_syscall(sys_clock_adjtime);
+cond_syscall(compat_sys_clock_adjtime);
+cond_syscall(sys_ustat);
+cond_syscall(compat_sys_ustat);
+cond_syscall(sys_lstat);
+cond_syscall(sys_fstat);
+cond_syscall(sys_stat);
+cond_syscall(sys_uname);
+cond_syscall(sys_olduname);
 
 /* arch-specific weak syscall entries */
 cond_syscall(sys_pciconfig_read);
@@ -169,6 +180,8 @@ cond_syscall(ppc_rtas);
 cond_syscall(sys_spu_run);
 cond_syscall(sys_spu_create);
 cond_syscall(sys_subpage_prot);
+cond_syscall(sys_s390_pci_mmio_read);
+cond_syscall(sys_s390_pci_mmio_write);
 
 /* mmu depending weak syscall entries */
 cond_syscall(sys_mprotect);
