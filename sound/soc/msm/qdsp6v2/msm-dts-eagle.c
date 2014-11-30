@@ -823,11 +823,15 @@ int msm_dts_eagle_handle_asm(struct dts_eagle_param_desc *depd, char *buf,
 		}
 		if (isALSA) {
 			if (depd->size == 2)
-				*(long *)buf++ = (long)*(__u16 *)buf_;
+				*(long *)buf = (long)*(__u16 *)buf_;
 			else {
-				u32 *pbuf = (u32 *)buf_;
-				for (i = 0; i < (depd->size >> 2); i++)
-					*(long *)buf++ = (long)*pbuf++;
+				s32 *pbuf = (s32 *)buf_;
+				long *bufl = (long *)buf;
+				for (i = 0; i < (depd->size >> 2); i++) {
+					*bufl++ = (long)*pbuf++;
+					eagle_asm_dbg("%s: out to alsa, value %li",
+							__func__, *(bufl-1));
+				}
 			}
 		} else {
 			memcpy(buf, buf_, depd->size);
@@ -852,9 +856,13 @@ DTS_EAGLE_IOCTL_GET_PARAM_PRE_EXIT:
 			if (depd->size == 2) {
 				*(__u16 *)&_depc[offset] = (__u16)*(long *)buf;
 			} else {
-				u32 *pbuf = (u32 *)&_depc[offset];
-				for (i = 0; i < (depd->size >> 2); i++)
-					*pbuf++ = (u32)*(long *)buf++;
+				s32 *pbuf = (s32 *)&_depc[offset];
+				long *bufl = (long *)buf;
+				for (i = 0; i < (depd->size >> 2); i++) {
+					*pbuf++ = (s32)*bufl++;
+					eagle_asm_dbg("%s: in from alsa, value = %i",
+							__func__, *(pbuf-1));
+				}
 			}
 		} else {
 			memcpy(&_depc[offset], buf, depd->size);
