@@ -176,7 +176,7 @@ config ACPI_PROCESSOR
 config ACPI_IPMI
 	tristate "IPMI"
 	depends on IPMI_SI
-	default n
+	default y
 	help
 	  This driver enables the ACPI to access the BMC controller. And it
 	  uses the IPMI request/response message to communicate with BMC
@@ -315,6 +315,12 @@ config ACPI_HOTPLUG_MEMORY
 	  To compile this driver as a module, choose M here:
 	  the module will be called acpi_memhotplug.
 
+config ACPI_HOTPLUG_IOAPIC
+	bool
+	depends on PCI
+	depends on X86_IO_APIC
+	default y
+
 config ACPI_SBS
 	tristate "Smart Battery System"
 	depends on X86
@@ -360,15 +366,14 @@ config ACPI_BGRT
 config ACPI_REDUCED_HARDWARE_ONLY
 	bool "Hardware-reduced ACPI support only" if EXPERT
 	def_bool n
-	depends on ACPI
 	help
-	This config item changes the way the ACPI code is built.  When this
-	option is selected, the kernel will use a specialized version of
-	ACPICA that ONLY supports the ACPI "reduced hardware" mode.  The
-	resulting kernel will be smaller but it will also be restricted to
-	running in ACPI reduced hardware mode ONLY.
+	  This config item changes the way the ACPI code is built.  When this
+	  option is selected, the kernel will use a specialized version of
+	  ACPICA that ONLY supports the ACPI "reduced hardware" mode.  The
+	  resulting kernel will be smaller but it will also be restricted to
+	  running in ACPI reduced hardware mode ONLY.
 
-	If you are unsure what to do, do not enable this option.
+	  If you are unsure what to do, do not enable this option.
 
 source "drivers/acpi/apei/Kconfig"
 

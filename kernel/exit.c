@@ -212,27 +212,6 @@ repeat:
 }
 
 /*
- * This checks not only the pgrp, but falls back on the pid if no
- * satisfactory pgrp is found. I dunno - gdb doesn't work correctly
- * without this...
- *
- * The caller must hold rcu lock or the tasklist lock.
- */
-struct pid *session_of_pgrp(struct pid *pgrp)
-{
-	struct task_struct *p;
-	struct pid *sid = NULL;
-
-	p = pid_task(pgrp, PIDTYPE_PGID);
-	if (p == NULL)
-		p = pid_task(pgrp, PIDTYPE_PID);
-	if (p != NULL)
-		sid = task_session(p);
-
-	return sid;
-}
-
-/*
  * Determine if a process group is "orphaned", according to the POSIX
  * definition in 2.2.2.52.  Orphaned process groups are not to be affected
  * by terminal-generated stop signals.  Newly orphaned process groups are
@@ -1002,6 +981,8 @@ static int wait_task_zombie(struct wait_opts *wo, struct task_struct *p)
 
 		get_task_struct(p);
 		read_unlock(&tasklist_lock);
+		sched_annotate_sleep();
+
 		if ((exit_code & 0x7f) == 0) {
 			why = CLD_EXITED;
 			status = exit_code >> 8;
@@ -1022,6 +1003,7 @@ static int wait_task_zombie(struct wait_opts *wo, struct task_struct *p)
 	 * We own this thread, nobody else can reap it.
 	 */
 	read_unlock(&tasklist_lock);
+	sched_annotate_sleep();
 
 	/*
 	 * Check thread_group_leader() to exclude the traced sub-threads.
@@ -1211,6 +1193,7 @@ unlock_sig:
 	pid = task_pid_vnr(p);
 	why = ptrace ? CLD_TRAPPED : CLD_STOPPED;
 	read_unlock(&tasklist_lock);
+	sched_annotate_sleep();
 
 	if (unlikely(wo->wo_flags & WNOWAIT))
 		return wait_noreap_copyout(wo, p, pid, uid, why, exit_code);
@@ -1273,6 +1256,7 @@ static int wait_task_continued(struct wait_opts *wo, struct task_struct *p)
 	pid = task_pid_vnr(p);
 	get_task_struct(p);
 	read_unlock(&tasklist_lock);
+	sched_annotate_sleep();
 
 	if (!wo->wo_info) {
 		retval = wo->wo_rusage

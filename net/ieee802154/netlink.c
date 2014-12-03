@@ -1,5 +1,5 @@
 /*
- * Netlink inteface for IEEE 802.15.4 stack
+ * Netlink interface for IEEE 802.15.4 stack
  *
  * Copyright 2007, 2008 Siemens AG
  *
@@ -11,10 +11,6 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  *
  * Written by:
  * Sergey Lapin <slapin@ossfans.org>
@@ -159,7 +155,7 @@ int __init ieee802154_nl_init(void)
 						    ieee802154_mcgrps);
 }
 
-void __exit ieee802154_nl_exit(void)
+void ieee802154_nl_exit(void)
 {
 	genl_unregister_family(&nl802154_family);
 }
