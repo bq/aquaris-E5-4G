@@ -6,7 +6,7 @@
 
 	aliases {
 		ethernet0 = &eth;
-		serial0 = &uart;
+		serial0 = &uart1;
 	};
 
 	cpus {
@@ -64,7 +64,20 @@
 			arm,tag-latency = <2 2 2>;
 		};
 
-		uart: uart@e0001000 {
+		uart0: uart@e0000000 {
+			compatible = "xlnx,xuartps";
+			status = "disabled";
+			reg = <0xe0000000 0x1000>;
+			interrupts = <0 27 4>;
+			interrupt-parent = <&gic>;
+			clock-names = "ref_clk", "aper_clk";
+			clocks = <&clkc 23>, <&clkc 40>;
+			port-number = <0>;
+			current-speed = <115200>;
+			device_type = "serial";
+		};
+
+		uart1: uart@e0001000 {
 			compatible = "xlnx,xuartps";
 			reg = <0xe0001000 0x1000>;
 			interrupts = < 0 50 4>;
@@ -300,7 +313,7 @@
 			xlnx,has-ecc = <0x0>;
 		} ;
 
-		ps7_ocm_0: ps7-ocm@0xfffc0000 {
+		ps7_ocm_0: ps7-ocm@f800c000 {
 			compatible = "xlnx,ps7-ocmc-1.00.a", "xlnx,zynq-ocmc-1.0";
 			interrupt-parent = <&gic>;
 			interrupts = <0 3 4>;

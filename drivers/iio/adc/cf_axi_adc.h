@@ -298,6 +298,12 @@ enum adc_data_sel {
 #define CHIPID_AD9652			0xC1
 #define AD9652_REG_VREF_MASK		0xC0
 
+/*
+ * Analog Devices AD9234
+ */
+
+#define CHIPID_AD9234			0xCE
+
 /* debugfs direct register access */
 #define DEBUGFS_DRA_PCORE_REG_MAGIC	0x80000000
 
@@ -313,6 +319,7 @@ enum {
 	ID_AD9625,
 	ID_AD9434,
 	ID_AD9652,
+	ID_AD9234,
 };
 
 struct axiadc_chip_info {
@@ -347,13 +354,11 @@ struct axiadc_state {
 	struct iio_chan_spec	channels[16];
 };
 
-struct ad9361_rf_phy;
-
 struct axiadc_converter {
 	struct spi_device 	*spi;
 	struct clk 		*clk;
-	struct ad9361_rf_phy *phy;
-	struct gpio_desc			*pwrdown_gpio;
+	void 			*phy;
+	struct gpio_desc		*pwrdown_gpio;
 	unsigned			id;
 	unsigned			adc_output_mode;
 	unsigned 		testmode[2];

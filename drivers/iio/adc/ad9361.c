@@ -142,6 +142,11 @@ struct ad9361_rf_phy {
 	bool			bypass_rx_fir;
 	bool			bypass_tx_fir;
 	bool			rx_eq_2tx;
+	bool			filt_valid;
+	unsigned long		filt_rx_path_clks[NUM_RX_CLOCKS];
+	unsigned long		filt_tx_path_clks[NUM_TX_CLOCKS];
+	u32			filt_rx_bw_Hz;
+	u32			filt_tx_bw_Hz;
 	u8			tx_fir_int;
 	u8			tx_fir_ntaps;
 	u8			rx_fir_dec;
@@ -193,17 +198,17 @@ static inline void ad9361_print_timestamp(void)
 {
 	int i;
 
-	pr_dbg("\n--- TRACE START / Points (%d) --- \n", timestamp_cnt);
+	pr_debug("\n--- TRACE START / Points (%d) --- \n", timestamp_cnt);
 
 	for (i = 0; i < timestamp_cnt; i++) {
 		if (i == 0)
-			pr_dbg("[%lld] [%lld] \t%s\t 0x%X\n",
+			pr_debug("[%lld] [%lld] \t%s\t 0x%X\n",
 			timestamps[i].time,
 				0LL,
 				timestamps[i].read ? "REG_RD" : "REG_WR",
 				timestamps[i].reg);
 		else
-			pr_dbg("[%lld] [%12lld] \t%s\t 0x%X\n",
+			pr_debug("[%lld] [%12lld] \t%s\t 0x%X\n",
 			timestamps[i].time,
 				timestamps[i].time - timestamps[i - 1].time,
 				timestamps[i].read ? "REG_RD" : "REG_WR",
@@ -211,7 +216,7 @@ static inline void ad9361_print_timestamp(void)
 
 		}
 
-	pr_dbg("\n--- TRACE END / Time %lld ns --- \n",
+	pr_debug("\n--- TRACE END / Time %lld ns --- \n",
 	       timestamps[timestamp_cnt - 1].time - timestamps[0].time);
 
 	timestamp_cnt = 0;
@@ -391,23 +396,33 @@ static int ad9361_hdl_loopback(struct ad9361_rf_phy *phy, bool enable)
 {
 	struct axiadc_converter *conv = spi_get_drvdata(phy->spi);
 	struct axiadc_state *st = iio_priv(conv->indio_dev);
-	unsigned reg, chan;
+	unsigned reg, addr, chan;
 
 	unsigned version = axiadc_read(st, 0x4000);
 
 	/* Still there but implemented a bit different */
 	if (PCORE_VERSION_MAJOR(version) > 7)
-		return -ENODEV;
+		addr = 0x4418;
+	else
+		addr = 0x4414;
 
 	for (chan = 0; chan < conv->chip_info->num_channels; chan++) {
-		reg = axiadc_read(st, 0x4414 + (chan) * 0x40);
-		/* DAC_LB_ENB If set enables loopback of receive data */
-		if (enable)
-			reg |= BIT(1);
-		else
-			reg &= ~BIT(1);
+		reg = axiadc_read(st, addr + (chan) * 0x40);
 
-		axiadc_write(st, 0x4414 + (chan) * 0x40, reg);
+		if (PCORE_VERSION_MAJOR(version) > 7) {
+		/* FIXME: May cause problems if DMA is selected */
+			if (enable)
+				reg = 0x8;
+			else
+				reg = 0x0;
+		} else {
+		/* DAC_LB_ENB If set enables loopback of receive data */
+			if (enable)
+				reg |= BIT(1);
+			else
+				reg &= ~BIT(1);
+		}
+		axiadc_write(st, addr + (chan) * 0x40, reg);
 	}
 
 	return 0;
@@ -3059,6 +3074,24 @@ out:
 
 }
 
+static int ad9361_validate_trx_clock_chain(struct ad9361_rf_phy *phy,
+				      unsigned long *rx_path_clks)
+{
+	int i, data_clk;
+
+	data_clk = (phy->pdata->rx2tx2 ? 4 : 2) * rx_path_clks[RX_SAMPL_FREQ];
+
+	for (i = ADC_FREQ; i < RX_SAMPL_CLK; i++) {
+		if (abs(rx_path_clks[i] - data_clk) < 4)
+			return 0;
+	}
+
+	dev_err(&phy->spi->dev, "%s: Failed - at least one of the clock rates"
+		"must be equal to the DATA_CLK (lvds) rate", __func__);
+
+	return -EINVAL;
+}
+
 static int ad9361_set_trx_clock_chain(struct ad9361_rf_phy *phy,
 				      unsigned long *rx_path_clks,
 				      unsigned long *tx_path_clks)
@@ -3070,6 +3103,20 @@ static int ad9361_set_trx_clock_chain(struct ad9361_rf_phy *phy,
 
 	if (!rx_path_clks || !tx_path_clks)
 		return -EINVAL;
+
+	dev_dbg(&phy->spi->dev, "%s: %lu %lu %lu %lu %lu %lu",
+		__func__, rx_path_clks[BBPLL_FREQ], rx_path_clks[ADC_FREQ],
+		rx_path_clks[R2_FREQ], rx_path_clks[R1_FREQ],
+		rx_path_clks[CLKRF_FREQ], rx_path_clks[RX_SAMPL_FREQ]);
+
+	dev_dbg(&phy->spi->dev, "%s: %lu %lu %lu %lu %lu %lu",
+		__func__, tx_path_clks[BBPLL_FREQ], tx_path_clks[ADC_FREQ],
+		tx_path_clks[R2_FREQ], tx_path_clks[R1_FREQ],
+		tx_path_clks[CLKRF_FREQ], tx_path_clks[RX_SAMPL_FREQ]);
+
+	ret = ad9361_validate_trx_clock_chain(phy, rx_path_clks);
+	if (ret < 0)
+		return ret;
 
 	ret = clk_set_rate(phy->clks[BBPLL_CLK], rx_path_clks[BBPLL_FREQ]);
 	if (ret < 0)
@@ -3226,16 +3273,6 @@ static int ad9361_calculate_rf_clock_chain(struct ad9361_rf_phy *phy,
 	tx_path_clks[T1_FREQ] =tx_path_clks[T2_FREQ] / clk_dividers[index_tx][2];
 	tx_path_clks[CLKTF_FREQ] = tx_path_clks[T1_FREQ] / clk_dividers[index_tx][3];
 	tx_path_clks[TX_SAMPL_FREQ] = tx_path_clks[CLKTF_FREQ] / 	tx_intdec;
-
-	dev_dbg(&phy->spi->dev, "%s: %lu %lu %lu %lu %lu %lu",
-		__func__, rx_path_clks[BBPLL_FREQ], rx_path_clks[ADC_FREQ],
-		rx_path_clks[R2_FREQ], rx_path_clks[R1_FREQ],
-		rx_path_clks[CLKRF_FREQ], rx_path_clks[RX_SAMPL_FREQ]);
-
-	dev_dbg(&phy->spi->dev, "%s: %lu %lu %lu %lu %lu %lu",
-		__func__, tx_path_clks[BBPLL_FREQ], tx_path_clks[ADC_FREQ],
-		tx_path_clks[R2_FREQ], tx_path_clks[R1_FREQ],
-		tx_path_clks[CLKRF_FREQ], tx_path_clks[RX_SAMPL_FREQ]);
 
 	return 0;
 }
@@ -3983,9 +4020,14 @@ static int ad9361_parse_fir(struct ad9361_rf_phy *phy,
 	int i = 0, ret, txc, rxc;
 	int tx = -1, tx_gain, tx_int;
 	int rx = -1, rx_gain, rx_dec;
+	int rtx = -1, rrx = -1;
 	short coef_tx[128];
 	short coef_rx[128];
 	char *ptr = data;
+
+	phy->filt_rx_bw_Hz = 0;
+	phy->filt_tx_bw_Hz = 0;
+	phy->filt_valid = false;
 
 	while ((line = strsep(&ptr, "\n"))) {
 		if (line >= data + size) {
@@ -4011,6 +4053,55 @@ static int ad9361_parse_fir(struct ad9361_rf_phy *phy,
 			else
 				tx = -1;
 		}
+
+		if (rtx < 0) {
+			ret = sscanf(line, "RTX %lu %lu %lu %lu %lu %lu",
+				     &phy->filt_tx_path_clks[0],
+				     &phy->filt_tx_path_clks[1],
+				     &phy->filt_tx_path_clks[2],
+				     &phy->filt_tx_path_clks[3],
+				     &phy->filt_tx_path_clks[4],
+				     &phy->filt_tx_path_clks[5]);
+			if (ret == 6) {
+				rtx = 0;
+				continue;
+			} else {
+				rtx = -1;
+			}
+		}
+
+		if (rrx < 0) {
+			ret = sscanf(line, "RRX %lu %lu %lu %lu %lu %lu",
+				     &phy->filt_rx_path_clks[0],
+				     &phy->filt_rx_path_clks[1],
+				     &phy->filt_rx_path_clks[2],
+				     &phy->filt_rx_path_clks[3],
+				     &phy->filt_rx_path_clks[4],
+				     &phy->filt_rx_path_clks[5]);
+			if (ret == 6) {
+				rrx = 0;
+				continue;
+			} else {
+				rrx = -1;
+			}
+		}
+
+		if (!phy->filt_rx_bw_Hz) {
+			ret = sscanf(line, "BWRX %d", &phy->filt_rx_bw_Hz);
+			if (ret == 1)
+				continue;
+			else
+				phy->filt_rx_bw_Hz = 0;
+		}
+
+		if (!phy->filt_tx_bw_Hz) {
+			ret = sscanf(line, "BWTX %d", &phy->filt_tx_bw_Hz);
+			if (ret == 1)
+				continue;
+			else
+				phy->filt_tx_bw_Hz = 0;
+		}
+
 		ret = sscanf(line, "%d,%d", &txc, &rxc);
 		if (ret == 1) {
 			coef_tx[i] = coef_rx[i] = (short)txc;
@@ -4050,6 +4141,8 @@ static int ad9361_parse_fir(struct ad9361_rf_phy *phy,
 	if (ret < 0)
 		return ret;
 
+	if (!(rrx | rtx))
+		phy->filt_valid = true;
 
 	return size;
 }
@@ -4059,7 +4152,7 @@ static int ad9361_validate_enable_fir(struct ad9361_rf_phy *phy)
 	struct device *dev = &phy->spi->dev;
 	int ret;
 	unsigned long rx[6], tx[6];
-	u32 max;
+	u32 max, valid;
 
 	dev_dbg(dev, "%s: TX FIR EN=%d/TAPS%d/INT%d, RX FIR EN=%d/TAPS%d/DEC%d",
 		__func__, !phy->bypass_tx_fir, phy->tx_fir_ntaps, phy->tx_fir_int,
@@ -4094,16 +4187,30 @@ static int ad9361_validate_enable_fir(struct ad9361_rf_phy *phy)
 		}
 	}
 
-	ret = ad9361_calculate_rf_clock_chain(phy,
-			clk_get_rate(phy->clks[TX_SAMPL_CLK]),
-			phy->rate_governor, rx, tx);
+	if (!phy->filt_valid || phy->bypass_rx_fir || phy->bypass_tx_fir) {
+		ret = ad9361_calculate_rf_clock_chain(phy,
+				clk_get_rate(phy->clks[TX_SAMPL_CLK]),
+				phy->rate_governor, rx, tx);
+		if (ret < 0) {
+			u32 min = DIV_ROUND_UP(MIN_ADC_CLK,
+					phy->rate_governor ? 8 : 12);
+			dev_err(dev,
+				"%s: Calculating filter rates failed %d "
+				"using min frequency",__func__, ret);
+			if (clk_get_rate(phy->clks[TX_SAMPL_CLK]) <= min)
+				ret = ad9361_calculate_rf_clock_chain(phy, min,
+					phy->rate_governor, rx, tx);
+			if (ret < 0) {
+				return ret;
+			}
 
-	if (ret < 0) {
-		dev_err(dev,
-			"%s: Calculating filter rates failed %d",
-			__func__, ret);
+		}
+		valid = false;
+	} else {
+		memcpy(rx, phy->filt_rx_path_clks, sizeof(rx));
+		memcpy(tx, phy->filt_tx_path_clks, sizeof(tx));
+		valid = true;
 
-		return ret;
 	}
 
 	if (!phy->bypass_tx_fir) {
@@ -4133,7 +4240,7 @@ static int ad9361_validate_enable_fir(struct ad9361_rf_phy *phy)
 		return ret;
 
 	/*
-	 * Workaround for clock framework since clocks don't change the we
+	 * Workaround for clock framework since clocks don't change we
 	 * manually need to enable the filter
 	 */
 
@@ -4147,8 +4254,9 @@ static int ad9361_validate_enable_fir(struct ad9361_rf_phy *phy)
 			TX_FIR_ENABLE_INTERPOLATION(~0), !phy->bypass_tx_fir);
 	}
 
-	return ad9361_update_rf_bandwidth(phy, phy->current_rx_bw_Hz,
-			phy->current_tx_bw_Hz);
+	return ad9361_update_rf_bandwidth(phy,
+		valid ? phy->filt_rx_bw_Hz : phy->current_rx_bw_Hz,
+		valid ? phy->filt_tx_bw_Hz : phy->current_tx_bw_Hz);
 }
 
 static void ad9361_work_func(struct work_struct *work)
@@ -5276,7 +5384,8 @@ static int ad9361_post_setup(struct iio_dev *indio_dev)
 {
 	struct axiadc_state *st = iio_priv(indio_dev);
 	struct axiadc_converter *conv = iio_device_get_drvdata(indio_dev);
-	unsigned rx2tx2 = conv->phy->pdata->rx2tx2;
+	struct ad9361_rf_phy *phy = conv->phy;
+	unsigned rx2tx2 = phy->pdata->rx2tx2;
 	unsigned tmp, num_chan;
 	int i, ret;
 
@@ -5305,14 +5414,14 @@ static int ad9361_post_setup(struct iio_dev *indio_dev)
 			     ADI_ENABLE | ADI_IQCOR_ENB);
 	}
 
-	ret = ad9361_dig_tune(conv->phy, (axiadc_read(st, ADI_REG_ID)) ?
+	ret = ad9361_dig_tune(phy, (axiadc_read(st, ADI_REG_ID)) ?
 		0 : 61440000);
 	if (ret < 0)
 		return ret;
 
-	return ad9361_set_trx_clock_chain(conv->phy,
-					 conv->phy->pdata->rx_path_clks,
-					 conv->phy->pdata->tx_path_clks);
+	return ad9361_set_trx_clock_chain(phy,
+					 phy->pdata->rx_path_clks,
+					 phy->pdata->tx_path_clks);
 }
 
 static int ad9361_register_axi_converter(struct ad9361_rf_phy *phy)
@@ -5704,7 +5813,7 @@ static IIO_DEVICE_ATTR(tx_path_rates, S_IRUGO,
 			NULL,
 			AD9361_TX_PATH_FREQ);
 
-static IIO_DEVICE_ATTR(trx_rate_governor, S_IRUGO,
+static IIO_DEVICE_ATTR(trx_rate_governor, S_IRUGO | S_IWUSR,
 			ad9361_phy_show,
 			ad9361_phy_store,
 			AD9361_TRX_RATE_GOV);
