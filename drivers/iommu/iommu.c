@@ -616,6 +616,7 @@ static struct iommu_group *get_pci_alias_group(struct pci_dev *pdev,
 struct group_for_pci_data {
 	struct pci_dev *pdev;
 	struct iommu_group *group;
+	u16 alias;
 };
 
 /*
@@ -628,6 +629,7 @@ static int get_pci_alias_or_group(struct pci_dev *pdev, u16 alias, void *opaque)
 
 	data->pdev = pdev;
 	data->group = iommu_group_get(&pdev->dev);
+	data->alias = alias;
 
 	return data->group != NULL;
 }
@@ -636,7 +638,8 @@ static int get_pci_alias_or_group(struct pci_dev *pdev, u16 alias, void *opaque)
  * Use standard PCI bus topology, isolation features, and DMA alias quirks
  * to find or create an IOMMU group for a device.
  */
-static struct iommu_group *iommu_group_get_for_pci_dev(struct pci_dev *pdev)
+struct iommu_group *iommu_group_get_for_pci_dev(struct pci_dev *pdev,
+						u16 *alias)
 {
 	struct group_for_pci_data data;
 	struct pci_bus *bus;
@@ -653,6 +656,13 @@ static struct iommu_group *iommu_group_get_for_pci_dev(struct pci_dev *pdev)
 		return data.group;
 
 	pdev = data.pdev;
+	if (alias) {
+		u8 busn = PCI_BUS_NUM(pdev->bus->number);
+		if (pdev->dev_flags & PCI_DEV_FLAGS_DMA_ALIAS_DEVFN)
+			*alias = PCI_DEVID(busn, pdev->dma_alias_devfn);
+		else
+			*alias = data.alias;
+	}
 
 	/*
 	 * Continue upstream from the point of minimum IOMMU granularity
@@ -717,7 +727,7 @@ struct iommu_group *iommu_group_get_for_dev(struct device *dev)
 	if (!dev_is_pci(dev))
 		return ERR_PTR(-EINVAL);
 
-	group = iommu_group_get_for_pci_dev(to_pci_dev(dev));
+	group = iommu_group_get_for_pci_dev(to_pci_dev(dev), NULL);
 
 	if (IS_ERR(group))
 		return group;

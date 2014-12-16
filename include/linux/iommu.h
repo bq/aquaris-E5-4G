@@ -199,6 +199,8 @@ extern int iommu_group_register_notifier(struct iommu_group *group,
 extern int iommu_group_unregister_notifier(struct iommu_group *group,
 					   struct notifier_block *nb);
 extern int iommu_group_id(struct iommu_group *group);
+extern struct iommu_group *iommu_group_get_for_pci_dev(struct pci_dev *dev,
+						       u16 *alias);
 extern struct iommu_group *iommu_group_get_for_dev(struct device *dev);
 
 extern int iommu_domain_get_attr(struct iommu_domain *domain, enum iommu_attr,
