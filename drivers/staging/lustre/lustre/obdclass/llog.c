@@ -346,8 +346,8 @@ repeat:
 			}
 			if (rec->lrh_len == 0 ||
 			    rec->lrh_len > LLOG_CHUNK_SIZE) {
-				CWARN("invalid length %d in llog record for "
-				      "index %d/%d\n", rec->lrh_len,
+				CWARN("invalid length %d in llog record for index %d/%d\n",
+				      rec->lrh_len,
 				      rec->lrh_index, index);
 				rc = -EINVAL;
 				goto out;
@@ -410,8 +410,6 @@ static int llog_process_thread_daemonize(void *arg)
 	struct llog_process_info	*lpi = arg;
 	struct lu_env			 env;
 	int				 rc;
-
-	unshare_fs_struct();
 
 	/* client env has no keys, tags is just 0 */
 	rc = lu_env_init(&env, LCT_LOCAL | LCT_MG_THREAD);

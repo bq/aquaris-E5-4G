@@ -161,4 +161,8 @@ obj-$(CONFIG_POWERCAP)		+= powercap/
 obj-$(CONFIG_MCB)		+= mcb/
 obj-$(CONFIG_RAS)		+= ras/
 obj-$(CONFIG_THUNDERBOLT)	+= thunderbolt/
+<<<<<<< HEAD
+=======
+obj-$(CONFIG_ANDROID)		+= android/
+>>>>>>> linux-next/akpm-base
 obj-$(CONFIG_CORESIGHT)		+= coresight/

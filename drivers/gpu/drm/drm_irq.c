@@ -166,7 +166,7 @@ static void vblank_disable_and_save(struct drm_device *dev, int crtc)
 	spin_lock_irqsave(&dev->vblank_time_lock, irqflags);
 
 	/*
-	 * If the vblank interrupt was already disbled update the count
+	 * If the vblank interrupt was already disabled update the count
 	 * and timestamp to maintain the appearance that the counter
 	 * has been ticking all along until this time. This makes the
 	 * count account for the entire time between drm_vblank_on() and
@@ -778,7 +778,7 @@ static struct timeval get_drm_timestamp(void)
 
 /**
  * drm_get_last_vbltimestamp - retrieve raw timestamp for the most recent
- * 			       vblank interval
+ *                             vblank interval
  * @dev: DRM device
  * @crtc: which CRTC's vblank timestamp to retrieve
  * @tvblank: Pointer to target struct timeval which should receive the timestamp
@@ -910,6 +910,7 @@ void drm_send_vblank_event(struct drm_device *dev, int crtc,
 {
 	struct timeval now;
 	unsigned int seq;
+
 	if (crtc >= 0) {
 		seq = drm_vblank_count_and_time(dev, crtc, &now);
 	} else {
@@ -1029,7 +1030,8 @@ void drm_vblank_put(struct drm_device *dev, int crtc)
 {
 	struct drm_vblank_crtc *vblank = &dev->vblank[crtc];
 
-	BUG_ON(atomic_read(&vblank->refcount) == 0);
+	if (WARN_ON(atomic_read(&vblank->refcount) == 0))
+		return;
 
 	if (WARN_ON(crtc >= dev->num_crtcs))
 		return;
@@ -1190,7 +1192,7 @@ EXPORT_SYMBOL(drm_crtc_vblank_off);
  *
  * This functions restores the vblank interrupt state captured with
  * drm_vblank_off() again. Note that calls to drm_vblank_on() and
- * drm_vblank_off() can be unbalanced and so can also be unconditionaly called
+ * drm_vblank_off() can be unbalanced and so can also be unconditionally called
  * in driver load code to reflect the current hardware state of the crtc.
  *
  * This is the legacy version of drm_crtc_vblank_on().
@@ -1237,7 +1239,7 @@ EXPORT_SYMBOL(drm_vblank_on);
  *
  * This functions restores the vblank interrupt state captured with
  * drm_vblank_off() again. Note that calls to drm_vblank_on() and
- * drm_vblank_off() can be unbalanced and so can also be unconditionaly called
+ * drm_vblank_off() can be unbalanced and so can also be unconditionally called
  * in driver load code to reflect the current hardware state of the crtc.
  *
  * This is the native kms version of drm_vblank_on().
@@ -1381,7 +1383,7 @@ static int drm_queue_vblank_event(struct drm_device *dev, int pipe,
 	unsigned int seq;
 	int ret;
 
-	e = kzalloc(sizeof *e, GFP_KERNEL);
+	e = kzalloc(sizeof(*e), GFP_KERNEL);
 	if (e == NULL) {
 		ret = -ENOMEM;
 		goto err_put;
@@ -1390,7 +1392,7 @@ static int drm_queue_vblank_event(struct drm_device *dev, int pipe,
 	e->pipe = pipe;
 	e->base.pid = current->pid;
 	e->event.base.type = DRM_EVENT_VBLANK;
-	e->event.base.length = sizeof e->event;
+	e->event.base.length = sizeof(e->event);
 	e->event.user_data = vblwait->request.signal;
 	e->base.event = &e->event.base;
 	e->base.file_priv = file_priv;
@@ -1410,12 +1412,12 @@ static int drm_queue_vblank_event(struct drm_device *dev, int pipe,
 		goto err_unlock;
 	}
 
-	if (file_priv->event_space < sizeof e->event) {
+	if (file_priv->event_space < sizeof(e->event)) {
 		ret = -EBUSY;
 		goto err_unlock;
 	}
 
-	file_priv->event_space -= sizeof e->event;
+	file_priv->event_space -= sizeof(e->event);
 	seq = drm_vblank_count_and_time(dev, pipe, &now);
 
 	if ((vblwait->request.type & _DRM_VBLANK_NEXTONMISS) &&

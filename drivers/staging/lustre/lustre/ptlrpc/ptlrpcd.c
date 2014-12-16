@@ -356,10 +356,9 @@ static int ptlrpcd_check(struct lu_env *env, struct ptlrpcd_ctl *pc)
 				if (atomic_read(&ps->set_new_count)) {
 					rc = ptlrpcd_steal_rqset(set, ps);
 					if (rc > 0)
-						CDEBUG(D_RPCTRACE, "transfer %d"
-						       " async RPCs [%d->%d]\n",
-							rc, partner->pc_index,
-							pc->pc_index);
+						CDEBUG(D_RPCTRACE, "transfer %d async RPCs [%d->%d]\n",
+						       rc, partner->pc_index,
+						       pc->pc_index);
 				}
 				ptlrpc_reqset_put(ps);
 			} while (rc == 0 && pc->pc_cursor != first);
@@ -382,7 +381,6 @@ static int ptlrpcd(void *arg)
 	struct lu_env env = { .le_ses = NULL };
 	int rc, exit = 0;
 
-	unshare_fs_struct();
 #if defined(CONFIG_SMP)
 	if (test_bit(LIOD_BIND, &pc->pc_flags)) {
 		int index = pc->pc_index;

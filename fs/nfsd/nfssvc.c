@@ -573,16 +573,6 @@ nfsd(void *vrqstp)
 	/* Lock module and set up kernel thread */
 	mutex_lock(&nfsd_mutex);
 
-	/* At this point, the thread shares current->fs
-	 * with the init process. We need to create files with a
-	 * umask of 0 instead of init's umask. */
-	if (unshare_fs_struct() < 0) {
-		printk("Unable to start nfsd thread: out of memory\n");
-		goto out;
-	}
-
-	current->fs->umask = 0;
-
 	/*
 	 * thread is spawned with all signals set to SIG_IGN, re-enable
 	 * the ones that will bring down the thread
@@ -623,7 +613,6 @@ nfsd(void *vrqstp)
 	mutex_lock(&nfsd_mutex);
 	nfsdstats.th_cnt --;
 
-out:
 	rqstp->rq_server = NULL;
 
 	/* Release the thread */
@@ -692,7 +681,7 @@ nfsd_dispatch(struct svc_rqst *rqstp, __be32 *statp)
 	/* Now call the procedure handler, and encode NFS status. */
 	nfserr = proc->pc_func(rqstp, rqstp->rq_argp, rqstp->rq_resp);
 	nfserr = map_new_errors(rqstp->rq_vers, nfserr);
-	if (nfserr == nfserr_dropit || rqstp->rq_dropme) {
+	if (nfserr == nfserr_dropit || test_bit(RQ_DROPME, &rqstp->rq_flags)) {
 		dprintk("nfsd: Dropping request; may be revisited later\n");
 		nfsd_cache_update(rqstp, RC_NOCACHE, NULL);
 		return 0;
