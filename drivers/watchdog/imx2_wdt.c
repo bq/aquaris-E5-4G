@@ -383,10 +383,7 @@ static struct platform_driver imx2_wdt_driver = {
 	.shutdown	= imx2_wdt_shutdown,
 	.driver		= {
 		.name	= DRIVER_NAME,
-<<<<<<< HEAD
-=======
 		.pm     = &imx2_wdt_pm_ops,
->>>>>>> linux-next/akpm-base
 		.of_match_table = imx2_wdt_dt_ids,
 	},
 };

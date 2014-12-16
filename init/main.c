@@ -78,11 +78,8 @@
 #include <linux/context_tracking.h>
 #include <linux/random.h>
 #include <linux/list.h>
-<<<<<<< HEAD
-=======
 #include <linux/proc_ns.h>
 #include <linux/fs_struct.h>
->>>>>>> linux-next/akpm-base
 #include <linux/integrity.h>
 
 #include <asm/io.h>
