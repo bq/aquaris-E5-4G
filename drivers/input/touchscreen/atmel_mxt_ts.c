@@ -1872,6 +1872,7 @@ static int mxt_parse_object_table(struct mxt_data *data)
 				data->T5_msg_size = mxt_obj_size(object) - 1;
 			}
 			data->T5_address = object->start_address;
+			break;
 		case MXT_GEN_COMMAND_T6:
 			data->T6_reportid = min_id;
 			data->T6_address = object->start_address;
