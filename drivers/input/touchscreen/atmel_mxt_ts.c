@@ -944,9 +944,9 @@ static void mxt_proc_t9_message(struct mxt_data *data, u8 *message)
 	amplitude = message[6];
 
 	dev_dbg(dev,
-		"[%u] %c x: %5u y: %5u area: %3u amp: %3u\n",
+		"[%u] %s x: %5u y: %5u area: %3u amp: %3u\n",
 		id,
-		(status & MXT_T9_MOVE) ? 'move' : 'press',
+		(status & MXT_T9_MOVE) ? "move" : "press",
 		x, y, area, amplitude);
 
 	finger[id].status = (status & MXT_T9_MOVE) ?
