@@ -24,10 +24,15 @@
 
 /* return value */
 #define BU21150_UNBLOCK     (5)
+#define BU21150_TIMEOUT     (6)
 
 /* ioctl(IOCTL_CMD_RESET) */
 #define BU21150_RESET_LOW   (0)
 #define BU21150_RESET_HIGH  (1)
+
+/* ioctl(IOCTL_CMD_SET_TIMEOUT) */
+#define BU21150_TIMEOUT_DISABLE (0)
+#define BU21150_TIMEOUT_ENABLE  (1)
 
 /* struct */
 struct bu21150_ioctl_get_frame_data {
@@ -40,6 +45,11 @@ struct bu21150_ioctl_spi_data {
 	unsigned long addr;
 	char __user *buf;
 	unsigned int count;
+};
+
+struct bu21150_ioctl_timeout_data {
+	unsigned int timeout_enb_flag;
+	unsigned int report_interval_us;
 };
 
 /* commands */
