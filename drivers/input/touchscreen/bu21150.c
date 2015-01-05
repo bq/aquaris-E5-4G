@@ -329,13 +329,12 @@ static void get_frame_timer_init(void)
 {
 	struct bu21150_data *ts = spi_get_drvdata(g_client_bu21150);
 
-	if(ts->set_timer_flag == 1) {
-		printk("%s : Delete timer.\n", __func__);
+	if (ts->set_timer_flag == 1) {
 		del_timer_sync(&get_frame_timer);
 		ts->set_timer_flag = 0;
 	}
 
-	if(ts->timeout > 0){
+	if (ts->timeout > 0) {
 		ts->set_timer_flag = 1;
 		ts->timeout_flag = 0;
 
@@ -353,7 +352,6 @@ static void get_frame_timer_handler(unsigned long data)
 {
 	struct bu21150_data *ts = spi_get_drvdata(g_client_bu21150);
 
-	printk("%s : Timeout.\n", __func__);
 	ts->timeout_flag = 1;
 	/* wake up */
 	wake_up_frame_waitq(ts);
@@ -363,7 +361,7 @@ static void get_frame_timer_delete(void)
 {
 	struct bu21150_data *ts = spi_get_drvdata(g_client_bu21150);
 
-	if(ts->set_timer_flag == 1){
+	if (ts->set_timer_flag == 1) {
 		ts->set_timer_flag = 0;
 		del_timer_sync(&get_frame_timer);
 	}
@@ -495,9 +493,8 @@ static long bu21150_ioctl_get_frame(unsigned long arg)
 		return -EINVAL;
 	}
 
-	if(ts->timeout_enb_flag == 1){
+	if (ts->timeout_enb_flag == 1)
 		get_frame_timer_init();
-	}
 
 	do {
 		ts->req_get = data;
@@ -507,9 +504,8 @@ static long bu21150_ioctl_get_frame(unsigned long arg)
 	} while (!is_same_bu21150_ioctl_get_frame_data(&data,
 				&(ts->frame_get)));
 
-	if(ts->timeout_enb_flag == 1){
+	if (ts->timeout_enb_flag == 1)
 		get_frame_timer_delete();
-	}
 
 	/* copy frame */
 	mutex_lock(&ts->mutex_frame);
@@ -541,9 +537,8 @@ static long bu21150_ioctl_reset(unsigned long reset)
 	gpio_set_value(ts->rst_gpio, reset);
 
 	ts->frame_waitq_flag = WAITQ_WAIT;
-	if(reset == BU21150_RESET_LOW){
+	if (reset == BU21150_RESET_LOW)
 		ts->reset_flag = 1;
-	}
 
 	return 0;
 }
@@ -661,11 +656,10 @@ static long bu21150_ioctl_set_timeout(unsigned long arg)
 	}
 
 	ts->timeout_enb_flag = data.timeout_enb_flag;
-	if(data.timeout_enb_flag == 1){
+	if (data.timeout_enb_flag == 1) {
 		ts->timeout = (unsigned int)(data.report_interval_us
-										* TIMEOUT_SCALE * HZ / 1000000);
-	}
-	else{
+			* TIMEOUT_SCALE * HZ / 1000000);
+	} else {
 		get_frame_timer_delete();
 	}
 
@@ -708,14 +702,13 @@ static void bu21150_irq_work_func(struct work_struct *work)
 	ts->frame_work_get = ts->req_get;
 	bu21150_read_register(REG_READ_DATA, ts->frame_work_get.size, psbuf);
 
-	if(ts->reset_flag == 0){
+	if (ts->reset_flag == 0) {
 #ifdef CHECK_SAME_FRAME
 		check_same_frame(ts);
 #endif
 		copy_frame(ts);
 		wake_up_frame_waitq(ts);
-	}
-	else{
+	} else {
 		ts->reset_flag = 0;
 	}
 
