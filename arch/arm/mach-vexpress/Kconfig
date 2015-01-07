@@ -21,6 +21,7 @@ menuconfig ARCH_VEXPRESS
 	select VEXPRESS_CONFIG
 	select VEXPRESS_SYSCFG
 	select MFD_VEXPRESS_SYSREG
+	select ZONE_DMA if ARM_LPAE
 	help
 	  This option enables support for systems using Cortex processor based
 	  ARM core and logic (FPGA) tiles on the Versatile Express motherboard,
