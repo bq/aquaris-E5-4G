@@ -545,6 +545,8 @@ struct ieee80211_hw *ieee80211_alloc_hw_nm(size_t priv_data_len,
 			   NL80211_FEATURE_MAC_ON_CREATE |
 			   NL80211_FEATURE_USERSPACE_MPM;
 
+	wiphy_ext_feature_set(wiphy, NL80211_EXT_FEATURE_RATESTATS);
+
 	if (!ops->hw_scan)
 		wiphy->features |= NL80211_FEATURE_LOW_PRIORITY_SCAN |
 				   NL80211_FEATURE_AP_SCAN;
@@ -858,6 +860,16 @@ int ieee80211_register_hw(struct ieee80211_hw *hw)
 
 		/* TODO: consider VHT for RX chains, hopefully it's the same */
 	}
+
+	/* if the HW has more than 12 legacy rates, some assumptions in the
+	 * data structures break - in this case don't allow the rate-stats
+	 * feature flag.
+	 */
+	if (WARN_ON(wiphy_ext_feature_isset(hw->wiphy,
+					    NL80211_EXT_FEATURE_RATESTATS) &&
+		    max_bitrates > 12))
+		hw->wiphy->ext_features[NL80211_EXT_FEATURE_RATESTATS / 8] &=
+			~BIT(NL80211_EXT_FEATURE_RATESTATS % 8);
 
 	/* if low-level driver supports AP, we also support VLAN */
 	if (local->hw.wiphy->interface_modes & BIT(NL80211_IFTYPE_AP)) {
