@@ -31,6 +31,8 @@
 #include <linux/of_gpio.h>
 #include <asm/byteorder.h>
 #include <linux/timer.h>
+#include <linux/notifier.h>
+#include <linux/fb.h>
 
 /* define */
 #define DEVICE_NAME   "jdi-bu21150"
@@ -40,6 +42,8 @@
 #define FRAME_HEADER_SIZE (16)  /* byte */
 #define GPIO_LOW  (0)
 #define GPIO_HIGH (1)
+#define DUR_RESET_HIGH	(1000)
+#define DUR_RESET_LOW	(10)
 #define WAITQ_WAIT   (0)
 #define WAITQ_WAKEUP (1)
 /* #define CHECK_SAME_FRAME */
@@ -81,6 +85,8 @@ struct bu21150_data {
 	int rst_gpio;
 	int power_supply;
 	u16 scan_mode;
+	/* suspend */
+	struct notifier_block fb_notif;
 };
 
 struct ser_req {
@@ -94,6 +100,10 @@ static int bu21150_probe(struct spi_device *client);
 static int bu21150_remove(struct spi_device *client);
 static int bu21150_open(struct inode *inode, struct file *filp);
 static int bu21150_release(struct inode *inode, struct file *filp);
+static int bu21150_suspend(struct device *dev);
+static int bu21150_resume(struct device *dev);
+static int fb_notifier_callback(struct notifier_block *self,
+				 unsigned long event, void *data);
 static long bu21150_ioctl(struct file *filp, unsigned int cmd,
 	unsigned long arg);
 static long bu21150_ioctl_get_frame(unsigned long arg);
@@ -268,6 +278,10 @@ static int bu21150_probe(struct spi_device *client)
 	if (rc)
 		pr_err("%s: gpio_request(%d) failed\n", __func__, ts->rst_gpio);
 	gpio_direction_output(ts->rst_gpio, GPIO_LOW);
+	gpio_set_value(ts->rst_gpio, BU21150_RESET_LOW);
+	usleep(DUR_RESET_LOW);
+	gpio_set_value(ts->rst_gpio, BU21150_RESET_HIGH);
+	usleep(DUR_RESET_HIGH);
 
 	mutex_init(&ts->mutex_frame);
 	init_waitqueue_head(&(ts->frame_waitq));
@@ -298,6 +312,14 @@ static int bu21150_probe(struct spi_device *client)
 	}
 	disable_irq(client->irq);
 
+	ts->fb_notif.notifier_call = fb_notifier_callback;
+	error = fb_register_client(&ts->fb_notif);
+	if (error) {
+		dev_err(&client->dev, "Unable to register fb_notifier: %d\n",
+			error);
+		goto err4;
+	}
+
 	error = misc_register(&g_bu21150_misc_device);
 	if (error) {
 		dev_err(&client->dev, "Failed to register misc device\n");
@@ -324,6 +346,46 @@ err1:
 	kfree(ts);
 	return error;
 }
+
+static int bu21150_suspend(struct device *dev)
+{
+	return 0;
+}
+
+static int bu21150_resume(struct device *dev)
+{
+	struct spi_device *client = to_spi_device(dev);
+	struct bu21150_data *ts = spi_get_drvdata(client);
+
+	if (ts->scan_mode == BU21150_GESTURE_SELF) {
+		gpio_set_value(ts->rst_gpio, BU21150_RESET_LOW);
+		usleep(DUR_RESET_LOW);
+		gpio_set_value(ts->rst_gpio, BU21150_RESET_HIGH);
+		usleep(DUR_RESET_HIGH);
+	}
+
+	return 0;
+}
+
+static int fb_notifier_callback(struct notifier_block *self,
+				 unsigned long event, void *data)
+{
+	struct fb_event *evdata = data;
+	int *blank;
+	struct bu21150_data *bu21150_dev_data =
+		container_of(self, struct bu21150_data, fb_notif);
+
+	if (evdata && evdata->data && event == FB_EVENT_BLANK &&
+			bu21150_dev_data && bu21150_dev_data->client) {
+		blank = evdata->data;
+		if (*blank == FB_BLANK_UNBLANK)
+			bu21150_resume(&bu21150_dev_data->client->dev);
+		else if (*blank == FB_BLANK_POWERDOWN)
+			bu21150_suspend(&bu21150_dev_data->client->dev);
+	}
+	return 0;
+}
+
 
 static void get_frame_timer_init(void)
 {
@@ -391,10 +453,12 @@ static int bu21150_open(struct inode *inode, struct file *filp)
 	++g_io_opened;
 
 	g_bu21150_ioctl_unblock = 0;
+	get_frame_timer_delete();
 	ts->reset_flag = 0;
 	ts->set_timer_flag = 0;
 	ts->timeout_flag = 0;
 	ts->timeout_enb_flag = 0;
+	ts->scan_mode = BU21150_MUTUAL;
 	memset(&(ts->req_get), 0, sizeof(struct bu21150_ioctl_get_frame_data));
 	/* set default value. */
 	ts->req_get.size = FRAME_HEADER_SIZE;
@@ -402,8 +466,13 @@ static int bu21150_open(struct inode *inode, struct file *filp)
 		sizeof(struct bu21150_ioctl_get_frame_data));
 	memset(&(ts->frame_work_get), 0,
 		sizeof(struct bu21150_ioctl_get_frame_data));
-	enable_irq(client->irq);
 
+	gpio_set_value(ts->rst_gpio, BU21150_RESET_LOW);
+	usleep(DUR_RESET_LOW);
+	gpio_set_value(ts->rst_gpio, BU21150_RESET_HIGH);
+	usleep(DUR_RESET_HIGH);
+
+	enable_irq(client->irq);
 	return 0;
 }
 
@@ -420,6 +489,9 @@ static int bu21150_release(struct inode *inode, struct file *filp)
 
 	if (g_io_opened < 0)
 		g_io_opened = 0;
+
+	gpio_set_value(ts->rst_gpio, BU21150_RESET_LOW);
+	usleep(DUR_RESET_LOW);
 
 	disable_irq(client->irq);
 

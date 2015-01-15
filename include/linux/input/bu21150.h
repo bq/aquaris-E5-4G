@@ -26,6 +26,12 @@
 #define BU21150_UNBLOCK     (5)
 #define BU21150_TIMEOUT     (6)
 
+/* scan_mode */
+#define BU21150_SELF           (0x01)
+#define BU21150_MUTUAL         (0x02)
+#define BU21150_GESTURE_SELF   (0x04)
+#define BU21150_GESTURE_MUTUAL (0x08)
+
 /* ioctl(IOCTL_CMD_RESET) */
 #define BU21150_RESET_LOW   (0)
 #define BU21150_RESET_HIGH  (1)
