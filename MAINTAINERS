@@ -4749,7 +4749,7 @@ S:	Supported
 F:	drivers/scsi/ipr.*
 
 IBM Power Virtual Ethernet Device Driver
-M:	Santiago Leon <santil@linux.vnet.ibm.com>
+M:	Thomas Falcon <tlfalcon@linux.vnet.ibm.com>
 L:	netdev@vger.kernel.org
 S:	Supported
 F:	drivers/net/ethernet/ibm/ibmveth.*
@@ -5279,6 +5279,15 @@ W:	http://www.openfabrics.org
 W:	www.open-iscsi.org
 Q:	http://patchwork.kernel.org/project/linux-rdma/list/
 F:	drivers/infiniband/ulp/iser/
+
+ISCSI EXTENSIONS FOR RDMA (ISER) TARGET
+M:	Sagi Grimberg <sagig@mellanox.com>
+T:	git git://git.kernel.org/pub/scm/linux/kernel/git/nab/target-pending.git master
+L:	linux-rdma@vger.kernel.org
+L:	target-devel@vger.kernel.org
+S:	Supported
+W:	http://www.linux-iscsi.org
+F:	drivers/infiniband/ulp/isert
 
 ISDN SUBSYSTEM
 M:	Karsten Keil <isdn@linux-pingi.de>
