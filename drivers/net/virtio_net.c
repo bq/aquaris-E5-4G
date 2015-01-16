@@ -760,7 +760,6 @@ static int virtnet_poll(struct napi_struct *napi, int budget)
 		container_of(napi, struct receive_queue, napi);
 	unsigned int r, received = 0;
 
-again:
 	received += virtnet_receive(rq, budget - received);
 
 	/* Out of packets? */
@@ -771,7 +770,6 @@ again:
 		    napi_schedule_prep(napi)) {
 			virtqueue_disable_cb(rq->vq);
 			__napi_schedule(napi);
-			goto again;
 		}
 	}
 
@@ -1760,6 +1758,8 @@ static int virtnet_probe(struct virtio_device *vdev)
 			dev->hw_features |= NETIF_F_TSO6;
 		if (virtio_has_feature(vdev, VIRTIO_NET_F_HOST_ECN))
 			dev->hw_features |= NETIF_F_TSO_ECN;
+
+		dev->features |= NETIF_F_GSO_ROBUST;
 
 		if (gso)
 			dev->features |= dev->hw_features & NETIF_F_ALL_TSO;

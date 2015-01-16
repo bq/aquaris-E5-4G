@@ -469,7 +469,7 @@ static int peek_head_len(struct sock *sk)
 	head = skb_peek(&sk->sk_receive_queue);
 	if (likely(head)) {
 		len = head->len;
-		if (vlan_tx_tag_present(head))
+		if (skb_vlan_tag_present(head))
 			len += VLAN_HLEN;
 	}
 
@@ -538,7 +538,7 @@ static int get_rx_bufs(struct vhost_virtqueue *vq,
 		++headcount;
 		seg += in;
 	}
-	heads[headcount - 1].len = cpu_to_vhost32(vq, len - datalen);
+	heads[headcount - 1].len = cpu_to_vhost32(vq, len + datalen);
 	*iovcount = seg;
 	if (unlikely(log))
 		*log_num = nlogs;

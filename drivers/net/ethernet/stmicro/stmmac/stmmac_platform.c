@@ -33,6 +33,7 @@
 
 static const struct of_device_id stmmac_dt_ids[] = {
 	/* SoC specific glue layers should come before generic bindings */
+	{ .compatible = "rockchip,rk3288-gmac", .data = &rk3288_gmac_data},
 	{ .compatible = "amlogic,meson6-dwmac", .data = &meson6_dwmac_data},
 	{ .compatible = "allwinner,sun7i-a20-gmac", .data = &sun7i_gmac_data},
 	{ .compatible = "st,stih415-dwmac", .data = &stih4xx_dwmac_data},
@@ -430,7 +431,6 @@ static struct platform_driver stmmac_pltfr_driver = {
 	.remove = stmmac_pltfr_remove,
 	.driver = {
 		   .name = STMMAC_RESOURCE_NAME,
-		   .owner = THIS_MODULE,
 		   .pm = &stmmac_pltfr_pm_ops,
 		   .of_match_table = of_match_ptr(stmmac_dt_ids),
 	},

@@ -473,6 +473,7 @@ static struct sh_eth_cpu_data r8a777x_data = {
 	.eesr_err_check	= EESR_TWB | EESR_TABT | EESR_RABT | EESR_RFE |
 			  EESR_RDE | EESR_RFRMER | EESR_TFE | EESR_TDE |
 			  EESR_ECI,
+	.fdr_value	= 0x00000f0f,
 
 	.apr		= 1,
 	.mpr		= 1,
@@ -495,6 +496,7 @@ static struct sh_eth_cpu_data r8a779x_data = {
 	.eesr_err_check	= EESR_TWB | EESR_TABT | EESR_RABT | EESR_RFE |
 			  EESR_RDE | EESR_RFRMER | EESR_TFE | EESR_TDE |
 			  EESR_ECI,
+	.fdr_value	= 0x00000f0f,
 
 	.apr		= 1,
 	.mpr		= 1,
@@ -535,6 +537,8 @@ static struct sh_eth_cpu_data sh7724_data = {
 	.eesr_err_check	= EESR_TWB | EESR_TABT | EESR_RABT | EESR_RFE |
 			  EESR_RDE | EESR_RFRMER | EESR_TFE | EESR_TDE |
 			  EESR_ECI,
+
+	.trscer_err_mask = DESC_I_RINT8,
 
 	.apr		= 1,
 	.mpr		= 1,
@@ -590,7 +594,7 @@ static struct sh_eth_cpu_data sh7757_data = {
 static void sh_eth_chip_reset_giga(struct net_device *ndev)
 {
 	int i;
-	unsigned long mahr[2], malr[2];
+	u32 mahr[2], malr[2];
 
 	/* save MAHR and MALR */
 	for (i = 0; i < 2; i++) {
@@ -856,6 +860,9 @@ static void sh_eth_set_default_cpu_data(struct sh_eth_cpu_data *cd)
 
 	if (!cd->eesr_err_check)
 		cd->eesr_err_check = DEFAULT_EESR_ERR_CHECK;
+
+	if (!cd->trscer_err_mask)
+		cd->trscer_err_mask = DEFAULT_TRSCER_ERR_MASK;
 }
 
 static int sh_eth_check_reset(struct net_device *ndev)
@@ -981,7 +988,7 @@ static void read_mac_address(struct net_device *ndev, unsigned char *mac)
 	}
 }
 
-static unsigned long sh_eth_get_edtrr_trns(struct sh_eth_private *mdp)
+static u32 sh_eth_get_edtrr_trns(struct sh_eth_private *mdp)
 {
 	if (sh_eth_is_gether(mdp) || sh_eth_is_rz_fast_ether(mdp))
 		return EDTRR_TRNS_GETHER;
@@ -1294,7 +1301,7 @@ static int sh_eth_dev_init(struct net_device *ndev, bool start)
 	/* Frame recv control (enable multiple-packets per rx irq) */
 	sh_eth_write(ndev, RMCR_RNC, RMCR);
 
-	sh_eth_write(ndev, DESC_I_RINT8 | DESC_I_RINT5 | DESC_I_TINT2, TRSCER);
+	sh_eth_write(ndev, mdp->cd->trscer_err_mask, TRSCER);
 
 	if (mdp->cd->bculr)
 		sh_eth_write(ndev, 0x800, BCULR);	/* Burst sycle set */
@@ -1514,7 +1521,7 @@ static void sh_eth_rcv_snd_enable(struct net_device *ndev)
 }
 
 /* error control function */
-static void sh_eth_error(struct net_device *ndev, int intr_status)
+static void sh_eth_error(struct net_device *ndev, u32 intr_status)
 {
 	struct sh_eth_private *mdp = netdev_priv(ndev);
 	u32 felic_stat;
@@ -1630,7 +1637,7 @@ static irqreturn_t sh_eth_interrupt(int irq, void *netdev)
 	struct sh_eth_private *mdp = netdev_priv(ndev);
 	struct sh_eth_cpu_data *cd = mdp->cd;
 	irqreturn_t ret = IRQ_NONE;
-	unsigned long intr_status, intr_enable;
+	u32 intr_status, intr_enable;
 
 	spin_lock(&mdp->lock);
 
@@ -1656,7 +1663,7 @@ static irqreturn_t sh_eth_interrupt(int irq, void *netdev)
 			__napi_schedule(&mdp->napi);
 		} else {
 			netdev_warn(ndev,
-				    "ignoring interrupt, status 0x%08lx, mask 0x%08lx.\n",
+				    "ignoring interrupt, status 0x%08x, mask 0x%08x.\n",
 				    intr_status, intr_enable);
 		}
 	}
@@ -1689,7 +1696,7 @@ static int sh_eth_poll(struct napi_struct *napi, int budget)
 						  napi);
 	struct net_device *ndev = napi->dev;
 	int quota = budget;
-	unsigned long intr_status;
+	u32 intr_status;
 
 	for (;;) {
 		intr_status = sh_eth_read(ndev, EESR);
@@ -2060,7 +2067,7 @@ static void sh_eth_tx_timeout(struct net_device *ndev)
 
 	netif_err(mdp, timer, ndev,
 		  "transmit timed out, status %8.8x, resetting...\n",
-		  (int)sh_eth_read(ndev, EESR));
+		  sh_eth_read(ndev, EESR));
 
 	/* tx_errors count up */
 	ndev->stats.tx_errors++;

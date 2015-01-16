@@ -351,10 +351,15 @@ static int vnet_rx_one(struct vnet_port *port, struct vio_net_desc *desc)
 	unsigned int len = desc->size;
 	unsigned int copy_len;
 	struct sk_buff *skb;
+	int maxlen;
 	int err;
 
 	err = -EMSGSIZE;
-	if (unlikely(len < ETH_ZLEN || len > port->rmtu)) {
+	if (port->tso && port->tsolen > port->rmtu)
+		maxlen = port->tsolen;
+	else
+		maxlen = port->rmtu;
+	if (unlikely(len < ETH_ZLEN || len > maxlen)) {
 		dev->stats.rx_length_errors++;
 		goto out_dropped;
 	}
@@ -466,23 +471,6 @@ static int vnet_send_ack(struct vnet_port *port, struct vio_dring_state *dr,
 	return err;
 }
 
-static u32 next_idx(u32 idx, struct vio_dring_state *dr)
-{
-	if (++idx == dr->num_entries)
-		idx = 0;
-	return idx;
-}
-
-static u32 prev_idx(u32 idx, struct vio_dring_state *dr)
-{
-	if (idx == 0)
-		idx = dr->num_entries - 1;
-	else
-		idx--;
-
-	return idx;
-}
-
 static struct vio_net_desc *get_rx_desc(struct vnet_port *port,
 					struct vio_dring_state *dr,
 					u32 index)
@@ -556,7 +544,8 @@ static int vnet_walk_rx(struct vnet_port *port, struct vio_dring_state *dr,
 	int ack_start = -1, ack_end = -1;
 	bool send_ack = true;
 
-	end = (end == (u32) -1) ? prev_idx(start, dr) : next_idx(end, dr);
+	end = (end == (u32) -1) ? vio_dring_prev(dr, start)
+				: vio_dring_next(dr, end);
 
 	viodbg(DATA, "vnet_walk_rx start[%08x] end[%08x]\n", start, end);
 
@@ -570,7 +559,7 @@ static int vnet_walk_rx(struct vnet_port *port, struct vio_dring_state *dr,
 		if (ack_start == -1)
 			ack_start = start;
 		ack_end = start;
-		start = next_idx(start, dr);
+		start = vio_dring_next(dr, start);
 		if (ack && start != end) {
 			err = vnet_send_ack(port, dr, ack_start, ack_end,
 					    VIO_DRING_ACTIVE);
@@ -584,7 +573,7 @@ static int vnet_walk_rx(struct vnet_port *port, struct vio_dring_state *dr,
 		}
 	}
 	if (unlikely(ack_start == -1))
-		ack_start = ack_end = prev_idx(start, dr);
+		ack_start = ack_end = vio_dring_prev(dr, start);
 	if (send_ack) {
 		port->napi_resume = false;
 		return vnet_send_ack(port, dr, ack_start, ack_end,
@@ -633,7 +622,7 @@ static int idx_is_pending(struct vio_dring_state *dr, u32 end)
 			found = 1;
 			break;
 		}
-		idx = next_idx(idx, dr);
+		idx = vio_dring_next(dr, idx);
 	}
 	return found;
 }
@@ -663,7 +652,7 @@ static int vnet_ack(struct vnet_port *port, void *msgbuf)
 	/* sync for race conditions with vnet_start_xmit() and tell xmit it
 	 * is time to send a trigger.
 	 */
-	dr->cons = next_idx(end, dr);
+	dr->cons = vio_dring_next(dr, end);
 	desc = vio_dring_entry(dr, dr->cons);
 	if (desc->hdr.state == VIO_DESC_READY && !port->start_cons) {
 		/* vnet_start_xmit() just populated this dring but missed
@@ -784,7 +773,7 @@ ldc_ctrl:
 			pkt->tag.stype = VIO_SUBTYPE_INFO;
 			pkt->tag.stype_env = VIO_DRING_DATA;
 			pkt->seq = dr->rcv_nxt;
-			pkt->start_idx = next_idx(port->napi_stop_idx, dr);
+			pkt->start_idx = vio_dring_next(dr, port->napi_stop_idx);
 			pkt->end_idx = -1;
 			goto napi_resume;
 		}
@@ -1217,6 +1206,7 @@ static int vnet_handle_offloads(struct vnet_port *port, struct sk_buff *skb)
 		segs = skb_gso_segment(skb, dev->features & ~NETIF_F_TSO);
 	if (IS_ERR(segs)) {
 		dev->stats.tx_dropped++;
+		dev_kfree_skb_any(skb);
 		return NETDEV_TX_OK;
 	}
 
