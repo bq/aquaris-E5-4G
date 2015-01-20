@@ -283,7 +283,8 @@ static void sdio_release_func(struct device *dev)
 #endif
 		sdio_free_func_cis(func);
 
-	kfree(func->info);
+	if (func->info)
+		kfree(func->info);
 
 	kfree(func);
 }

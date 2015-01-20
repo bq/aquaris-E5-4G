@@ -1276,7 +1276,7 @@ static int do_umount(struct mount *mnt, int flags)
 		shrink_submounts(mnt);
 
 	retval = -EBUSY;
-	if (flags & MNT_DETACH || !propagate_mount_busy(mnt, 2)) {
+	if (flags & MNT_DETACH || !propagate_mount_busy(mnt, 3)) {
 		if (!list_empty(&mnt->mnt_list))
 			umount_tree(mnt, 1);
 		retval = 0;

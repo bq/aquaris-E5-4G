@@ -21,6 +21,7 @@
 #ifndef _SYNAPTICS_DSX_RMI4_H_
 #define _SYNAPTICS_DSX_RMI4_H_
 
+#define SUPPORT_READ_TP_VERSION // *#87# can read tp version
 #define SYNAPTICS_DS4 (1 << 0)
 #define SYNAPTICS_DS5 (1 << 1)
 #define SYNAPTICS_DSX_DRIVER_PRODUCT SYNAPTICS_DS4
@@ -35,10 +36,16 @@
 #include <linux/earlysuspend.h>
 #endif
 #include <linux/debugfs.h>
+#ifdef CONFIG_TOUCHPANEL_PROXIMITY_SENSOR  //liyong2 2014.6.17
+#include <linux/mutex.h>
+#include <mach/gpiomux.h>
+#include <linux/sensors.h>
+#include <linux/workqueue.h>
+#endif
 
 #define PDT_PROPS (0x00EF)
 #define PDT_START (0x00E9)
-#define PDT_END (0x000A)
+#define PDT_END (0x00D0)   //(0x000A)
 #define PDT_ENTRY_SIZE (0x0006)
 #define PAGES_TO_SERVICE (10)
 #define PAGE_SELECT_LEN (2)
@@ -48,6 +55,7 @@
 #define SYNAPTICS_RMI4_F12 (0x12)
 #define SYNAPTICS_RMI4_F1A (0x1a)
 #define SYNAPTICS_RMI4_F34 (0x34)
+#define SYNAPTICS_RMI4_F51 (0x51)
 #define SYNAPTICS_RMI4_F54 (0x54)
 #define SYNAPTICS_RMI4_F55 (0x55)
 
@@ -55,6 +63,7 @@
 #define SYNAPTICS_RMI4_DATE_CODE_SIZE 3
 #define SYNAPTICS_RMI4_PRODUCT_ID_SIZE 10
 #define SYNAPTICS_RMI4_BUILD_ID_SIZE 3
+#define SYNAPTICS_RMI4_CONFIG_ID_SIZE 4  
 
 #define MAX_NUMBER_OF_FINGERS 10
 #define MAX_NUMBER_OF_BUTTONS 4
@@ -71,6 +80,10 @@
 #define MASK_1BIT 0x01
 
 #define NAME_BUFFER_SIZE 256
+
+#define PINCTRL_STATE_ACTIVE	"pmx_ts_active"
+#define PINCTRL_STATE_SUSPEND	"pmx_ts_suspend"
+#define PINCTRL_STATE_RELEASE	"pmx_ts_release"
 
 /*
  * struct synaptics_rmi4_fn_desc - function descriptor fields in PDT
@@ -160,7 +173,9 @@ struct synaptics_rmi4_device_info {
 	unsigned short serial_number;
 	unsigned char product_id_string[SYNAPTICS_RMI4_PRODUCT_ID_SIZE + 1];
 	unsigned char build_id[SYNAPTICS_RMI4_BUILD_ID_SIZE];
+    unsigned char custom_specific[1];
 	unsigned char config_id[3];
+    unsigned char fw_config_id[SYNAPTICS_RMI4_CONFIG_ID_SIZE];  
 	struct mutex support_fn_list_mutex;
 	struct list_head support_fn_list;
 	unsigned int package_id;
@@ -215,6 +230,32 @@ struct synaptics_rmi4_data {
 	struct mutex rmi4_io_ctrl_mutex;
 	struct delayed_work det_work;
 	struct workqueue_struct *det_workqueue;
+#ifdef CONFIG_TOUCHPANEL_PROXIMITY_SENSOR  //liyong2 2014.6.17
+	struct device *dev;
+	struct input_dev *prox_dev;
+	struct sensors_classdev prox_cdev;
+	struct delayed_work input_work;
+	struct mutex op_lock;
+	int poll_interval;
+	/* FD+ add */
+	unsigned short f51_query_base_addr;
+	unsigned short f51_cmd_base_addr;
+	unsigned short f51_ctrl_base_addr;
+	unsigned short f51_data_base_addr;
+	unsigned char fd_enabled;
+	unsigned int firmware_id;
+	unsigned char f51_intr_reg_number;
+	unsigned char f51_intr_offset;
+	/* FD+ end */
+#endif
+    unsigned short f54_ctrl_base_addr;
+    unsigned short f11_ctrl_base_addr;
+    unsigned short f1A_ctrl_base_addr;
+#ifdef CONFIG_SYNAPTICS_RMI4_ESD_PROTECT
+	struct delayed_work esd_work;
+#endif
+    unsigned int firmware_config_id;
+    unsigned int custom_specific_id;
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	struct early_suspend early_suspend;
 #endif
@@ -234,6 +275,7 @@ struct synaptics_rmi4_data {
 	unsigned short f01_cmd_base_addr;
 	unsigned short f01_ctrl_base_addr;
 	unsigned short f01_data_base_addr;
+    unsigned short f34_ctrl_base_addr;
 	int irq;
 	int sensor_max_x;
 	int sensor_max_y;
@@ -266,8 +308,9 @@ struct synaptics_rmi4_data {
 #endif
 #endif
 	struct pinctrl *ts_pinctrl;
-	struct pinctrl_state *gpio_state_active;
-	struct pinctrl_state *gpio_state_suspend;
+	struct pinctrl_state *pinctrl_state_active;
+	struct pinctrl_state *pinctrl_state_suspend;
+	struct pinctrl_state *pinctrl_state_release;
 };
 
 enum exp_fn {

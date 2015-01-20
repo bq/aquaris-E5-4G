@@ -2,30 +2,89 @@
 # Siano Mobile Silicon Digital TV device configuration
 #
 
+config SMS_SIANO_POWER
+	tristate "Siano SMSxxxx based MDTV power ctrl driver"
+	---help---
+	  power control driver for the Siano SMSxxxx based MDTV
+
+config SMS_SIANO_IO_VOLTAGE_1P8
+	tristate "Siano SMSxxxx based MDTV IO voltage 1.8v supply enable"
+	---help---
+	IO Voltage 1.8V supply enable for the Siano SMSxxxx based MDTV
+	  
 config SMS_SIANO_MDTV
-	tristate
-	depends on DVB_CORE && HAS_DMA
-	depends on !RC_CORE || RC_CORE
-	depends on SMS_USB_DRV || SMS_SDIO_DRV
-	default y
+	tristate "Siano SMSxxxx based MDTV receiver"
+	default n
+	---help---
+	  Choose Y or M here if you have MDTV receiver with a Siano chipset.
 
-config SMS_SIANO_RC
-	bool "Enable Remote Controller support for Siano devices"
-	depends on SMS_SIANO_MDTV && RC_CORE
-	depends on SMS_USB_DRV || SMS_SDIO_DRV
-	depends on MEDIA_COMMON_OPTIONS
+	  To compile this driver as a module, choose M here
+	  (The module will be called smsmdtv).
+
+	  Further documentation on this driver can be found on the WWW
+	  at http://www.siano-ms.com/
+
+menu "Siano module components"
+
+# Kernel sub systems support
+
+config SMS_RC_SUPPORT_SUBSYS
+	bool "Remote Control Subsystem support"
+	depends on RC_CORE
+	default n
+	---help---
+	Choose if you would like to have Siano's ir remote control sub-system support.
+
+config SMS_HOSTLIB_SUBSYS
+	bool "Host Library Subsystem support"
 	default y
 	---help---
-	  Choose Y to select Remote Controller support for Siano driver.
+	Choose if you would like to have Siano's host library kernel sub-system support.
 
-config SMS_SIANO_DEBUGFS
-	bool "Enable debugfs for smsdvb"
-	depends on SMS_SIANO_MDTV
-	depends on DEBUG_FS
-	depends on SMS_USB_DRV
+config SMS_DVB_API_SUBSYS
+	bool "DVB API Subsystem support"
+	depends on DVB_CORE
+	default n
 	---help---
-	  Choose Y to enable visualizing a dump of the frontend
-	  statistics response packets via debugfs. Currently, works
-	  only with Siano USB devices.
+	Choose if you would like to have Siano's host library kernel sub-system support.
 
-	  Useful only for developers. In doubt, say N.
+if SMS_HOSTLIB_SUBSYS
+config SMS_NET_SUBSYS
+	bool "Siano Network Adapter"
+	depends on NET
+	default n
+	---help---
+	Choose if you would like to have Siano's network adapter support.
+endif # SMS_HOSTLIB_SUBSYS
+
+# Hardware interfaces support
+
+config SMS_USB_DRV
+	bool "USB interface support"
+	depends on USB
+	default n if USB
+	---help---
+	  Choose if you would like to have Siano's support for USB interface
+
+config SMS_SDIO_DRV
+	bool "SDIO interface support"
+	depends on MMC
+        default y if MMC
+	---help---
+	  Choose if you would like to have Siano's support for SDIO interface
+
+config SMS_SPI_DRV
+	bool "SPI interface support"
+	depends on SPI
+	default n if SPI
+	---help---
+	Choose if you would like to have Siano's support for PXA 310 SPI interface
+
+config SMS_I2C_DRV
+	bool "I2C interface support"
+	depends on I2C
+	---help---
+	Choose if you would like to have Siano's support for I2C interface
+
+endmenu
+

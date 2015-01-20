@@ -127,6 +127,7 @@ struct mdss_data_type {
 	u8 has_wb_ad;
 	u8 has_non_scalar_rgb;
 	bool has_src_split;
+	bool idle_pc_enabled;
 
 	u32 rotator_ot_limit;
 	u32 mdp_irq_mask;
@@ -208,8 +209,10 @@ struct mdss_data_type {
 	struct mdss_prefill_data prefill_data;
 
 	int handoff_pending;
-	bool ulps;
+	bool idle_pc;
 	struct mdss_perf_tune perf_tune;
+	bool traffic_shaper_en;
+	int iommu_ref_cnt;
 };
 extern struct mdss_data_type *mdss_res;
 
@@ -233,6 +236,7 @@ void mdss_enable_irq(struct mdss_hw *hw);
 void mdss_disable_irq(struct mdss_hw *hw);
 void mdss_disable_irq_nosync(struct mdss_hw *hw);
 void mdss_bus_bandwidth_ctrl(int enable);
+int mdss_iommu_ctrl(int enable);
 
 static inline struct ion_client *mdss_get_ionclient(void)
 {

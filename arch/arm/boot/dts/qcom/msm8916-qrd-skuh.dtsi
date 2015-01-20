@@ -12,8 +12,10 @@
 
 #include "msm8916-qrd.dtsi"
 #include "dsi-panel-innolux-720p-video.dtsi"
-#include "msm8916-camera-sensor-qrd.dtsi"
-
+/*
+* #include "msm8916-camera-sensor-qrd.dtsi"
+* delete the qrd camera for ct300 
+*/
 &tlmm_pinmux {
 	akm_reset_pin {
 		qcom,pins = <&gp 36>;
@@ -200,27 +202,27 @@
 
 	vsp-supply = <&tps65132_pos>;
 	vsn-supply = <&tps65132_neg>;
-	qcom,platform-supply-entry4 {
-		qcom,supply-name = "vsp";
-		qcom,supply-min-voltage = <5400000>;
-		qcom,supply-max-voltage = <5400000>;
-		qcom,supply-enable-load = <200>;
-		qcom,supply-disable-load = <0>;
-		qcom,supply-pre-on-sleep = <0>;
-		qcom,supply-post-on-sleep = <0>;
-		qcom,supply-pre-off-sleep = <0>;
-		qcom,supply-post-off-sleep = <0>;
-	};
-	qcom,platform-supply-entry5 {
-		qcom,supply-name = "vsn";
-		qcom,supply-min-voltage = <5400000>;
-		qcom,supply-max-voltage = <5400000>;
-		qcom,supply-enable-load = <40>;
-		qcom,supply-disable-load = <0>;
-		qcom,supply-pre-on-sleep = <0>;
-		qcom,supply-post-on-sleep = <0>;
-		qcom,supply-pre-off-sleep = <0>;
-		qcom,supply-post-off-sleep = <0>;
+	qcom,panel-supply-entries {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		qcom,panel-supply-entry@2 {
+			reg = <2>;
+			qcom,supply-name = "vsp";
+			qcom,supply-min-voltage = <5400000>;
+			qcom,supply-max-voltage = <5400000>;
+			qcom,supply-enable-load = <200>;
+			qcom,supply-disable-load = <0>;
+		};
+
+		qcom,panel-supply-entry@3 {
+			reg = <3>;
+			qcom,supply-name = "vsn";
+			qcom,supply-min-voltage = <5400000>;
+			qcom,supply-max-voltage = <5400000>;
+			qcom,supply-enable-load = <40>;
+			qcom,supply-disable-load = <0>;
+		};
 	};
 };
 
@@ -243,7 +245,7 @@
 		red {
 			gpios = <&msm_gpio 8 0>;
 			label = "red";
-			linux,default-trigger = "battery-charging";
+			linux,default-trigger = "none";
 			default-state = "off";
 			retain-state-suspended;
 		};
@@ -251,7 +253,7 @@
 		green {
 			gpios = <&msm_gpio 9 0>;
 			label = "green";
-			linux,default-trigger = "battery-full";
+			linux,default-trigger = "none";
 			default-state = "off";
 			retain-state-suspended;
 		};
@@ -268,25 +270,53 @@
 			compatible = "qcom,msm8x16-audio-codec";
 			qcom,model = "msm8x16-skuh-snd-card";
 			qcom,msm-snd-card-id = <0>;
-			qcom,msm-ext-pa = <0>;
+			qcom,msm-ext-pa = "primary";
 			qcom,msm-codec-type = "internal";
 			qcom,msm-mbhc-hphl-swh = <1>;
 			qcom,msm-mbhc-gnd-swh = <0>;
-			qcom,msm-hs-micbias-type = "external";
-			qcom,audio-routing =
-				"RX_BIAS", "MCLK",
-				"SPK_RX_BIAS", "MCLK",
-				"INT_LDO_H", "MCLK",
-				"MIC BIAS External", "Handset Mic",
-				"MIC BIAS External2", "Headset Mic",
-				"MIC BIAS External", "Secondary Mic",
-				"AMIC1", "MIC BIAS External",
-				"AMIC2", "MIC BIAS External2",
-				"AMIC3", "MIC BIAS External";
-			pinctrl-names = "cdc_pdm_lines_act",
-					"cdc_pdm_lines_sus";
+			pinctrl-names = "cdc_lines_act",
+					"cdc_lines_sus";
 			pinctrl-0 = <&cdc_pdm_lines_act>;
 			pinctrl-1 = <&cdc_pdm_lines_sus>;
+	};
+
+	i2c@78b9000 { /* BLSP1 QUP5 */
+		synaptics@70 {
+			compatible = "synaptics,rmi4";
+			reg = <0x70>;
+			interrupt-parent = <&msm_gpio>;
+			interrupts = <13 0x2008>;
+			vdd-supply = <&vdd_vreg>;
+			vcc_i2c-supply = <&pm8916_l16>;
+			/* pins used by touchscreen */
+			pinctrl-names = "pmx_ts_active","pmx_ts_suspend";
+			pinctrl-0 = <&ts_int_active &ts_reset_active>;
+			pinctrl-1 = <&ts_int_suspend &ts_reset_suspend>;
+			synaptics,display-coords = <0 0 1100 1756>;
+			synaptics,panel-coords = <0 0 1100 1899>;
+			synaptics,irq-gpio = <&msm_gpio 13 0x2008>;
+			synaptics,reset-gpio = <&msm_gpio 12 0x0>;
+			synaptics,i2c-pull-up;
+			synaptics,power-down;
+			synaptics,disable-gpios;
+			synaptics,fw-image-name = "PR1601177-s3207_8916_qrd_00430000.img";
+		};
+	};
+
+	vdd_vreg: vdd_vreg {
+		compatible = "regulator-fixed";
+		status = "ok";
+		regulator-name = "vdd_vreg";
+	};
+
+	gen-vkeys {
+		compatible = "qcom,gen-vkeys";
+		label = "synaptics_rmi4_i2c";
+		qcom,disp-maxx = <720>;
+		qcom,disp-maxy = <1280>;
+		qcom,panel-maxx = <720>;
+		qcom,panel-maxy = <1369>;
+		qcom,key-codes = <158 172 139>;
 	};
 };
 
@@ -296,9 +326,16 @@
 	};
 };
 
+&pm8916_adc_tm {
+	chan@30 {
+		qcom,scale-function = <6>;
+	};
+};
+
 &pm8916_chg {
 	qcom,vddmax-mv = <4350>;
 	qcom,vddsafe-mv = <4380>;
+	qcom,vinmin-mv = <4470>;
 	qcom,batt-hot-percentage = <35>;
 	qcom,batt-cold-percentage = <70>;
 	qcom,tchg-mins = <360>;
@@ -328,6 +365,6 @@
 	qcom,vdd-always-on;
 	qcom,vdd-lpm-sup;
 
-	qcom,vdd-current-level = <9000 400000>;
+	qcom,vdd-current-level = <4000 400000>;
 };
 

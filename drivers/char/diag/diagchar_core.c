@@ -291,6 +291,7 @@ static int diagchar_close(struct inode *inode, struct file *file)
 	int i = -1;
 	struct diagchar_priv *diagpriv_data = file->private_data;
 	struct diag_dci_client_tbl *dci_entry = NULL;
+	unsigned long flags;
 
 	pr_debug("diag: process exit %s\n", current->comm);
 	if (!(file->private_data)) {
@@ -327,6 +328,19 @@ static int diagchar_close(struct inode *inode, struct file *file)
 #ifdef CONFIG_DIAG_OVER_USB
 	/* If the SD logging process exits, change logging to USB mode */
 	if (driver->logging_process_id == current->tgid) {
+		if (driver->rsp_buf_busy) {
+			/*
+			 * This happens when the logging process did not get a
+			 * chance to read the last response. Clear the busy flag
+			 * for the response buffer.
+			 */
+			spin_lock_irqsave(&driver->rsp_buf_busy_lock, flags);
+			driver->rsp_buf_busy = 0;
+			spin_unlock_irqrestore(&driver->rsp_buf_busy_lock,
+					       flags);
+			pr_debug("diag: In %s, Resetting rsp_buf_busy explicitly due to pid: %d\n",
+				 __func__, current->tgid);
+		}
 		diag_update_proc_vote(DIAG_PROC_MEMORY_DEVICE, VOTE_DOWN,
 				      ALL_PROC);
 		diag_switch_logging(USB_MODE);
@@ -665,23 +679,15 @@ drop:
 		/* Copy the total data length */
 		COPY_USER_SPACE_OR_EXIT(buf+8, total_data_len, 4);
 		ret -= 4;
-		/*
-		 * Flush any read that is currently pending on DCI data and
-		 * command channnels. This will ensure that the next read is not
-		 * missed.
-		 */
-		flush_workqueue(driver->diag_dci_wq);
-		diag_ws_on_copy_complete(DIAG_WS_DCI);
 	} else {
 		pr_debug("diag: In %s, Trying to copy ZERO bytes, total_data_len: %d\n",
 			__func__, total_data_len);
 	}
 
 	entry->in_service = 0;
-	mutex_unlock(&entry->write_buf_mutex);
-
 	exit_stat = 0;
 exit:
+	mutex_unlock(&entry->write_buf_mutex);
 	*pret = ret;
 
 	return exit_stat;
@@ -1355,6 +1361,7 @@ static ssize_t diagchar_read(struct file *file, char __user *buf, size_t count,
 	int index = -1, i = 0, ret = 0;
 	int num_data = 0, data_type;
 	int remote_token;
+	int copy_dci_data = 0;
 	int exit_stat;
 	int copy_data = 0;
 	unsigned long flags;
@@ -1608,7 +1615,6 @@ drop:
 	if (driver->data_ready[index] & DCI_DATA_TYPE) {
 		/* Copy the type of data being passed */
 		data_type = driver->data_ready[index] & DCI_DATA_TYPE;
-		driver->data_ready[index] ^= DCI_DATA_TYPE;
 		list_for_each_safe(start, temp, &driver->dci_client_list) {
 			entry = list_entry(start, struct diag_dci_client_tbl,
 									track);
@@ -1620,7 +1626,9 @@ drop:
 								sizeof(int));
 			COPY_USER_SPACE_OR_EXIT(buf + ret,
 					entry->client_info.token, sizeof(int));
+			copy_dci_data = 1;
 			exit_stat = diag_copy_dci(buf, count, entry, &ret);
+			driver->data_ready[index] ^= DCI_DATA_TYPE;
 			if (exit_stat == 1)
 				goto exit;
 		}
@@ -1644,6 +1652,7 @@ drop:
 		goto exit;
 	}
 exit:
+	mutex_unlock(&driver->diagchar_mutex);
 	if (copy_data) {
 		/*
 		 * Flush any work that is currently pending on the data
@@ -1654,7 +1663,15 @@ exit:
 		wake_up(&driver->smd_wait_q);
 		diag_ws_on_copy_complete(DIAG_WS_MD);
 	}
-	mutex_unlock(&driver->diagchar_mutex);
+	/*
+	 * Flush any read that is currently pending on DCI data and
+	 * command channnels. This will ensure that the next read is not
+	 * missed.
+	 */
+	if (copy_dci_data) {
+		diag_ws_on_copy_complete(DIAG_WS_DCI);
+		flush_workqueue(driver->diag_dci_wq);
+	}
 	return ret;
 }
 
@@ -1699,7 +1716,10 @@ static ssize_t diagchar_write(struct file *file, const char __user *buf,
 		&& (driver->logging_mode == USB_MODE) &&
 		(!driver->usb_connected))) {
 		/*Drop the diag payload */
+		//add by liuxuexin, pass write nv cmd even usb is not plug-in
+		if (pkt_type != CALLBACK_DATA_TYPE) {
 		return -EIO;
+		}
 	}
 #endif /* DIAG over USB */
 	if (pkt_type == DCI_DATA_TYPE) {

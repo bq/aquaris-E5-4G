@@ -27,6 +27,10 @@ DEFINE_MSM_MUTEX(msm_actuator_mutex);
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
 #endif
 
+// add by gpg for ak7345
+uint16_t inf_code = 0;
+uint16_t macro_code = 0;
+// end by gpg
 
 static int32_t msm_actuator_power_up(struct msm_actuator_ctrl_t *a_ctrl);
 static int32_t msm_actuator_power_down(struct msm_actuator_ctrl_t *a_ctrl);
@@ -72,6 +76,10 @@ static int32_t msm_actuator_piezo_set_default_focus(
 	return rc;
 }
 
+#define OTP_ADJUST_INF	100        //20 
+#define OTP_ADJUST_MAC	160        //20 
+
+
 static void msm_actuator_parse_i2c_params(struct msm_actuator_ctrl_t *a_ctrl,
 	int16_t next_lens_position, uint32_t hw_params, uint16_t delay)
 {
@@ -80,6 +88,7 @@ static void msm_actuator_parse_i2c_params(struct msm_actuator_ctrl_t *a_ctrl,
 	uint16_t i2c_byte1 = 0, i2c_byte2 = 0;
 	uint16_t value = 0;
 	uint32_t size = a_ctrl->reg_tbl_size, i = 0;
+	int16_t pos_value = next_lens_position;
 	struct msm_camera_i2c_reg_array *i2c_tbl = a_ctrl->i2c_reg_tbl;
 	CDBG("Enter\n");
 	for (i = 0; i < size; i++) {
@@ -116,7 +125,78 @@ static void msm_actuator_parse_i2c_params(struct msm_actuator_ctrl_t *a_ctrl,
 				i2c_byte1 = (value & 0xFF00) >> 8;
 				i2c_byte2 = value & 0xFF;
 			}
-		} else {
+		//}
+		/* Add for DW9761 */		
+		} else if (write_arr[i].reg_write_type == MSM_ACTUATOR_WRITE_DAC_DW9761){
+			value = (next_lens_position <<
+				write_arr[i].data_shift) |
+				((hw_dword & write_arr[i].hw_mask) >>
+				write_arr[i].hw_shift);
+			if (write_arr[i].reg_addr != 0xFFFF) {
+				i2c_byte1 = write_arr[i].reg_addr;
+				i2c_byte2 = value;
+				if (size != (i+1)) {
+					i2c_byte2 = (value & 0xFF00) >> 8;
+					CDBG("byte1:0x%x, byte2:0x%x\n",
+						i2c_byte1, i2c_byte2);
+					i2c_tbl[a_ctrl->i2c_tbl_index].
+						reg_addr = i2c_byte1;
+					i2c_tbl[a_ctrl->i2c_tbl_index].
+						reg_data = i2c_byte2;
+					i2c_tbl[a_ctrl->i2c_tbl_index].
+						delay = 0;
+					a_ctrl->i2c_tbl_index++;
+					i++;
+					i2c_byte1 = write_arr[i].reg_addr;
+					i2c_byte2 = value & 0xFF;
+				}
+			} else {
+				i2c_byte1 = (value & 0xFF00) >> 8;
+				i2c_byte2 = value & 0xFF;
+			}
+		/* Add end */	
+		}
+		else if (write_arr[i].reg_write_type == MSM_ACTUATOR_WRITE_DAC_AK7345) 
+		{
+				
+			if(macro_code <= inf_code)
+			{
+				pr_err("ERROR ! af:macro_code:%d,inf_code:%d\n", macro_code,inf_code);
+				return ;
+			}
+			if(macro_code> 1023 - OTP_ADJUST_MAC)
+			{
+				macro_code = 1023 - OTP_ADJUST_MAC;	
+			}
+				
+			pos_value = (next_lens_position*((macro_code+OTP_ADJUST_MAC)-(inf_code-OTP_ADJUST_INF))/1024+(inf_code-OTP_ADJUST_INF))/2; //10bit map to otp value, then change to 9bit 
+			CDBG("af:pos_value:%d, next_lens_position:%d,macro_code:%d,inf_code:%d\n",
+						pos_value, next_lens_position,macro_code,inf_code);
+			
+			value = (pos_value <<
+				write_arr[i].data_shift) |
+				((hw_dword & write_arr[i].hw_mask) >>
+				write_arr[i].hw_shift);
+			if (write_arr[i].reg_addr != 0xFFFF) {
+				i2c_byte1 = write_arr[i].reg_addr;
+				i2c_byte2 = value;
+				if (size != (i+1)) {
+					i2c_byte2 = (value>>1) & 0xFF;
+					CDBG("i2c_byte1:0x%x, i2c_byte2:0x%x\n",
+						i2c_byte1, i2c_byte2);
+					i2c_tbl[a_ctrl->i2c_tbl_index].
+						reg_addr = i2c_byte1;
+					i2c_tbl[a_ctrl->i2c_tbl_index].
+						reg_data = i2c_byte2;
+					i2c_tbl[a_ctrl->i2c_tbl_index].
+						delay = 0;
+					a_ctrl->i2c_tbl_index++;
+					i++;
+					i2c_byte1 = write_arr[i].reg_addr;
+					i2c_byte2 = ((value&0x1) << 7 );
+				}
+			}		
+		}else {
 			i2c_byte1 = write_arr[i].reg_addr;
 			i2c_byte2 = (hw_dword & write_arr[i].hw_mask) >>
 				write_arr[i].hw_shift;
@@ -450,7 +530,9 @@ static int32_t msm_actuator_set_default_focus(
 	int32_t rc = 0;
 	CDBG("Enter\n");
 
-	if (a_ctrl->curr_step_pos != 0)
+//	if (a_ctrl->curr_step_pos != 0)
+		move_params->dest_step_pos = 1; // add by gpg for Close Loop
+
 		rc = a_ctrl->func_tbl->actuator_move_focus(a_ctrl, move_params);
 	CDBG("Exit\n");
 	return rc;
@@ -761,6 +843,13 @@ static int32_t msm_actuator_config(struct msm_actuator_ctrl_t *a_ctrl,
 		if (rc < 0)
 			pr_err("Failed actuator power up%d\n", rc);
 		break;
+// add by gpg 
+	case CFG_AK7345_ACTUATOR_SET_OTP_TUNE:
+		inf_code = cdata->cfg.ak7345_otp_info.m_inf_code;
+		macro_code = cdata->cfg.ak7345_otp_info.m_macro_code;
+		pr_err("%s CFG_AK7345_ACTUATOR_SET_OTP_TUNE %d, %d\n", __func__, inf_code, macro_code);
+		break;
+// end by gpg
 
 	default:
 		break;

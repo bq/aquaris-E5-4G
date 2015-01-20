@@ -33,6 +33,7 @@
 			regulator-name = "smb1360_otg_vreg";
 
 			qcom,chg-inhibit-disabled;
+            qcom,shdn-after-pwroff;
 			qcom,float-voltage-mv = <4200>;
 			qcom,iterm-ma = <100>;
 			qcom,charging-disabled;

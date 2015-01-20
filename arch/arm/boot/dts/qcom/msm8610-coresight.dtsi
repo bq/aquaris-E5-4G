@@ -46,7 +46,9 @@
 		qcom,vdd-io-voltage-level = <2950000 2950000>;
 		qcom,vdd-io-current-level = <200 50000>;
 
-		qcom,nidnt;
+		qcom,nidntsw;
+		qcom,nidnt-swduart;
+		qcom,nidnt-swdtrc;
 	};
 
 	replicator: replicator@fc324000 {
@@ -154,6 +156,7 @@
 		coresight-outports = <0>;
 		coresight-child-list = <&funnel_a7ss>;
 		coresight-child-ports = <0>;
+		coresight-etm-cpu = <&CPU0>;
 
 		qcom,pc-save;
 		qcom,round-robin;
@@ -170,6 +173,7 @@
 		coresight-outports = <0>;
 		coresight-child-list = <&funnel_a7ss>;
 		coresight-child-ports = <1>;
+		coresight-etm-cpu = <&CPU1>;
 
 		qcom,pc-save;
 		qcom,round-robin;
@@ -186,6 +190,7 @@
 		coresight-outports = <0>;
 		coresight-child-list = <&funnel_a7ss>;
 		coresight-child-ports = <2>;
+		coresight-etm-cpu = <&CPU2>;
 
 		qcom,pc-save;
 		qcom,round-robin;
@@ -202,6 +207,7 @@
 		coresight-outports = <0>;
 		coresight-child-list = <&funnel_a7ss>;
 		coresight-child-ports = <3>;
+		coresight-etm-cpu = <&CPU3>;
 
 		qcom,pc-save;
 		qcom,round-robin;

@@ -990,6 +990,29 @@ config TOUCHSCREEN_SYNAPTICS_DSX_FW_UPDATE
 	  To compile this driver as a module, choose M here: the
 	  module will be called synaptics_dsx_fw_update.
 
+config TOUCHPANEL_PROXIMITY_SENSOR
+        tristate "Synaptics I2C touchscreen simulate proximity sensor"
+        depends on TOUCHSCREEN_SYNAPTICS_I2C_RMI4
+        help
+          This enables support for character device channel for Synaptics
+          RMI4 touchscreens.
+
+          Say Y here if you have a Synaptics DSX I2C touchscreen
+          connected to your system, and you will simulate proximity sensor.
+
+          If unsure, say N.
+
+          To compile this driver as a module, choose M here: the
+          module will be called synaptics_dsx_rmi4_dev.
+
+config SYNAPTICS_RMI4_ESD_PROTECT
+        bool "Synaptics DSX touchscreen RMI esd check"
+        depends on TOUCHSCREEN_SYNAPTICS_I2C_RMI4
+        help
+          Say Y here to enable support for direct RMI register access.
+
+          If unsure, say N.
+
 config SECURE_TOUCH
 	bool "Secure Touch"
 	depends on TOUCHSCREEN_ATMEL_MXT
@@ -1008,6 +1031,34 @@ config TOUCHSCREEN_GT9XX
 	  report 5 touches at a time.
 
           If unsure, say N.
+
+config TOUCHSCREEN_msg2133
+			  bool  "mstar touchscreens msg2133"	
+        depends on I2C	
+        help	
+         Say Y here if you have a msg2133 touchscreen.
+
+config TOUCHSCREEN_MSG26XX
+			  bool  "mstar touchscreens MSG2633"	
+        depends on I2C	
+        help	
+         Say Y here if you have a msg2133 touchscreen.
+
+config TOUCHSCREEN_GSL968 
+        bool  "gsl touchscreens gsl968"
+        depends on I2C
+        help
+         Say Y here if you have a gsl968 touchscreen.
+
+config TOUCHPANEL_PROXIMITY_SENSOR
+        tristate "touchpanel used as proximity sensor support"
+        depends on I2C
+        default n
+        help
+          if touch panel use as proximity sensor, please set it YES.
+
+config FTS_GESTURE
+		bool "FT5x06 doble tap"
 
 source "drivers/input/touchscreen/gt9xx/Kconfig"
 

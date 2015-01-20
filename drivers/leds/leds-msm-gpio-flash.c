@@ -52,11 +52,21 @@ static void led_gpio_brightness_set(struct led_classdev *led_cdev,
 	int flash_en = 0, flash_now = 0;
 
 	if (brightness > LED_HALF) {
-		flash_en = 1;
-		flash_now = 1;
-	} else if (brightness > LED_OFF) {
+#ifdef CONFIG_SGM3780
 		flash_en = 1;
 		flash_now = 0;
+#else
+		flash_en = 1;
+		flash_now = 1;
+#endif
+	} else if (brightness > LED_OFF) {
+#ifdef CONFIG_SGM3780
+				flash_en = 0;
+				flash_now = 1;
+#else
+				flash_en = 1;
+				flash_now = 0;
+#endif
 	} else {
 		flash_en = 0;
 		flash_now = 0;

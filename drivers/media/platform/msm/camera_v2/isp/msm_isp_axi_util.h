@@ -41,6 +41,10 @@ void msm_isp_calculate_framedrop(
 		struct msm_vfe_axi_shared_data *axi_data,
 		struct msm_vfe_axi_stream_request_cmd *stream_cfg_cmd);
 
+void msm_isp_reset_framedrop(struct vfe_device *vfe_dev,
+		struct msm_vfe_axi_stream *stream_info);
+
+
 int msm_isp_request_axi_stream(struct vfe_device *vfe_dev, void *arg);
 int msm_isp_cfg_axi_stream(struct vfe_device *vfe_dev, void *arg);
 int msm_isp_release_axi_stream(struct vfe_device *vfe_dev, void *arg);

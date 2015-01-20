@@ -48,6 +48,7 @@
 #define STATE_BUSY                  2   /* processing userspace calls */
 #define STATE_CANCELED              3   /* transaction canceled by host */
 #define STATE_ERROR                 4   /* error from completion routine */
+#define STATE_RESET                 5   /* reset from device reset request */
 
 /* number of tx and rx requests to allocate */
 #define MTP_TX_REQ_MAX 8
@@ -66,6 +67,7 @@
 /* constants for device status */
 #define MTP_RESPONSE_OK             0x2001
 #define MTP_RESPONSE_DEVICE_BUSY    0x2019
+#define MTP_RESPONSE_DEVICE_CANCEL	0x201F
 
 unsigned int mtp_rx_req_len = MTP_BULK_BUFFER_SIZE;
 module_param(mtp_rx_req_len, uint, S_IRUGO | S_IWUSR);
@@ -116,6 +118,11 @@ struct mtp_dev {
 	uint16_t xfer_command;
 	uint32_t xfer_transaction_id;
 	int xfer_result;
+//Added MTP MSFT OS Descriptor from mtk
+	char	usb_functions[32];
+	int		curr_mtp_func_index;
+	int		usb_functions_no;
+//Added MTP MSFT OS Descriptor from mtk
 };
 
 static struct usb_interface_descriptor mtp_interface_desc = {
@@ -303,6 +310,65 @@ static u8 mtp_os_string[] = {
 	0
 };
 
+//Added MTP MSFT OS Descriptor from mtk
+/* Microsoft Extended Property OS Feature Descriptor Header Section */
+struct mtp_ext_prop_desc_header {
+	__le32	dwLength;
+	__u16	bcdVersion;
+	__le16	wIndex;
+	__u16	wCount;
+};
+
+/* Microsoft xtended Property OS Feature Function Section */
+struct mtp_ext_prop_desc_property {
+	__le32	dwSize;
+	__le32	dwPropertyDataType;
+	__le16	wPropertyNameLength;
+	__u8	bPropertyName[8];		//MTP
+	__le32	dwPropertyDataLength;
+	__u8	bPropertyData[22];		//MTP Device
+}mtp_ext_prop_desc_property;
+
+/* MTP Extended Configuration Descriptor */
+struct {
+	struct mtp_ext_prop_desc_header	header;
+	struct mtp_ext_prop_desc_property customProp;
+} mtp_ext_prop_desc = {
+	.header = {
+		.dwLength = __constant_cpu_to_le32(sizeof(mtp_ext_prop_desc)),
+		.bcdVersion = __constant_cpu_to_le16(0x0100),
+		.wIndex = __constant_cpu_to_le16(5),
+		.wCount = __constant_cpu_to_le16(1),
+	},
+	.customProp = {
+		.dwSize = __constant_cpu_to_le32(sizeof(mtp_ext_prop_desc_property)),
+		.dwPropertyDataType = __constant_cpu_to_le32(1),
+		.wPropertyNameLength = __constant_cpu_to_le16(8),
+		.bPropertyName = {'M', 0, 'T', 0, 'P', 0, 0, 0},		//MTP
+		.dwPropertyDataLength = __constant_cpu_to_le32(22),
+		.bPropertyData = {'M', 0, 'T', 0, 'P', 0, ' ', 0, 'D', 0, 'e', 0, 'v', 0, 'i', 0, 'c', 0, 'e', 0, 0, 0},		//MTP Device
+	},
+};
+
+#define MSFT_bMS_VENDOR_CODE	1
+#define USB_MTP_FUNCTIONS		6
+
+#define USB_MTP			"mtp\n"
+#define USB_MTP_ADB		"mtp,ffs\n"
+#define USB_MTP_UMS		"mtp,mass_storage\n"
+#define USB_MTP_UMS_ADB	"mtp,mass_storage,ffs\n"
+
+
+static char * USB_MTP_FUNC[USB_MTP_FUNCTIONS] =
+{
+	USB_MTP,
+	USB_MTP_ADB,
+	USB_MTP_UMS,
+	USB_MTP_UMS_ADB
+};
+
+//Added MTP MSFT OS Descriptor from mtk
+
 /* Microsoft Extended Configuration Descriptor Header Section */
 struct mtp_ext_config_desc_header {
 	__le32	dwLength;
@@ -338,6 +404,79 @@ struct {
 		.compatibleID = { 'M', 'T', 'P' },
 	},
 };
+
+//Added MTP MSFT OS Descriptor from mtk
+struct {
+	struct mtp_ext_config_desc_header	header;
+	struct mtp_ext_config_desc_function    function1;
+	struct mtp_ext_config_desc_function    function2;
+} mtp_ext_config_desc_2 = {
+	.header = {
+		.dwLength = __constant_cpu_to_le32(sizeof(mtp_ext_config_desc_2)),
+		.bcdVersion = __constant_cpu_to_le16(0x0100),
+		.wIndex = __constant_cpu_to_le16(4),
+		//.bCount = __constant_cpu_to_le16(1),
+		.bCount = 0x02,
+		.reserved = { 0 },
+	},
+	.function1 =
+	{
+	.bFirstInterfaceNumber = 0,
+	.bInterfaceCount = 1,
+	.compatibleID = { 'M', 'T', 'P', 0, 0, 0, 0, 0 },
+	.subCompatibleID = { 0 },
+	.reserved = { 0 },
+	},
+	.function2 =
+	{
+	.bFirstInterfaceNumber = 1,
+	.bInterfaceCount = 1,
+	.compatibleID = { 0 },
+	.subCompatibleID = { 0 },
+	.reserved = { 0 },
+	},
+};
+struct {
+	struct mtp_ext_config_desc_header	header;
+	struct mtp_ext_config_desc_function    function1;
+	struct mtp_ext_config_desc_function    function2;
+	struct mtp_ext_config_desc_function    function3;
+} mtp_ext_config_desc_3 = {
+	.header = {
+		.dwLength = __constant_cpu_to_le32(sizeof(mtp_ext_config_desc_3)),
+		.bcdVersion = __constant_cpu_to_le16(0x0100),
+		.wIndex = __constant_cpu_to_le16(4),
+		//.bCount = __constant_cpu_to_le16(1),
+		.bCount = 0x03,
+		.reserved = { 0 },
+	},
+	.function1 =
+	{
+	.bFirstInterfaceNumber = 0,
+	.bInterfaceCount = 1,
+	.compatibleID = { 'M', 'T', 'P', 0, 0, 0, 0, 0 },
+	.subCompatibleID = { 0 },
+	.reserved = { 0 },
+	},
+	.function2 =
+	{
+	.bFirstInterfaceNumber = 1,
+	.bInterfaceCount = 1,
+	.compatibleID = { 0 },
+	.subCompatibleID = { 0 },
+	.reserved = { 0 },
+	},
+	.function3 =
+	{
+	.bFirstInterfaceNumber = 2,
+	.bInterfaceCount = 1,
+	.compatibleID = { 0 },
+	.subCompatibleID = { 0 },
+	.reserved = { 0 },
+	},
+};
+
+//Added MTP MSFT OS Descriptor from mtk
 
 struct mtp_device_status {
 	__le16	wLength;
@@ -568,6 +707,24 @@ static ssize_t mtp_read(struct file *fp, char __user *buf,
 	if (len > mtp_rx_req_len)
 		return -EINVAL;
 
+//Added for bug from WHQL test form mtk
+
+	spin_lock_irq(&dev->lock);
+	if(dev->state == STATE_RESET)
+	{
+		//Added for MTP Develpment debug, more log for more debuging help
+		DBG(dev->cdev,      "%s: dev->state = %d, device is under reset state!! \n", __func__, dev->state);
+		//Added for USB Develpment debug, more log for more debuging help
+		dev->state = STATE_READY;
+		//Added for MTP Develpment debug, more log for more debuging help
+		DBG(dev->cdev,      "%s: dev->state = %d, change back to Ready state;!! \n", __func__, dev->state);
+		//Added for USB Develpment debug, more log for more debuging help
+		spin_unlock_irq(&dev->lock);
+		return -ECANCELED;
+	}
+	spin_unlock_irq(&dev->lock);
+//Added for bug from WHQL test form mtk
+
 	/* we will block until we're online */
 	DBG(cdev, "mtp_read: waiting for online state\n");
 	ret = wait_event_interruptible(dev->read_wq,
@@ -576,6 +733,20 @@ static ssize_t mtp_read(struct file *fp, char __user *buf,
 		r = ret;
 		goto done;
 	}
+
+//Added for bug from WHQL test form mtk
+	spin_lock_irq(&dev->lock);
+	if(dev->state == STATE_RESET)
+	{
+		DBG(dev->cdev,      "%s: dev->state = %d, device is under reset state!! \n", __func__, dev->state);
+		dev->state = STATE_READY;
+		DBG(dev->cdev,      "%s: dev->state = %d, change back to Ready state;!! \n", __func__, dev->state);
+		spin_unlock_irq(&dev->lock);
+		return -ECANCELED;
+	}
+	spin_unlock_irq(&dev->lock);
+//Added for bug from WHQL test form mtk
+
 	spin_lock_irq(&dev->lock);
 	if (dev->state == STATE_CANCELED) {
 		/* report cancelation to userspace */
@@ -626,6 +797,19 @@ requeue_req:
 		r = xfer;
 		if (copy_to_user(buf, req->buf, xfer))
 			r = -EFAULT;
+//Added for bug from WHQL test form mtk
+	} 	else if(dev->state == STATE_RESET) {
+		//copy to user!!
+		/* If we got a 0-len packet, throw it back and try again. */
+		if (req->actual == 0)
+			goto requeue_req;
+
+		DBG(dev->cdev,   "rx %p %d\n", req, req->actual);
+		xfer = (req->actual < count) ? req->actual : count;
+		r = xfer;
+		if (copy_to_user(buf, req->buf, xfer))
+			r = -EFAULT;
+//Added for bug from WHQL test form mtk
 	} else
 		r = -EIO;
 
@@ -660,6 +844,14 @@ static ssize_t mtp_write(struct file *fp, const char __user *buf,
 		spin_unlock_irq(&dev->lock);
 		return -ECANCELED;
 	}
+//Added for bug from WHQL test form mtk
+	if (dev->state == STATE_RESET) {
+		/* report cancelation to userspace */
+		dev->state = STATE_READY;
+		spin_unlock_irq(&dev->lock);
+		return -ECANCELED;
+	}
+//Added for bug from WHQL test form mtk
 	if (dev->state == STATE_OFFLINE) {
 		spin_unlock_irq(&dev->lock);
 		return -ENODEV;
@@ -724,6 +916,14 @@ static ssize_t mtp_write(struct file *fp, const char __user *buf,
 	spin_lock_irq(&dev->lock);
 	if (dev->state == STATE_CANCELED)
 		r = -ECANCELED;
+//Added for bug from WHQL test form mtk
+	else if(dev->state == STATE_RESET)
+	{
+		DBG(dev->cdev, "%s: dev->state = %d, device is under reset state!! \n", __func__, dev->state);
+		dev->state = STATE_READY;
+		r = -ECANCELED;
+	}
+//Added for bug from WHQL test form mtk
 	else if (dev->state != STATE_OFFLINE)
 		dev->state = STATE_READY;
 	spin_unlock_irq(&dev->lock);
@@ -782,6 +982,12 @@ static void send_file_work(struct work_struct *data)
 			r = -ECANCELED;
 			break;
 		}
+		else if (dev->state == STATE_RESET) {
+			DBG(dev->cdev, "%s: dev->state = %d, device is under reset state!! \n", __func__, dev->state);
+			r = -ECANCELED;
+			break;
+		}
+
 		if (!req) {
 			r = ret;
 			break;
@@ -1061,6 +1267,11 @@ fail:
 	spin_lock_irq(&dev->lock);
 	if (dev->state == STATE_CANCELED)
 		ret = -ECANCELED;
+	//Added for bug from WHQL test form mtk
+	else if (dev->state == STATE_RESET)
+		ret = -ECANCELED;
+	//Added for bug from WHQL test form mtk
+
 	else if (dev->state != STATE_OFFLINE)
 		dev->state = STATE_READY;
 	spin_unlock_irq(&dev->lock);
@@ -1108,6 +1319,36 @@ static struct miscdevice mtp_device = {
 	.fops = &mtp_fops,
 };
 
+//MTP MSFT OS Descriptor from mtk
+static void mtp_read_usb_functions(int functions_no, char * buff)
+{
+	struct mtp_dev *dev = _mtp_dev;
+	int i;
+       	//Added for MTP Develpment debug, more log for more debuging help
+	DBG(dev->cdev, "%s: dev->curr_mtp_func_index = 0x%x\n",__func__, dev->curr_mtp_func_index);
+
+	/*if(dev->curr_mtp_func_index!=0xff)
+		return;*/
+       	//Added for MTP Develpment debug, more log for more debuging help
+
+	dev->usb_functions_no = functions_no;
+	dev->curr_mtp_func_index = 0xff;
+	memcpy(dev->usb_functions, buff, sizeof(dev->usb_functions));
+	DBG(dev->cdev, "%s:usb_functions_no = %d, usb_functions=%s\n",__func__, dev->usb_functions_no, dev->usb_functions);
+
+	for(i=0;i<USB_MTP_FUNCTIONS;i++)
+	{
+		if(!strcmp(dev->usb_functions, USB_MTP_FUNC[i]))
+		{	
+			DBG(dev->cdev, "%s: usb functions = %s, i = %d \n",__func__, dev->usb_functions, i);
+			dev->curr_mtp_func_index = i;
+			break;
+		}
+	}
+
+}
+//MTP MSFT OS Descriptor from mtk
+
 static int mtp_ctrlrequest(struct usb_composite_dev *cdev,
 				const struct usb_ctrlrequest *ctrl)
 {
@@ -1136,7 +1377,9 @@ static int mtp_ctrlrequest(struct usb_composite_dev *cdev,
 		/* Handle MTP OS descriptor */
 		DBG(cdev, "vendor request: %d index: %d value: %d length: %d\n",
 			ctrl->bRequest, w_index, w_value, w_length);
-
+		//MTP MSFT OS Descriptor from mtk
+#if 0
+		//MTP MSFT OS Descriptor from mtk
 		if (ctrl->bRequest == 1
 				&& (ctrl->bRequestType & USB_DIR_IN)
 				&& (w_index == 4 || w_index == 5)) {
@@ -1144,6 +1387,49 @@ static int mtp_ctrlrequest(struct usb_composite_dev *cdev,
 					w_length : sizeof(mtp_ext_config_desc));
 			memcpy(cdev->req->buf, &mtp_ext_config_desc, value);
 		}
+		//MTP MSFT OS Descriptor from mtk
+#endif
+		if (ctrl->bRequest == 1
+				&& (ctrl->bRequestType & USB_DIR_IN)
+				&& (w_index == 5)) {
+			value = (w_length < sizeof(mtp_ext_prop_desc) ?
+					w_length : sizeof(mtp_ext_prop_desc));
+			DBG(cdev, "vendor request: Property OS Feature, w_length = %d, value = %d \n", w_length, value);
+			memcpy(cdev->req->buf, &mtp_ext_prop_desc, value);
+		}
+		else if (ctrl->bRequest == 1
+				&& (ctrl->bRequestType & USB_DIR_IN)
+				&& (w_index == 4)) {
+
+			switch(dev->curr_mtp_func_index)
+			{
+			case 0:			//mtp
+				value = (w_length < sizeof(mtp_ext_config_desc) ?
+						w_length : sizeof(mtp_ext_config_desc));
+				memcpy(cdev->req->buf, &mtp_ext_config_desc, value);
+				break;
+			case 1:			//mtp,adb 
+			case 2:			//mtp,mass_storage
+			//case 4:			
+				value = (w_length < sizeof(mtp_ext_config_desc_2) ?
+						w_length : sizeof(mtp_ext_config_desc_2));
+				memcpy(cdev->req->buf, &mtp_ext_config_desc_2, value);
+				break;
+			case 3:			//mtp,mass_storage,adb
+			//case 5:			
+				value = (w_length < sizeof(mtp_ext_config_desc_3) ?
+						w_length : sizeof(mtp_ext_config_desc_3));
+				memcpy(cdev->req->buf, &mtp_ext_config_desc_3, value);
+				break;
+			default:			//unknown, 0xff
+				value = (w_length < sizeof(mtp_ext_config_desc) ?
+						w_length : sizeof(mtp_ext_config_desc));
+				memcpy(cdev->req->buf, &mtp_ext_config_desc, value);
+				break;
+			}
+
+		}
+		//MTP MSFT OS Descriptor from mtk
 	} else if ((ctrl->bRequestType & USB_TYPE_MASK) == USB_TYPE_CLASS) {
 		DBG(cdev, "class request: %d index: %d value: %d length: %d\n",
 			ctrl->bRequest, w_index, w_value, w_length);

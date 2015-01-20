@@ -98,6 +98,11 @@ enum cpp_state {
 	CPP_STATE_OFF,
 };
 
+enum cpp_iommu_state {
+	CPP_IOMMU_STATE_DETACHED,
+	CPP_IOMMU_STATE_ATTACHED,
+};
+
 enum msm_queue {
 	MSM_CAM_Q_CTRL,     /* control command or control command status */
 	MSM_CAM_Q_VFE_EVT,  /* adsp event */
@@ -186,12 +191,14 @@ struct cpp_device {
 	struct regulator *fs_cpp;
 	struct mutex mutex;
 	enum cpp_state state;
+	enum cpp_iommu_state iommu_state;
 	uint8_t is_firmware_loaded;
 	char *fw_name_bin;
 	struct workqueue_struct *timer_wq;
 	struct msm_cpp_work_t *work;
 	uint32_t fw_version;
 	uint8_t stream_cnt;
+	uint8_t timeout_trial_cnt;
 
 	int domain_num;
 	struct iommu_domain *domain;

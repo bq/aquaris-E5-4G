@@ -30,7 +30,7 @@
 #include "mdss_panel.h"
 #include "mdss_mdp.h"
 
-#define STATUS_CHECK_INTERVAL_MS 5000
+#define STATUS_CHECK_INTERVAL_MS 2000 //5000 tangshouxing 9.2
 #define STATUS_CHECK_INTERVAL_MIN_MS 200
 #define DSI_STATUS_CHECK_DISABLE 0
 
@@ -57,6 +57,12 @@ static void check_dsi_ctrl_status(struct work_struct *work)
 
 	if (!pdsi_status->mfd) {
 		pr_err("%s: FB data not available\n", __func__);
+		return;
+	}
+
+	if (pdsi_status->mfd->shutdown_pending ||
+		!pdsi_status->mfd->panel_power_on) {
+		pr_err("%s: panel off\n", __func__);
 		return;
 	}
 
@@ -94,12 +100,12 @@ static int fb_event_callback(struct notifier_block *self,
 	pinfo = &ctrl_pdata->panel_data.panel_info;
 
 	if (!(pinfo->esd_check_enabled)) {
-		pr_debug("ESD check is not enaled in panel dtsi\n");
+		pr_info("ESD check is not enaled in panel dtsi\n");
 		return NOTIFY_DONE;
 	}
 
 	if (dsi_status_disable) {
-		pr_debug("%s: DSI status disabled\n", __func__);
+		pr_info("%s: DSI status disabled\n", __func__);
 		return NOTIFY_DONE;
 	}
 

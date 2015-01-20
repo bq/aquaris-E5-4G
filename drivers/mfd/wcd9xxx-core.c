@@ -1411,9 +1411,12 @@ static int wcd9xxx_dt_parse_micbias_info(struct device *dev,
 		micbias->bias4_cfilt_sel = (u8)prop_val;
 
 	/* micbias external cap */
+
 	micbias->bias1_cap_mode =
 	    (of_property_read_bool(dev->of_node, "qcom,cdc-micbias1-ext-cap") ?
 	     MICBIAS_EXT_BYP_CAP : MICBIAS_NO_EXT_BYP_CAP);
+
+
 	micbias->bias2_cap_mode =
 	    (of_property_read_bool(dev->of_node, "qcom,cdc-micbias2-ext-cap") ?
 	     MICBIAS_EXT_BYP_CAP : MICBIAS_NO_EXT_BYP_CAP);

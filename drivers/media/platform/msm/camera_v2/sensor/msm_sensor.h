@@ -35,6 +35,23 @@
 
 #define DEFINE_MSM_MUTEX(mutexname) \
 	static struct mutex mutexname = __MUTEX_INITIALIZER(mutexname)
+	
+#if defined(CONFIG_L6300_COMMON) || defined(CONFIG_L6140_COMMON)
+#define YUV_SENSOR_REGISTER_AS_DEV_VIDEO2       1 // /dev/video2
+#define KK_CAMERA_CTS  1
+#else
+#define YUV_SENSOR_REGISTER_AS_DEV_VIDEO2       0 // /dev/video2
+#define KK_CAMERA_CTS 0
+#endif
+
+#if YUV_SENSOR_REGISTER_AS_DEV_VIDEO2
+extern struct platform_device * tmp_pdev;
+extern const void * tmp_data;
+extern int32_t is_yuv_sensor ; 
+#endif
+#if KK_CAMERA_CTS
+extern int front_sensor_is_poweruped;
+#endif
 
 struct msm_sensor_ctrl_t;
 
@@ -74,6 +91,7 @@ struct msm_sensor_ctrl_t {
 	uint32_t id;
 	struct device_node *of_node;
 	enum msm_camera_stream_type_t camera_stream_type;
+	uint32_t set_mclk_23880000;
 };
 
 int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp);
@@ -108,4 +126,14 @@ int32_t msm_sensor_get_dt_gpio_set_tbl(struct device_node *of_node,
 int32_t msm_sensor_init_gpio_pin_tbl(struct device_node *of_node,
 	struct msm_camera_gpio_conf *gconf, uint16_t *gpio_array,
 	uint16_t gpio_array_size);
+
+int32_t msm_sensor_init_device_name(void);
+void msm_sensor_set_module_info(struct msm_sensor_ctrl_t *s_ctrl);
+
+#if YUV_SENSOR_REGISTER_AS_DEV_VIDEO2
+ int32_t lct_is_yuv_sensor(const char* sensor_name);
+int32_t msm_yuv_sensor_platform_probe(struct platform_device *pdev,
+				  const void *data);
+#endif
+
 #endif

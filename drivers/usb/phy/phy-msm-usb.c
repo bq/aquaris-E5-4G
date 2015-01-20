@@ -91,7 +91,7 @@ module_param(lpm_disconnect_thresh , uint, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(lpm_disconnect_thresh,
 	"Delay before entering LPM on USB disconnect");
 
-static bool floated_charger_enable;
+static bool floated_charger_enable = true;
 module_param(floated_charger_enable , bool, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(floated_charger_enable,
 	"Whether to enable floated charger");
@@ -121,6 +121,10 @@ static inline bool aca_enabled(void)
 }
 
 static int vdd_val[VDD_VAL_MAX];
+static u32 bus_freqs[USB_NUM_BUS_CLOCKS];	/* bimc, snoc, pcnoc clk */;
+static char bus_clkname[USB_NUM_BUS_CLOCKS][20] = {"bimc_clk", "snoc_clk",
+						"pcnoc_clk"};
+static bool bus_clk_rate_set;
 
 static int msm_hsusb_ldo_init(struct msm_otg *motg, int init)
 {
@@ -860,6 +864,78 @@ static int msm_otg_set_suspend(struct usb_phy *phy, int suspend)
 	return 0;
 }
 
+static int msm_otg_bus_freq_get(struct device *dev, struct msm_otg *motg)
+{
+	struct device_node *np = dev->of_node;
+	int len = 0;
+	int i;
+	int ret;
+
+	if (!np)
+		return -EINVAL;
+
+	of_find_property(np, "qcom,bus-clk-rate", &len);
+	if (!len || (len / sizeof(u32) != USB_NUM_BUS_CLOCKS)) {
+		pr_err("Invalid bus clock rate parameters\n");
+		return -EINVAL;
+	}
+	of_property_read_u32_array(np, "qcom,bus-clk-rate", bus_freqs,
+		USB_NUM_BUS_CLOCKS);
+	for (i = 0; i < USB_NUM_BUS_CLOCKS; i++) {
+		motg->bus_clks[i] = devm_clk_get(motg->phy.dev,
+				bus_clkname[i]);
+		if (IS_ERR(motg->bus_clks[i])) {
+			pr_err("%s get failed\n", bus_clkname[i]);
+			return PTR_ERR(motg->bus_clks[i]);
+		}
+		ret = clk_set_rate(motg->bus_clks[i], bus_freqs[i]);
+		if (ret) {
+			pr_err("%s set rate failed: %d\n", bus_clkname[i],
+				ret);
+			return ret;
+		}
+		pr_debug("%s set at %lu Hz\n", bus_clkname[i],
+			clk_get_rate(motg->bus_clks[i]));
+	}
+	bus_clk_rate_set = true;
+	return 0;
+}
+
+static void msm_otg_bus_clks_enable(struct msm_otg *motg)
+{
+	int i;
+	int ret;
+
+	if (!bus_clk_rate_set || motg->bus_clks_enabled)
+		return;
+
+	for (i = 0; i < USB_NUM_BUS_CLOCKS; i++) {
+		ret = clk_prepare_enable(motg->bus_clks[i]);
+		if (ret) {
+			pr_err("%s enable rate failed: %d\n", bus_clkname[i],
+				ret);
+			goto err_clk_en;
+		}
+	}
+	motg->bus_clks_enabled = true;
+	return;
+err_clk_en:
+	for (--i; i >= 0; --i)
+		clk_disable_unprepare(motg->bus_clks[i]);
+}
+
+static void msm_otg_bus_clks_disable(struct msm_otg *motg)
+{
+	int i;
+
+	if (!bus_clk_rate_set || !motg->bus_clks_enabled)
+		return;
+
+	for (i = 0; i < USB_NUM_BUS_CLOCKS; i++)
+		clk_disable_unprepare(motg->bus_clks[i]);
+	motg->bus_clks_enabled = false;
+}
+
 static void msm_otg_bus_vote(struct msm_otg *motg, enum usb_bus_vote vote)
 {
 	int ret;
@@ -876,6 +952,10 @@ static void msm_otg_bus_vote(struct msm_otg *motg, enum usb_bus_vote vote)
 		if (ret)
 			dev_err(motg->phy.dev, "%s: Failed to vote (%d)\n"
 				   "for bus bw %d\n", __func__, vote, ret);
+		if (vote == USB_MAX_PERF_VOTE)
+			msm_otg_bus_clks_enable(motg);
+		else
+			msm_otg_bus_clks_disable(motg);
 	}
 }
 
@@ -2757,7 +2837,7 @@ static void msm_otg_sm_work(struct work_struct *w)
 					break;
 				case USB_FLOATED_CHARGER:
 					msm_otg_notify_charger(motg,
-							IDEV_CHG_MAX);
+							IDEV_CHG_MIN);
 					pm_runtime_put_noidle(otg->phy->dev);
 					pm_runtime_suspend(otg->phy->dev);
 					break;
@@ -3471,6 +3551,11 @@ static irqreturn_t msm_otg_irq(int irq, void *data)
 	return ret;
 }
 
+#ifdef CONFIG_TOUCHSCREEN_FT5X06
+extern struct work_struct usbdetect_on;
+extern struct work_struct usbdetect_off;
+#endif
+
 static void msm_otg_set_vbus_state(int online)
 {
 	struct msm_otg *motg = the_msm_otg;
@@ -3478,10 +3563,16 @@ static void msm_otg_set_vbus_state(int online)
 
 	if (online) {
 		pr_debug("PMIC: BSV set\n");
+#ifdef CONFIG_TOUCHSCREEN_FT5X06
+		schedule_work(&usbdetect_on);
+#endif
 		if (test_and_set_bit(B_SESS_VLD, &motg->inputs) && init)
 			return;
 	} else {
 		pr_debug("PMIC: BSV clear\n");
+#ifdef CONFIG_TOUCHSCREEN_FT5X06
+		schedule_work(&usbdetect_off);
+#endif
 		if (!test_and_clear_bit(B_SESS_VLD, &motg->inputs) && init)
 			return;
 	}
@@ -3499,11 +3590,17 @@ static void msm_otg_set_vbus_state(int online)
 
 	if (!init) {
 		init = true;
+		if (pmic_vbus_init.done &&
+				test_bit(B_SESS_VLD, &motg->inputs)) {
+			pr_debug("PMIC: BSV came late\n");
+			goto out;
+		}
 		complete(&pmic_vbus_init);
 		pr_debug("PMIC: BSV init complete\n");
 		return;
 	}
 
+out:
 	if (test_bit(MHL, &motg->inputs) ||
 			mhl_det_in_progress) {
 		pr_debug("PMIC: BSV interrupt ignored in MHL\n");
@@ -4454,7 +4551,16 @@ struct msm_otg_platform_data *msm_otg_dt_to_pdata(struct platform_device *pdev)
 	pdata->usb_id_gpio = of_get_named_gpio(node, "qcom,usbid-gpio", 0);
 	if (pdata->usb_id_gpio < 0)
 		pr_debug("usb_id_gpio is not available\n");
-
+#if defined(CONFIG_L8200_COMMON) || defined(CONFIG_L8700_COMMON) || defined(CONFIG_L6300_COMMON)
+	pdata->usbid_switch = of_get_named_gpio(node, "qcom,usbid-switch", 0);
+	if (pdata->usb_id_gpio < 0)
+		pr_debug("usbid_switch is not available\n");
+	else
+	{
+		gpio_request(pdata->usbid_switch, "USB_ID_SWITCH");
+		gpio_direction_output(pdata->usbid_switch, 1);
+	}
+#endif
 	pdata->l1_supported = of_property_read_bool(node,
 				"qcom,hsusb-l1-supported");
 	pdata->enable_ahb2ahb_bypass = of_property_read_bool(node,
@@ -4620,6 +4726,10 @@ static int msm_otg_probe(struct platform_device *pdev)
 			msm_otg_bus_vote(motg, USB_MIN_PERF_VOTE);
 		}
 	}
+
+	ret = msm_otg_bus_freq_get(motg->phy.dev, motg);
+	if (ret)
+		pr_err("failed to vote for explicit noc rates: %d\n", ret);
 
 	/*
 	 * ACA ID_GND threshold range is overlapped with OTG ID_FLOAT.  Hence
@@ -5220,8 +5330,6 @@ static int msm_otg_pm_resume(struct device *dev)
 	dev_dbg(dev, "OTG PM resume\n");
 
 	motg->pm_done = 0;
-	if (!motg->host_bus_suspend)
-		atomic_set(&motg->pm_suspended, 0);
 
 	if (motg->async_int || motg->sm_work_pending ||
 			!pm_runtime_suspended(dev)) {
@@ -5233,14 +5341,7 @@ static int msm_otg_pm_resume(struct device *dev)
 		pm_runtime_set_active(dev);
 		pm_runtime_enable(dev);
 
-		/*
-		 * Defer any host mode disconnect events until
-		 * all devices are RESUMED
-		 */
-		if (motg->sm_work_pending && !motg->host_bus_suspend) {
-			motg->sm_work_pending = false;
-			queue_work(system_nrt_wq, &motg->sm_work);
-		}
+		/* sm work will start in pm notify */
 	}
 
 	return ret;

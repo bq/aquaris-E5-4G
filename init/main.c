@@ -427,6 +427,21 @@ void __init parse_early_param(void)
 
 	/* All fall through to do_early_param. */
 	strlcpy(tmp_cmdline, boot_command_line, COMMAND_LINE_SIZE);
+//++++>
+	{
+		extern char android_boot_mode[16];
+		char *p_src = NULL, *p_dst = &android_boot_mode[0];
+		unsigned int len = sizeof(android_boot_mode);
+		memset(android_boot_mode, 0, sizeof(android_boot_mode));
+		p_src = strstr(tmp_cmdline, "androidboot.mode=");
+		if(p_src)
+		{
+			p_src += strlen("androidboot.mode=");
+			while(*p_src && len-- && *p_src!=' ')
+				*p_dst++ = *p_src++;
+		}
+	}
+//<++++ xuke @ 20140911		Get charger mode used in the probe function of TP driver.
 	parse_early_options(tmp_cmdline);
 	done = 1;
 }

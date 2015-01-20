@@ -779,6 +779,14 @@ void encode_rsp_and_send(int buf_length)
 		 */
 		usleep_range(10000, 10100);
 		retry_count++;
+
+		/*
+		 * There can be a race conditon that clears the data ready flag
+		 * for responses. Make sure we don't miss previous wakeups for
+		 * draining responses when we are in Memory Device Mode.
+		 */
+		if (driver->logging_mode == MEMORY_DEVICE_MODE)
+			chk_logging_wakeup();
 	}
 	if (driver->rsp_buf_busy) {
 		pr_err("diag: unable to get hold of response buffer\n");
@@ -1618,6 +1626,14 @@ int diag_process_apps_pkt(unsigned char *buf, int len)
 		kernel_restart(NULL);
 		/* Not required, represents that command isnt sent to modem */
 		return 0;
+	}
+	else if((cpu_is_msm8x60() || cpu_is_msm8916() || chk_apps_master()) &&( (*buf == 0x29) && (*(buf+1) == 0x2))) { 
+		/* call reset API */ 
+		printk(KERN_CRIT "diag: reset mode set, Rebooting SoC.....\n"); 
+		msm_set_restart_mode(RESTART_NORMAL); 
+		kernel_restart(NULL); 
+		/* Not required, represents that command isnt sent to modem */ 
+		return 0; 
 	}
 	/* Check for polling for Apps only DIAG */
 	else if ((*buf == 0x4b) && (*(buf+1) == 0x32) &&

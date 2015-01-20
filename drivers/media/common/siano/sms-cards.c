@@ -18,64 +18,66 @@
  */
 
 #include "sms-cards.h"
+#ifdef SMS_RC_SUPPORT_SUBSYS
 #include "smsir.h"
-#include <linux/module.h>
-
-static int sms_dbg;
-module_param_named(cards_dbg, sms_dbg, int, 0644);
-MODULE_PARM_DESC(cards_dbg, "set debug level (info=1, adv=2 (or-able))");
-
+#endif
 static struct sms_board sms_boards[] = {
 	[SMS_BOARD_UNKNOWN] = {
-		.name	= "Unknown board",
+	/* 0 */
+		.name = "Unknown board",
 		.type = SMS_UNKNOWN_TYPE,
-		.default_mode = DEVICE_MODE_NONE,
+		.default_mode = SMSHOSTLIB_DEVMD_NONE,
 	},
 	[SMS1XXX_BOARD_SIANO_STELLAR] = {
-		.name	= "Siano Stellar Digital Receiver",
-		.type	= SMS_STELLAR,
-		.default_mode = DEVICE_MODE_DVBT_BDA,
+	/* 1 */
+		.name =	"Siano Stellar Digital Receiver",
+		.type = SMS_STELLAR,
+		.default_mode = SMSHOSTLIB_DEVMD_DVBT_BDA,
 	},
 	[SMS1XXX_BOARD_SIANO_NOVA_A] = {
-		.name	= "Siano Nova A Digital Receiver",
-		.type	= SMS_NOVA_A0,
-		.default_mode = DEVICE_MODE_DVBT_BDA,
+	/* 2 */
+		.name = "Siano Nova A Digital Receiver",
+		.type = SMS_NOVA_A0,
+		.default_mode = SMSHOSTLIB_DEVMD_DVBT_BDA,
 	},
 	[SMS1XXX_BOARD_SIANO_NOVA_B] = {
-		.name	= "Siano Nova B Digital Receiver",
-		.type	= SMS_NOVA_B0,
-		.default_mode = DEVICE_MODE_DVBT_BDA,
+	/* 3 */
+		.name = "Siano Nova B Digital Receiver",
+		.type = SMS_NOVA_B0,
+		.default_mode = SMSHOSTLIB_DEVMD_DVBT_BDA,
 	},
 	[SMS1XXX_BOARD_SIANO_VEGA] = {
-		.name	= "Siano Vega Digital Receiver",
-		.type	= SMS_VEGA,
-		.default_mode = DEVICE_MODE_CMMB,
+	/* 4 */
+		.name = "Siano Vega Digital Receiver",
+		.type = SMS_VEGA,
+		.default_mode = SMSHOSTLIB_DEVMD_CMMB,
 	},
 	[SMS1XXX_BOARD_HAUPPAUGE_CATAMOUNT] = {
-		.name	= "Hauppauge Catamount",
-		.type	= SMS_STELLAR,
-		.fw[DEVICE_MODE_DVBT_BDA] = SMS_FW_DVBT_STELLAR,
-		.default_mode = DEVICE_MODE_DVBT_BDA,
+	/* 5 */
+		.name = "Hauppauge Catamount",
+		.type = SMS_STELLAR,
+		.fw[SMSHOSTLIB_DEVMD_DVBT_BDA] = "sms1xxx-stellar-dvbt-01.fw",
+		.default_mode = SMSHOSTLIB_DEVMD_DVBT_BDA,
 	},
 	[SMS1XXX_BOARD_HAUPPAUGE_OKEMO_A] = {
-		.name	= "Hauppauge Okemo-A",
-		.type	= SMS_NOVA_A0,
-		.fw[DEVICE_MODE_DVBT_BDA] = SMS_FW_DVBT_NOVA_A,
-		.default_mode = DEVICE_MODE_DVBT_BDA,
+	/* 6 */
+		.name = "Hauppauge Okemo-A",
+		.type = SMS_NOVA_A0,
+		.fw[SMSHOSTLIB_DEVMD_DVBT_BDA] = "sms1xxx-nova-a-dvbt-01.fw",
+		.default_mode = SMSHOSTLIB_DEVMD_DVBT_BDA,
 	},
 	[SMS1XXX_BOARD_HAUPPAUGE_OKEMO_B] = {
-		.name	= "Hauppauge Okemo-B",
-		.type	= SMS_NOVA_B0,
-		.fw[DEVICE_MODE_DVBT_BDA] = SMS_FW_DVBT_NOVA_B,
-		.default_mode = DEVICE_MODE_DVBT_BDA,
+	/* 7 */
+		.name = "Hauppauge Okemo-B",
+		.type = SMS_NOVA_B0,
+		.fw[SMSHOSTLIB_DEVMD_DVBT_BDA] = "sms1xxx-nova-b-dvbt-01.fw",
 	},
 	[SMS1XXX_BOARD_HAUPPAUGE_WINDHAM] = {
-		.name	= "Hauppauge WinTV MiniStick",
-		.type	= SMS_NOVA_B0,
-		.fw[DEVICE_MODE_ISDBT_BDA] = SMS_FW_ISDBT_HCW_55XXX,
-		.fw[DEVICE_MODE_DVBT_BDA]  = SMS_FW_DVBT_HCW_55XXX,
-		.default_mode = DEVICE_MODE_DVBT_BDA,
-		.rc_codes = RC_MAP_HAUPPAUGE,
+	/* 8 */
+		.name = "Hauppauge WinTV MiniStick",
+		.type = SMS_NOVA_B0,
+		.fw[SMSHOSTLIB_DEVMD_DVBT_BDA] = "sms1xxx-hcw-55xxx-dvbt-02.fw",
+		.default_mode = SMSHOSTLIB_DEVMD_DVBT_BDA,
 		.board_cfg.leds_power = 26,
 		.board_cfg.led0 = 27,
 		.board_cfg.led1 = 28,
@@ -85,78 +87,118 @@ static struct sms_board sms_boards[] = {
 		.led_hi    = 28,
 	},
 	[SMS1XXX_BOARD_HAUPPAUGE_TIGER_MINICARD] = {
+	/* 9 */
 		.name	= "Hauppauge WinTV MiniCard",
 		.type	= SMS_NOVA_B0,
-		.fw[DEVICE_MODE_DVBT_BDA] = SMS_FW_DVBT_HCW_55XXX,
-		.default_mode = DEVICE_MODE_DVBT_BDA,
+		.fw[SMSHOSTLIB_DEVMD_DVBT_BDA] = "sms1xxx-hcw-55xxx-dvbt-02.fw",
+		.default_mode = SMSHOSTLIB_DEVMD_DVBT_BDA,
 		.lna_ctrl  = 29,
 		.board_cfg.foreign_lna0_ctrl = 29,
 		.rf_switch = 17,
 		.board_cfg.rf_switch_uhf = 17,
 	},
 	[SMS1XXX_BOARD_HAUPPAUGE_TIGER_MINICARD_R2] = {
-		.name	= "Hauppauge WinTV MiniCard",
-		.type	= SMS_NOVA_B0,
-		.fw[DEVICE_MODE_DVBT_BDA] = SMS_FW_DVBT_HCW_55XXX,
-		.default_mode = DEVICE_MODE_DVBT_BDA,
+	/* 10 */
+		.name = "Hauppauge WinTV MiniCard",
+		.type = SMS_NOVA_B0,
+		.fw[SMSHOSTLIB_DEVMD_DVBT_BDA] = "sms1xxx-hcw-55xxx-dvbt-02.fw",
+		.default_mode = SMSHOSTLIB_DEVMD_DVBT_BDA,
+		.board_cfg.foreign_lna0_ctrl = 1,
 		.lna_ctrl  = -1,
 	},
 	[SMS1XXX_BOARD_SIANO_NICE] = {
+	/* 11 */
 		.name = "Siano Nice Digital Receiver",
 		.type = SMS_NOVA_B0,
-		.default_mode = DEVICE_MODE_DVBT_BDA,
+		.default_mode = SMSHOSTLIB_DEVMD_DVBT_BDA,
 	},
 	[SMS1XXX_BOARD_SIANO_VENICE] = {
+	/* 12 */
 		.name = "Siano Venice Digital Receiver",
-		.type = SMS_VEGA,
-		.default_mode = DEVICE_MODE_CMMB,
+		.type = SMS_VENICE,
+		.default_mode = SMSHOSTLIB_DEVMD_CMMB,
 	},
 	[SMS1XXX_BOARD_SIANO_STELLAR_ROM] = {
-		.name = "Siano Stellar Digital Receiver ROM",
+	/* 13 */
+		.name =
+		"Siano Stellar Digital Receiver ROM",
 		.type = SMS_STELLAR,
-		.default_mode = DEVICE_MODE_DVBT_BDA,
+		.default_mode = SMSHOSTLIB_DEVMD_DVBT_BDA,
 		.intf_num = 1,
 	},
 	[SMS1XXX_BOARD_ZTE_DVB_DATA_CARD] = {
+	/* 14 */
 		.name = "ZTE Data Card Digital Receiver",
 		.type = SMS_NOVA_B0,
-		.default_mode = DEVICE_MODE_DVBT_BDA,
+		.default_mode = SMSHOSTLIB_DEVMD_DVBT_BDA,
 		.intf_num = 5,
 		.mtu = 15792,
 	},
 	[SMS1XXX_BOARD_ONDA_MDTV_DATA_CARD] = {
+	/* 15 */
 		.name = "ONDA Data Card Digital Receiver",
 		.type = SMS_NOVA_B0,
-		.default_mode = DEVICE_MODE_DVBT_BDA,
+		.default_mode = SMSHOSTLIB_DEVMD_DVBT_BDA,
 		.intf_num = 6,
 		.mtu = 15792,
 	},
 	[SMS1XXX_BOARD_SIANO_MING] = {
+	/* 16 */
 		.name = "Siano Ming Digital Receiver",
 		.type = SMS_MING,
-		.default_mode = DEVICE_MODE_CMMB,
+		.default_mode = SMSHOSTLIB_DEVMD_CMMB,
 	},
 	[SMS1XXX_BOARD_SIANO_PELE] = {
+	/* 17 */
 		.name = "Siano Pele Digital Receiver",
 		.type = SMS_PELE,
-		.default_mode = DEVICE_MODE_ISDBT_BDA,
+		.default_mode = SMSHOSTLIB_DEVMD_ISDBT_BDA,
 	},
 	[SMS1XXX_BOARD_SIANO_RIO] = {
+	/* 18 */
 		.name = "Siano Rio Digital Receiver",
 		.type = SMS_RIO,
-		.default_mode = DEVICE_MODE_ISDBT_BDA,
+		.default_mode = SMSHOSTLIB_DEVMD_ISDBT_BDA,
 	},
 	[SMS1XXX_BOARD_SIANO_DENVER_1530] = {
-		.name = "Siano Denver (ATSC-M/H) Digital Receiver",
-		.type = SMS_DENVER_1530,
-		.default_mode = DEVICE_MODE_ATSC,
-		.crystal = 2400,
+    /* 19 */
+        .name = "Siano Denver (ATSC-M/H) Digital Receiver",
+        .type = SMS_DENVER_1530,
+        .default_mode = SMSHOSTLIB_DEVMD_ATSC,
+	.crystal = 2400,
+    },
+    [SMS1XXX_BOARD_SIANO_DENVER_2160] = {
+    /* 20 */
+        .name = "Siano Denver (TDMB) Digital Receiver",
+        .type = SMS_DENVER_2160,
+        .default_mode = SMSHOSTLIB_DEVMD_DAB_TDMB,
 	},
-	[SMS1XXX_BOARD_SIANO_DENVER_2160] = {
-		.name = "Siano Denver (TDMB) Digital Receiver",
-		.type = SMS_DENVER_2160,
-		.default_mode = DEVICE_MODE_DAB_TDMB,
+    [SMS1XXX_BOARD_SIANO_QING] = {
+    /* 21 */
+	.name = "Siano Qing Digital Receiver",
+	.type = SMS_QING,
+	.default_mode = SMSHOSTLIB_DEVMD_CMMB,
+    },
+    [SMS1XXX_BOARD_SIANO_ZICO] = {
+    /* 22 */
+	.name = "Siano Zico Digital Receiver",
+	.type = SMS_ZICO,
+	.default_mode = SMSHOSTLIB_DEVMD_ISDBT,
+    },
+    [SMS1XXX_BOARD_SIANO_SANTOS] = {
+    /* 23 */
+	.name = "Siano Santos Digital Receiver",
+	.type = SMS_SANTOS,
+	.default_mode = SMSHOSTLIB_DEVMD_ISDBT,
+    },
+	[SMS1XXX_BOARD_SIANO_SIENA] = {
+	/* 24 */
+		.name = "Siano Siena Digital Receiver",
+		.type = SMS_SIENA,
+		.default_mode = SMSHOSTLIB_DEVMD_DVBT2,
 	},
+
+
 };
 
 struct sms_board *sms_get_board(unsigned id)
@@ -165,35 +207,115 @@ struct sms_board *sms_get_board(unsigned id)
 
 	return &sms_boards[id];
 }
-EXPORT_SYMBOL_GPL(sms_get_board);
+
 static inline void sms_gpio_assign_11xx_default_led_config(
-		struct smscore_config_gpio *p_gpio_config) {
-	p_gpio_config->direction = SMS_GPIO_DIRECTION_OUTPUT;
-	p_gpio_config->inputcharacteristics =
-		SMS_GPIO_INPUTCHARACTERISTICS_NORMAL;
-	p_gpio_config->outputdriving = SMS_GPIO_OUTPUTDRIVING_4mA;
-	p_gpio_config->outputslewrate = SMS_GPIO_OUTPUT_SLEW_RATE_0_45_V_NS;
-	p_gpio_config->pullupdown = SMS_GPIO_PULLUPDOWN_NONE;
+		struct smscore_gpio_config *pGpioConfig) {
+	pGpioConfig->direction = SMS_GPIO_DIRECTION_OUTPUT;
+	pGpioConfig->input_characteristics = SMS_GPIO_INPUTCHARACTERISTICS_NORMAL;
+	pGpioConfig->output_driving = SMS_GPIO_OUTPUTDRIVING_4mA;
+	pGpioConfig->output_slew_rate = SMS_GPIO_OUTPUTSLEWRATE_0_45_V_NS;
+	pGpioConfig->pull_up_down = SMS_GPIO_PULLUPDOWN_NONE;
 }
 
-int sms_board_event(struct smscore_device_t *coredev,
-		    enum SMS_BOARD_EVENTS gevent)
-{
-	struct smscore_config_gpio my_gpio_config;
+int sms_board_event(void *coredev,
+		enum SMS_BOARD_EVENTS gevent) {
 
-	sms_gpio_assign_11xx_default_led_config(&my_gpio_config);
+	struct sms_board *board;
+	struct smscore_gpio_config MyGpioConfig;
+	struct sms_properties_t properties;
+
+	smscore_get_device_properties(coredev, &properties);
+	board = sms_get_board(properties.board_id);
+
+	sms_gpio_assign_11xx_default_led_config(&MyGpioConfig);
 
 	switch (gevent) {
 	case BOARD_EVENT_POWER_INIT: /* including hotplug */
+		switch (properties.board_id) {
+		case SMS1XXX_BOARD_HAUPPAUGE_WINDHAM:
+			/* set I/O and turn off all LEDs */
+			smscore_gpio_configure(coredev,
+					board->board_cfg.leds_power,
+					&MyGpioConfig);
+			smscore_gpio_set_level(coredev,
+					board->board_cfg.leds_power, 0);
+			smscore_gpio_configure(coredev, board->board_cfg.led0,
+					&MyGpioConfig);
+			smscore_gpio_set_level(coredev,
+					board->board_cfg.led0, 0);
+			smscore_gpio_configure(coredev, board->board_cfg.led1,
+					&MyGpioConfig);
+			smscore_gpio_set_level(coredev,
+					board->board_cfg.led1, 0);
+			break;
+		case SMS1XXX_BOARD_HAUPPAUGE_TIGER_MINICARD_R2:
+		case SMS1XXX_BOARD_HAUPPAUGE_TIGER_MINICARD:
+			/* set I/O and turn off LNA */
+			smscore_gpio_configure(coredev,
+					board->board_cfg.foreign_lna0_ctrl,
+					&MyGpioConfig);
+			smscore_gpio_set_level(coredev,
+					board->board_cfg.foreign_lna0_ctrl,
+					0);
+			break;
+		}
 		break; /* BOARD_EVENT_BIND */
 
 	case BOARD_EVENT_POWER_SUSPEND:
+		switch (properties.board_id) {
+		case SMS1XXX_BOARD_HAUPPAUGE_WINDHAM:
+			smscore_gpio_set_level(coredev,
+						board->board_cfg.leds_power, 0);
+			smscore_gpio_set_level(coredev,
+						board->board_cfg.led0, 0);
+			smscore_gpio_set_level(coredev,
+						board->board_cfg.led1, 0);
+			break;
+		case SMS1XXX_BOARD_HAUPPAUGE_TIGER_MINICARD_R2:
+		case SMS1XXX_BOARD_HAUPPAUGE_TIGER_MINICARD:
+			smscore_gpio_set_level(coredev,
+					board->board_cfg.foreign_lna0_ctrl,
+					0);
+			break;
+		}
 		break; /* BOARD_EVENT_POWER_SUSPEND */
 
 	case BOARD_EVENT_POWER_RESUME:
+		switch (properties.board_id) {
+		case SMS1XXX_BOARD_HAUPPAUGE_WINDHAM:
+			smscore_gpio_set_level(coredev,
+						board->board_cfg.leds_power, 1);
+			smscore_gpio_set_level(coredev,
+						board->board_cfg.led0, 1);
+			smscore_gpio_set_level(coredev,
+						board->board_cfg.led1, 0);
+			break;
+		case SMS1XXX_BOARD_HAUPPAUGE_TIGER_MINICARD_R2:
+		case SMS1XXX_BOARD_HAUPPAUGE_TIGER_MINICARD:
+			smscore_gpio_set_level(coredev,
+					board->board_cfg.foreign_lna0_ctrl,
+					1);
+			break;
+		}
 		break; /* BOARD_EVENT_POWER_RESUME */
 
 	case BOARD_EVENT_BIND:
+		switch (properties.board_id) {
+		case SMS1XXX_BOARD_HAUPPAUGE_WINDHAM:
+			smscore_gpio_set_level(coredev,
+				board->board_cfg.leds_power, 1);
+			smscore_gpio_set_level(coredev,
+				board->board_cfg.led0, 1);
+			smscore_gpio_set_level(coredev,
+				board->board_cfg.led1, 0);
+			break;
+		case SMS1XXX_BOARD_HAUPPAUGE_TIGER_MINICARD_R2:
+		case SMS1XXX_BOARD_HAUPPAUGE_TIGER_MINICARD:
+			smscore_gpio_set_level(coredev,
+					board->board_cfg.foreign_lna0_ctrl,
+					1);
+			break;
+		}
 		break; /* BOARD_EVENT_BIND */
 
 	case BOARD_EVENT_SCAN_PROG:
@@ -203,8 +325,20 @@ int sms_board_event(struct smscore_device_t *coredev,
 	case BOARD_EVENT_EMERGENCY_WARNING_SIGNAL:
 		break; /* BOARD_EVENT_EMERGENCY_WARNING_SIGNAL */
 	case BOARD_EVENT_FE_LOCK:
+		switch (properties.board_id) {
+		case SMS1XXX_BOARD_HAUPPAUGE_WINDHAM:
+			smscore_gpio_set_level(coredev,
+			board->board_cfg.led1, 1);
+			break;
+		}
 		break; /* BOARD_EVENT_FE_LOCK */
 	case BOARD_EVENT_FE_UNLOCK:
+		switch (properties.board_id) {
+		case SMS1XXX_BOARD_HAUPPAUGE_WINDHAM:
+			smscore_gpio_set_level(coredev,
+						board->board_cfg.led1, 0);
+			break;
+		}
 		break; /* BOARD_EVENT_FE_UNLOCK */
 	case BOARD_EVENT_DEMOD_LOCK:
 		break; /* BOARD_EVENT_DEMOD_LOCK */
@@ -231,18 +365,17 @@ int sms_board_event(struct smscore_device_t *coredev,
 	}
 	return 0;
 }
-EXPORT_SYMBOL_GPL(sms_board_event);
 
-static int sms_set_gpio(struct smscore_device_t *coredev, int pin, int enable)
+static int sms_set_gpio(void *coredev, int pin, int enable)
 {
 	int lvl, ret;
 	u32 gpio;
-	struct smscore_config_gpio gpioconfig = {
+	struct smscore_gpio_config gpioconfig = {
 		.direction            = SMS_GPIO_DIRECTION_OUTPUT,
-		.pullupdown           = SMS_GPIO_PULLUPDOWN_NONE,
-		.inputcharacteristics = SMS_GPIO_INPUTCHARACTERISTICS_NORMAL,
-		.outputslewrate       = SMS_GPIO_OUTPUT_SLEW_RATE_FAST,
-		.outputdriving        = SMS_GPIO_OUTPUTDRIVING_S_4mA,
+		.pull_up_down           = SMS_GPIO_PULLUPDOWN_NONE,
+		.input_characteristics = SMS_GPIO_INPUTCHARACTERISTICS_NORMAL,
+		.output_slew_rate       = SMS_GPIO_OUTPUTSLEWRATE_FAST,
+		.output_driving        = SMS_GPIO_OUTPUTDRIVING_4mA,
 	};
 
 	if (pin == 0)
@@ -257,20 +390,25 @@ static int sms_set_gpio(struct smscore_device_t *coredev, int pin, int enable)
 		lvl = enable ? 1 : 0;
 	}
 
-	ret = smscore_configure_gpio(coredev, gpio, &gpioconfig);
+	ret = smscore_gpio_configure(coredev, gpio, &gpioconfig);
 	if (ret < 0)
 		return ret;
 
-	return smscore_set_gpio(coredev, gpio, lvl);
+	return smscore_gpio_set_level(coredev, gpio, lvl);
 }
 
-int sms_board_setup(struct smscore_device_t *coredev)
+int sms_board_setup(void *coredev)
 {
-	int board_id = smscore_get_board_id(coredev);
-	struct sms_board *board = sms_get_board(board_id);
+	struct sms_properties_t properties;
 
-	switch (board_id) {
+	struct sms_board *board;
+
+	smscore_get_device_properties(coredev, &properties);
+	board = sms_get_board(properties.board_id);
+
+	switch (properties.board_id) {
 	case SMS1XXX_BOARD_HAUPPAUGE_WINDHAM:
+		smscore_gpio_set_level(coredev, board->board_cfg.led1, 1);
 		/* turn off all LEDs */
 		sms_set_gpio(coredev, board->led_power, 0);
 		sms_set_gpio(coredev, board->led_hi, 0);
@@ -284,15 +422,19 @@ int sms_board_setup(struct smscore_device_t *coredev)
 	}
 	return 0;
 }
-EXPORT_SYMBOL_GPL(sms_board_setup);
 
-int sms_board_power(struct smscore_device_t *coredev, int onoff)
+
+int sms_board_power(void *coredev, int onoff)
 {
-	int board_id = smscore_get_board_id(coredev);
-	struct sms_board *board = sms_get_board(board_id);
+	struct sms_properties_t properties;
+	struct sms_board *board;
 
-	switch (board_id) {
+	smscore_get_device_properties(coredev, &properties);
+	board = sms_get_board(properties.board_id);
+
+	switch (properties.board_id) {
 	case SMS1XXX_BOARD_HAUPPAUGE_WINDHAM:
+		smscore_gpio_set_level(coredev,	board->board_cfg.led1, 0);
 		/* power LED */
 		sms_set_gpio(coredev,
 			     board->led_power, onoff ? 1 : 0);
@@ -306,18 +448,21 @@ int sms_board_power(struct smscore_device_t *coredev, int onoff)
 	}
 	return 0;
 }
-EXPORT_SYMBOL_GPL(sms_board_power);
 
-int sms_board_led_feedback(struct smscore_device_t *coredev, int led)
+
+int sms_board_led_feedback(void *coredev, int led)
 {
-	int board_id = smscore_get_board_id(coredev);
-	struct sms_board *board = sms_get_board(board_id);
+	struct sms_properties_t properties;
+	struct sms_board *board;
+
+	smscore_get_device_properties(coredev, &properties);
+	board = sms_get_board(properties.board_id);
 
 	/* dont touch GPIO if LEDs are already set */
 	if (smscore_led_state(coredev, -1) == led)
 		return 0;
 
-	switch (board_id) {
+	switch (properties.board_id) {
 	case SMS1XXX_BOARD_HAUPPAUGE_WINDHAM:
 		sms_set_gpio(coredev,
 			     board->led_lo, (led & SMS_LED_LO) ? 1 : 0);
@@ -329,16 +474,19 @@ int sms_board_led_feedback(struct smscore_device_t *coredev, int led)
 	}
 	return 0;
 }
-EXPORT_SYMBOL_GPL(sms_board_led_feedback);
 
-int sms_board_lna_control(struct smscore_device_t *coredev, int onoff)
+
+int sms_board_lna_control(void *coredev, int onoff)
 {
-	int board_id = smscore_get_board_id(coredev);
-	struct sms_board *board = sms_get_board(board_id);
+	struct sms_properties_t properties;
+	struct sms_board *board;
+
+	smscore_get_device_properties(coredev, &properties);
+	board = sms_get_board(properties.board_id);
 
 	sms_debug("%s: LNA %s", __func__, onoff ? "enabled" : "disabled");
 
-	switch (board_id) {
+	switch (properties.board_id) {
 	case SMS1XXX_BOARD_HAUPPAUGE_TIGER_MINICARD_R2:
 	case SMS1XXX_BOARD_HAUPPAUGE_TIGER_MINICARD:
 		sms_set_gpio(coredev,
@@ -348,11 +496,11 @@ int sms_board_lna_control(struct smscore_device_t *coredev, int onoff)
 	}
 	return -EINVAL;
 }
-EXPORT_SYMBOL_GPL(sms_board_lna_control);
+
 
 int sms_board_load_modules(int id)
 {
-	request_module("smsdvb");
+	/* Siano smsmdtv loads all other supported "client" modules*/
 	return 0;
 }
-EXPORT_SYMBOL_GPL(sms_board_load_modules);
+
