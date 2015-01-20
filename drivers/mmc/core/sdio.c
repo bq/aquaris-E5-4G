@@ -841,6 +841,7 @@ try_again:
 		 */
 		mmc_set_clock(host, mmc_sdio_get_max_clock(card));
 
+		mmc_delay(20);
 		/*
 		 * Switch to wider bus (if supported).
 		 */
@@ -947,6 +948,17 @@ out:
 		mmc_release_host(host);
 	}
 }
+
+void mmc_sdio_card_remove(struct mmc_host *host)
+{
+	mmc_sdio_remove(host);
+
+	mmc_claim_host(host);
+	mmc_detach_bus(host);
+	mmc_power_off(host);
+	mmc_release_host(host);
+}
+EXPORT_SYMBOL(mmc_sdio_card_remove);
 
 /*
  * SDIO suspend.  We need to suspend all functions separately.

@@ -35,6 +35,10 @@
 #include <linux/of_irq.h>
 
 #define SYN_I2C_RETRY_TIMES 10
+
+/* For Qualcomm 8916 I2C bulk read limitation */
+#define I2C_LIMIT 255
+static struct i2c_msg *read_msg;
 #define RESET_DELAY 100
 
 static int synaptics_rmi4_i2c_set_page(struct synaptics_rmi4_data *rmi4_data,
@@ -75,21 +79,39 @@ static int synaptics_rmi4_i2c_read(struct synaptics_rmi4_data *rmi4_data,
 	int retval;
 	unsigned char retry;
 	unsigned char buf;
+	unsigned int full = length / I2C_LIMIT; 
+	unsigned int partial = length % I2C_LIMIT;
+	unsigned int total;
+	unsigned int last;
+	int ii;
+	static int msg_length;	
 	struct i2c_client *i2c = to_i2c_client(rmi4_data->pdev->dev.parent);
-	struct i2c_msg msg[] = {
-		{
-			.addr = i2c->addr,
-			.flags = 0,
-			.len = 1,
-			.buf = &buf,
-		},
-		{
-			.addr = i2c->addr,
-			.flags = I2C_M_RD,
-			.len = length,
-			.buf = data,
-		},
-	};
+
+	if ( (full + 2) > msg_length ){
+		kfree(read_msg);
+		msg_length = full + 2;
+		read_msg = kcalloc(msg_length, sizeof(struct i2c_msg), GFP_KERNEL);
+	}
+
+	read_msg[0].addr = i2c->addr;
+	read_msg[0].flags = 0;
+	read_msg[0].len = 1;
+	read_msg[0].buf = &buf;
+
+	if (partial) {
+		total = full + 1;
+		last = partial;
+	} else {
+		total = full;
+		last = I2C_LIMIT;
+	}
+
+	for ( ii = 1; ii <= total; ii++) {
+		read_msg[ii].addr = i2c->addr;
+		read_msg[ii].flags = I2C_M_RD;
+		read_msg[ii].len = ( ii == total ) ? last : I2C_LIMIT;
+		read_msg[ii].buf = data + I2C_LIMIT * (ii - 1);
+	}
 
 	buf = addr & MASK_8BIT;
 
@@ -102,7 +124,7 @@ static int synaptics_rmi4_i2c_read(struct synaptics_rmi4_data *rmi4_data,
 	}
 
 	for (retry = 0; retry < SYN_I2C_RETRY_TIMES; retry++) {
-		if (i2c_transfer(i2c->adapter, msg, 2) == 2) {
+		if (i2c_transfer(i2c->adapter, read_msg, (total + 1)) == (total + 1)) {
 			retval = length;
 			break;
 		}

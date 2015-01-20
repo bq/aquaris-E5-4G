@@ -824,9 +824,14 @@ static u8 sdhci_calc_timeout(struct sdhci_host *host, struct mmc_command *cmd)
 	if (!data)
 		target_timeout = cmd->cmd_timeout_ms * 1000;
 	else {
-		target_timeout = data->timeout_ns / 1000;
-		if (host->clock)
-			target_timeout += data->timeout_clks / host->clock;
+		if (!data->timeout_ns && (host->quirks2 & SDHCI_QUIRK2_USE_RESERVED_MAX_TIMEOUT) &&
+				(host->clock > 400000)) {
+			return 0xE;
+		} else {
+			target_timeout = data->timeout_ns / 1000;
+			if (host->clock)
+				target_timeout += data->timeout_clks / host->clock;
+		}
 	}
 
 	/*
@@ -1735,6 +1740,7 @@ static void sdhci_request(struct mmc_host *mmc, struct mmc_request *mrq)
 					MMC_SEND_TUNING_BLOCK_HS200 :
 					MMC_SEND_TUNING_BLOCK;
 				host->mrq = NULL;
+				host->flags &= ~SDHCI_NEEDS_RETUNING;
 				spin_unlock_irqrestore(&host->lock, flags);
 				sdhci_execute_tuning(mmc, tuning_opcode);
 				spin_lock_irqsave(&host->lock, flags);
@@ -2189,6 +2195,9 @@ static int sdhci_do_start_signal_voltage_switch(struct sdhci_host *host,
 {
 	u16 ctrl;
 	int ret;
+#ifdef CONFIG_SMS_SIANO_IO_VOLTAGE_1P8
+	unsigned char	signal_voltage;		/* signalling voltage (1.8V or 3.3V) */
+#endif
 
 	/*
 	 * Signal Voltage Switching is only applicable for Host Controllers
@@ -2199,7 +2208,24 @@ static int sdhci_do_start_signal_voltage_switch(struct sdhci_host *host,
 
 	ctrl = sdhci_readw(host, SDHCI_HOST_CONTROL2);
 
+#ifdef CONFIG_SMS_SIANO_IO_VOLTAGE_1P8
+	if(host->mmc->index == 1)
+		pr_info("%s:%s set signal voltage to %d\n",
+			mmc_hostname(host->mmc), __func__, ios->signal_voltage);
+#endif
+
+#ifdef CONFIG_SMS_SIANO_IO_VOLTAGE_1P8
+	if(host->mmc->index == 1)
+		signal_voltage = MMC_SIGNAL_VOLTAGE_180;
+	else
+		signal_voltage = ios->signal_voltage;
+	if(host->mmc->index == 1)
+		pr_info("%s:%s force set signal voltage to %d\n",
+			mmc_hostname(host->mmc), __func__, signal_voltage);
+	switch (signal_voltage) {
+#else
 	switch (ios->signal_voltage) {
+#endif
 	case MMC_SIGNAL_VOLTAGE_330:
 		/* Set 1.8V Signal Enable in the Host Control2 register to 0 */
 		ctrl &= ~SDHCI_CTRL_VDD_180;
@@ -2771,6 +2797,7 @@ static void sdhci_tuning_timer(unsigned long data)
 static void sdhci_cmd_irq(struct sdhci_host *host, u32 intmask)
 {
 	u16 auto_cmd_status;
+	u32 command;
 	BUG_ON(intmask == 0);
 
 	if (!host->cmd) {
@@ -2802,8 +2829,13 @@ static void sdhci_cmd_irq(struct sdhci_host *host, u32 intmask)
 	}
 
 	if (host->cmd->error) {
-		if (host->cmd->error == -EILSEQ)
-			host->flags |= SDHCI_NEEDS_RETUNING;
+		command = SDHCI_GET_CMD(sdhci_readw(host,
+						    SDHCI_COMMAND));
+		if (host->cmd->error == -EILSEQ &&
+		    (command != MMC_SEND_TUNING_BLOCK_HS400) &&
+		    (command != MMC_SEND_TUNING_BLOCK_HS200) &&
+		    (command != MMC_SEND_TUNING_BLOCK))
+				host->flags |= SDHCI_NEEDS_RETUNING;
 		tasklet_schedule(&host->finish_tasklet);
 		return;
 	}

@@ -314,6 +314,9 @@ static int32_t msm_sensor_validate_slave_info(
 	return 0;
 }
 
+
+
+
 /* static function definition */
 int32_t msm_sensor_driver_probe(void *setting)
 {
@@ -620,6 +623,18 @@ int32_t msm_sensor_driver_probe(void *setting)
 	/*Save sensor info*/
 	s_ctrl->sensordata->cam_slave_info = slave_info;
 
+	msm_sensor_init_device_name();
+	msm_sensor_set_module_info(s_ctrl);
+	
+	#if YUV_SENSOR_REGISTER_AS_DEV_VIDEO2
+	printk("is_yuv_sensor == %d\n",is_yuv_sensor);
+	if(is_yuv_sensor)
+	{
+		printk("we probe yuv sensor here\n");
+		msm_yuv_sensor_platform_probe(tmp_pdev,tmp_data);
+	}
+	#endif
+	
 	return rc;
 
 CAMERA_POWER_DOWN:
@@ -799,6 +814,12 @@ static int32_t msm_sensor_driver_get_dt_data(struct msm_sensor_ctrl_t *s_ctrl)
 	of_property_read_string(of_node, "qcom,vdd-cx-name",
 		&sensordata->misc_regulator);
 	CDBG("qcom,misc_regulator %s", sensordata->misc_regulator);
+
+	s_ctrl->set_mclk_23880000 = of_property_read_bool(of_node,
+						"qcom,mclk-23880000");
+
+	CDBG("%s qcom,mclk-23880000 = %d\n", __func__,
+		s_ctrl->set_mclk_23880000);
 
 	return rc;
 

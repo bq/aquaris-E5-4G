@@ -4334,7 +4334,7 @@ error:
 	if (!ret) {
 		if (wait) {
 			mutex_lock(&ad->lock);
-			init_completion(&ad->comp);
+			INIT_COMPLETION(ad->comp);
 			mutex_unlock(&ad->lock);
 		}
 		if (wait) {
@@ -4907,6 +4907,7 @@ int mdss_mdp_ad_addr_setup(struct mdss_data_type *mdata, u32 *ad_offsets)
 		mdata->ad_cfgs[i].last_str = 0xFFFFFFFF;
 		mdata->ad_cfgs[i].last_bl = 0;
 		mutex_init(&mdata->ad_cfgs[i].lock);
+		init_completion(&mdata->ad_cfgs[i].comp);
 		mdata->ad_cfgs[i].handle.vsync_handler = pp_ad_vsync_handler;
 		mdata->ad_cfgs[i].handle.cmd_post_flush = true;
 		INIT_WORK(&mdata->ad_cfgs[i].calc_work, pp_ad_calc_worker);
@@ -5165,6 +5166,8 @@ static int is_valid_calib_addr(void *addr, u32 operation)
 
 	if ((uintptr_t) addr % 4) {
 		ret = 0;
+	} else if (ptr == mdss_res->mdss_base + MDSS_REG_HW_VERSION) {
+		ret = MDP_PP_OPS_READ;
 	} else if (ptr == (mdss_res->mdp_base + MDSS_MDP_REG_HW_VERSION) ||
 	    ptr == (mdss_res->mdp_base + MDSS_MDP_REG_DISP_INTF_SEL)) {
 		ret = MDP_PP_OPS_READ;
@@ -5219,7 +5222,7 @@ int mdss_mdp_calib_config(struct mdp_calib_config_data *cfg, u32 *copyback)
 
 	/* Calib addrs are always offsets from the MDSS base */
 	ptr = (void *)((unsigned int) cfg->addr) +
-		((uintptr_t) mdss_res->mdp_base);
+		((uintptr_t) mdss_res->mdss_base);
 	if (is_valid_calib_addr(ptr, cfg->ops))
 		ret = 0;
 	else

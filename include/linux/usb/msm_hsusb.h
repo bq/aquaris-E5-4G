@@ -102,11 +102,15 @@ enum msm_usb_phy_type {
 	SNPS_28NM_INTEGRATED_PHY,
 };
 
-#define IDEV_CHG_MAX	1500
+#if defined(CONFIG_L6140_COMMON) || defined(CONFIG_L8200_COMMON)|| defined(CONFIG_L6300_COMMON) || defined(CONFIG_L8700_COMMON)
+#define IDEV_CHG_MAX	1100
+#else
+#define IDEV_CHG_MAX	720
+#endif
 #define IDEV_CHG_MIN	500
 #define IUNIT		100
 
-#define IDEV_ACA_CHG_MAX	1500
+#define IDEV_ACA_CHG_MAX	700
 #define IDEV_ACA_CHG_LIMIT	500
 
 /**
@@ -283,6 +287,9 @@ struct msm_otg_platform_data {
 	bool enable_ahb2ahb_bypass;
 	bool disable_retention_with_vdd_min;
 	int usb_id_gpio;
+#if defined(CONFIG_L8200_COMMON) || defined(CONFIG_L8700_COMMON) || defined(CONFIG_L6300_COMMON)
+	int usbid_switch;
+#endif
 };
 
 /* phy related flags */
@@ -332,6 +339,8 @@ struct msm_otg_platform_data {
 #define B_TST_SRP	8
 #define B_TST_CONFIG	9
 
+#define USB_NUM_BUS_CLOCKS      3
+
 /**
  * struct msm_otg: OTG driver data. Shared by HCD and DCD.
  * @otg: USB OTG Transceiver structure.
@@ -342,6 +351,7 @@ struct msm_otg_platform_data {
  * @pclk: clock struct of iface_clk.
  * @core_clk: clock struct of core_bus_clk.
  * @sleep_clk: clock struct of sleep_clk for USB PHY.
+ * @bus_clks: bimc/snoc/pcnoc clock struct.
  * @core_clk_rate: core clk max frequency
  * @regs: ioremapped register base address.
  * @usb_phy_ctrl_reg: relevant PHY_CTRL_REG register base address.
@@ -371,6 +381,7 @@ struct msm_otg_platform_data {
  * @mhl_enabled: MHL driver registration successful and MHL enabled.
  * @host_bus_suspend: indicates host bus suspend or not.
  * @device_bus_suspend: indicates device bus suspend or not.
+ * @bus_clks_enabled: indicates pcnoc/snoc/bimc clocks are on or not.
  * @chg_check_timer: The timer used to implement the workaround to detect
  *               very slow plug in of wall charger.
  * @ui_enabled: USB Intterupt is enabled or disabled.
@@ -390,6 +401,7 @@ struct msm_otg {
 	struct clk *pclk;
 	struct clk *core_clk;
 	struct clk *sleep_clk;
+	struct clk *bus_clks[USB_NUM_BUS_CLOCKS];
 	long core_clk_rate;
 	struct resource *io_res;
 	void __iomem *regs;
@@ -438,6 +450,7 @@ struct msm_otg {
 	bool mhl_enabled;
 	bool host_bus_suspend;
 	bool device_bus_suspend;
+	bool bus_clks_enabled;
 	struct timer_list chg_check_timer;
 	/*
 	 * Allowing PHY power collpase turns off the HSUSB 3.3v and 1.8v

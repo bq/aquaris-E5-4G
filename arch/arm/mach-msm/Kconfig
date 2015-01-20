@@ -138,6 +138,7 @@ config ARCH_MSM8916
 	select MSM_AUDIO_QDSP6V2 if SND_SOC
 	select ARM_HAS_SG_CHAIN
 	select MSM_RPM_STATS_LOG
+	select ARCH_WANT_KMAP_ATOMIC_FLUSH
 	select MSM_RPM_LOG
 	select MSM_JTAGV8 if CORESIGHT_ETMV4
 
@@ -314,6 +315,89 @@ config ARCH_MSMSAMARIUM
 	select PINCTRL
 	select PINCTRL_MSM_TLMM_V3
 	select MSM_IRQ
+endmenu
+
+menu "LCT Customer of Project Selection"
+
+config L6140_COMMON
+    depends on ARCH_MSM8916
+    depends on !MSM_STACKED_MEMORY
+    default n
+    bool "Longcheer L6140 board"
+    help
+        Support for the L6140 longcheer board.
+
+config L6300_COMMON
+    depends on ARCH_MSM8916
+    depends on !MSM_STACKED_MEMORY
+    default n
+    bool "Longcheer L6300 board"
+    help
+        Support for the L6300 longcheer board.
+
+config LCT_CT300
+    depends on ARCH_MSM8916
+    depends on !MSM_STACKED_MEMORY
+    default n
+    bool "Longcheer CT300 board"
+    help
+        Support for the LCT CT300 longcheer board.
+
+config L6300_LCT_A01
+    depends on ARCH_MSM8916
+    depends on !MSM_STACKED_MEMORY
+    default n
+    bool "Longcheer L6300 A01 board"
+    help
+        Support for the L6300 longcheer board.
+
+config L6300_AEP_A01
+    depends on ARCH_MSM8916
+    depends on !MSM_STACKED_MEMORY
+    default n
+    bool "Longcheer L6300 AEP A01 board"
+    help
+        Support for the L6300 AEP longcheer board.
+
+config L8200_COMMON
+    depends on ARCH_MSM8916
+    depends on !MSM_STACKED_MEMORY
+    default n
+    bool "Longcheer L8200 board"
+    help
+        Support for the L8200 longcheer board.
+
+config L8700_COMMON
+    depends on ARCH_MSM8916
+    depends on !MSM_STACKED_MEMORY
+    default n
+    bool "Longcheer L8700 board"
+    help
+        Support for the L8700 longcheer board.
+
+config CT850_COMMON
+    depends on ARCH_MSM8916
+    depends on !MSM_STACKED_MEMORY
+    default n
+    bool "Longcheer CT850 board"
+    help
+        Support for the CT850 longcheer board.
+	
+config EXT_EARPHONE_PA
+    depends on ARCH_MSM8916
+    depends on !MSM_STACKED_MEMORY
+    default n
+    bool "Longcheer EXT_EARPHONE_PA"
+    help
+        Support for the L8700 longcheer EXT_EARPHONE_PA.
+config LCT_SUPPORT_READ_MBHC_PLUG_TYPE
+    depends on ARCH_MSM8916
+    depends on !MSM_STACKED_MEMORY
+    default n
+    bool "Longcheer LCT_SUPPORT_READ_MBHC_PLUG_TYPE"
+    help
+        Support for the L8700 longcheer LCT_SUPPORT_READ_MBHC_PLUG_TYPE.
+        		
 endmenu
 
 config MSM_KRAIT_TBB_ABORT_HANDLER

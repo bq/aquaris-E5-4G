@@ -149,10 +149,10 @@ source "drivers/media/rc/Kconfig"
 # V4L platform/mem2mem drivers
 #
 
-source "drivers/media/usb/Kconfig"
+#source "drivers/media/usb/Kconfig"
 source "drivers/media/pci/Kconfig"
 source "drivers/media/platform/Kconfig"
-source "drivers/media/mmc/Kconfig"
+#source "drivers/media/mmc/Kconfig"
 source "drivers/media/parport/Kconfig"
 source "drivers/media/radio/Kconfig"
 

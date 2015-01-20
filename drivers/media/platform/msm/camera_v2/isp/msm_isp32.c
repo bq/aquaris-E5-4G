@@ -121,7 +121,9 @@ vfe_remap_failed:
 				msm_vfe32_2_clk_info, vfe_dev->vfe_clk,
 				ARRAY_SIZE(msm_vfe32_2_clk_info), 0);
 clk_enable_failed:
-	regulator_disable(vfe_dev->fs_vfe);
+	if (vfe_dev->fs_vfe) {
+		regulator_disable(vfe_dev->fs_vfe);
+	}
 fs_failed:
 	msm_isp_deinit_bandwidth_mgr(ISP_VFE0 + vfe_dev->pdev->id);
 bus_scale_register_failed:
@@ -1101,6 +1103,15 @@ static void msm_vfe32_get_irq_mask(struct vfe_device *vfe_dev,
 	*irq1_mask = msm_camera_io_r(vfe_dev->vfe_base + 0x20);
 }
 
+static int msm_vfe32_get_reg_update(uint32_t irq0_status,
+	uint32_t irq1_status)
+{
+	int rc = 0;
+	if ((irq0_status & 0x20) || (irq1_status & 0x1C000000))
+		rc = 1;
+	return rc;
+}
+
 static void msm_vfe32_restore_irq_mask(struct vfe_device *vfe_dev)
 {
 	msm_camera_io_w(vfe_dev->error_info.overflow_recover_irq_mask0,
@@ -1277,6 +1288,7 @@ struct msm_vfe_hardware_info vfe32_hw_info = {
 			.get_halt_restart_mask =
 				msm_vfe32_get_halt_restart_mask,
 			.process_error_status = msm_vfe32_process_error_status,
+			.get_regupdate_status = msm_vfe32_get_reg_update,
 		},
 		.stats_ops = {
 			.get_stats_idx = msm_vfe32_get_stats_idx,

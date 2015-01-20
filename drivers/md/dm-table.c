@@ -326,14 +326,14 @@ static struct dm_dev_internal *find_device(struct list_head *l, dev_t dev)
 static int open_dev(struct dm_dev_internal *d, dev_t dev,
 		    struct mapped_device *md)
 {
-	static char *_claim_ptr = "I belong to device-mapper";
+	//static char *_claim_ptr = "I belong to device-mapper";
 	struct block_device *bdev;
 
 	int r;
 
 	BUG_ON(d->dm_dev.bdev);
 
-	bdev = blkdev_get_by_dev(dev, d->dm_dev.mode | FMODE_EXCL, _claim_ptr);
+	bdev = blkdev_get_by_dev(dev, d->dm_dev.mode | FMODE_EXCL, NULL);
 	if (IS_ERR(bdev))
 		return PTR_ERR(bdev);
 
