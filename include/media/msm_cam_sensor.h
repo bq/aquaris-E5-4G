@@ -512,6 +512,9 @@ enum msm_actuator_cfg_type_t {
 	CFG_ACTUATOR_POWERDOWN,
 	CFG_ACTUATOR_POWERUP,
 	CFG_ACTUATOR_INIT,
+// add by gpg
+	CFG_AK7345_ACTUATOR_SET_OTP_TUNE,
+//
 };
 
 enum actuator_type {
@@ -625,6 +628,13 @@ struct msm_actuator_set_position_t {
 	uint16_t delay[MAX_NUMBER_OF_STEPS];
 };
 
+// add by gpg
+struct ak7345_actuator_otp_info_t {
+	uint16_t m_inf_code;
+	uint16_t m_macro_code;
+};
+// end by gpg
+
 struct msm_actuator_cfg_data {
 	int cfgtype;
 	uint8_t is_af_supported;
@@ -634,12 +644,21 @@ struct msm_actuator_cfg_data {
 		struct msm_actuator_get_info_t get_info;
 		struct msm_actuator_set_position_t setpos;
 		enum af_camera_name cam_name;
+		// add by gpg
+		struct ak7345_actuator_otp_info_t ak7345_otp_info;
+		// end by gpg		
 	} cfg;
 };
 
 enum msm_actuator_write_type {
 	MSM_ACTUATOR_WRITE_HW_DAMP,
 	MSM_ACTUATOR_WRITE_DAC,
+	//added for DW9761 begin
+	MSM_ACTUATOR_WRITE_DAC_DW9761,
+	//added for DW9761 end
+	// add for AK7345
+	MSM_ACTUATOR_WRITE_DAC_AK7345,
+	// end for AK7345 
 };
 
 struct msm_actuator_reg_params_t {

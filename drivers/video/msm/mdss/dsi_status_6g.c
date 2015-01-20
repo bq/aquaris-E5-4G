@@ -65,11 +65,19 @@ void mdss_check_dsi_ctrl_status(struct work_struct *work, uint32_t interval)
 		return;
 	}
 
+	if (!ctl->power_on) {
+		schedule_delayed_work(&pstatus_data->check_status,
+			msecs_to_jiffies(interval));
+		pr_err("%s: ctl not powered on\n", __func__);
+		return;
+	}
+
 	if (ctl->shared_lock)
 		mutex_lock(ctl->shared_lock);
 	mutex_lock(&mdp5_data->ov_lock);
 
-	if (pstatus_data->mfd->shutdown_pending) {
+	if (pstatus_data->mfd->shutdown_pending ||
+		!pstatus_data->mfd->panel_power_on) {
 		mutex_unlock(&mdp5_data->ov_lock);
 		if (ctl->shared_lock)
 			mutex_unlock(ctl->shared_lock);

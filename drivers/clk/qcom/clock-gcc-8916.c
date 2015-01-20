@@ -341,7 +341,9 @@ static DEFINE_VDD_REGULATORS(vdd_sr2_pll, VDD_SR2_PLL_NUM, 2,
 static struct pll_freq_tbl apcs_pll_freq[] = {
 	F_APCS_PLL( 998400000, 52, 0x0, 0x1, 0x0, 0x0, 0x0),
 	F_APCS_PLL(1094400000, 57, 0x0, 0x1, 0x0, 0x0, 0x0),
+	F_APCS_PLL(1152000000, 60, 0x0, 0x1, 0x0, 0x0, 0x0),
 	F_APCS_PLL(1190400000, 62, 0x0, 0x1, 0x0, 0x0, 0x0),
+	F_APCS_PLL(1209600000, 63, 0x0, 0x1, 0x0, 0x0, 0x0),
 	F_APCS_PLL(1248000000, 65, 0x0, 0x1, 0x0, 0x0, 0x0),
 	F_APCS_PLL(1401600000, 73, 0x0, 0x1, 0x0, 0x0, 0x0),
 	PLL_F_END
@@ -1190,6 +1192,7 @@ static struct rcg_clk sdcc1_apps_clk_src = {
 static struct clk_freq_tbl ftbl_gcc_sdcc2_apps_clk[] = {
 	F(    144000,	      xo,  16,	  3,   25),
 	F(    400000,	      xo,  12,	  1,	4),
+	F(  15000000,	   gpll0,  16,	  3,	10),
 	F(  20000000,	   gpll0,  10,	  1,	4),
 	F(  25000000,	   gpll0,  16,	  1,	2),
 	F(  50000000,	   gpll0,  16,	  0,	0),
@@ -2794,6 +2797,13 @@ static int msm_gcc_probe(struct platform_device *pdev)
 	regval |= BIT(0);
 	writel_relaxed(regval, GCC_REG_BASE(APCS_GPLL_ENA_VOTE));
 
+	xo_a_clk_src.c.parent = clk_get(&pdev->dev, "xo_a");
+	if (IS_ERR(xo_a_clk_src.c.parent)) {
+		if (!(PTR_ERR(xo_a_clk_src.c.parent) == -EPROBE_DEFER))
+			dev_err(&pdev->dev, "Unable to get xo_a clock!!!\n");
+		return PTR_ERR(xo_a_clk_src.c.parent);
+	}
+
 	ret = of_msm_clock_register(pdev->dev.of_node,
 				msm_clocks_lookup,
 				ARRAY_SIZE(msm_clocks_lookup));
@@ -2808,13 +2818,6 @@ static int msm_gcc_probe(struct platform_device *pdev)
 
 	clk_set_rate(&apss_ahb_clk_src.c, 19200000);
 	clk_prepare_enable(&apss_ahb_clk_src.c);
-
-	xo_a_clk_src.c.parent = clk_get(&pdev->dev, "xo_a");
-	if (IS_ERR(xo_a_clk_src.c.parent)) {
-		if (!(PTR_ERR(xo_a_clk_src.c.parent) == -EPROBE_DEFER))
-			dev_err(&pdev->dev, "Unable to get xo_a clock!!!\n");
-		return PTR_ERR(xo_a_clk_src.c.parent);
-	}
 
 	dev_info(&pdev->dev, "Registered GCC clocks\n");
 

@@ -1208,7 +1208,6 @@ out:
 		*len = 0;
 	return ret;
 }
-
 #define MAX_PROP_SIZE 32
 static int sdhci_msm_dt_parse_vreg_info(struct device *dev,
 		struct sdhci_msm_reg_data **vreg_data, const char *vreg_name)
@@ -1274,7 +1273,6 @@ static int sdhci_msm_dt_parse_vreg_info(struct device *dev,
 
 	return ret;
 }
-
 /* GPIO/Pad data extraction */
 static int sdhci_msm_parse_pinctrl_info(struct device *dev,
 		struct sdhci_msm_pltfm_data *pdata)
@@ -1431,6 +1429,12 @@ static struct sdhci_msm_pltfm_data *sdhci_msm_populate_pdata(struct device *dev)
 	}
 	pdata->sup_clk_table = clk_table;
 	pdata->sup_clk_cnt = clk_table_len;
+	//pr_info("sdhci_msm_populate_pdata:: pdata->sup_clk_cnt is %d\n",pdata->sup_clk_cnt);
+	
+//#ifndef CONFIG_SMS_SIANO_IO_VOLTAGE_1P8
+	//if (pdata->sup_clk_cnt == 2)
+		//clk_table[1] = 25000000;
+//#endif
 
 	pdata->vreg_data = devm_kzalloc(dev, sizeof(struct
 						    sdhci_msm_slot_reg_data),
@@ -1439,19 +1443,19 @@ static struct sdhci_msm_pltfm_data *sdhci_msm_populate_pdata(struct device *dev)
 		dev_err(dev, "failed to allocate memory for vreg data\n");
 		goto out;
 	}
-
+#ifndef CONFIG_SMS_SIANO_POWER
 	if (sdhci_msm_dt_parse_vreg_info(dev, &pdata->vreg_data->vdd_data,
 					 "vdd")) {
 		dev_err(dev, "failed parsing vdd data\n");
 		goto out;
 	}
+#endif
 	if (sdhci_msm_dt_parse_vreg_info(dev,
 					 &pdata->vreg_data->vdd_io_data,
 					 "vdd-io")) {
 		dev_err(dev, "failed parsing vdd-io data\n");
 		goto out;
 	}
-
 	if (sdhci_msm_dt_parse_gpio_info(dev, pdata)) {
 		dev_err(dev, "failed parsing gpio data\n");
 		goto out;
@@ -2057,8 +2061,17 @@ static irqreturn_t sdhci_msm_pwr_irq(int irq, void *data)
 		ret = sdhci_msm_setup_vreg(msm_host->pdata, true, false);
 		if (!ret) {
 			ret = sdhci_msm_setup_pins(msm_host->pdata, true);
+#ifdef CONFIG_SMS_SIANO_IO_VOLTAGE_1P8
+			if(host->mmc->index ==1)
+				ret |= sdhci_msm_set_vdd_io_vol(msm_host->pdata,
+						VDD_IO_LOW, 0);
+			else
+				ret |= sdhci_msm_set_vdd_io_vol(msm_host->pdata,
+						VDD_IO_HIGH, 0);
+#else
 			ret |= sdhci_msm_set_vdd_io_vol(msm_host->pdata,
-					VDD_IO_HIGH, 0);
+						VDD_IO_HIGH, 0);
+#endif
 		}
 		if (ret)
 			irq_ack |= CORE_PWRCTL_BUS_FAIL;
@@ -2066,7 +2079,14 @@ static irqreturn_t sdhci_msm_pwr_irq(int irq, void *data)
 			irq_ack |= CORE_PWRCTL_BUS_SUCCESS;
 
 		pwr_state = REQ_BUS_ON;
+#ifdef CONFIG_SMS_SIANO_IO_VOLTAGE_1P8
+		if(host->mmc->index ==1)
+			io_level = REQ_IO_LOW;
+		else
+			io_level = REQ_IO_HIGH;
+#else
 		io_level = REQ_IO_HIGH;
+#endif
 	}
 	if (irq_status & CORE_PWRCTL_BUS_OFF) {
 		ret = sdhci_msm_setup_vreg(msm_host->pdata, false, false);
@@ -2096,13 +2116,27 @@ static irqreturn_t sdhci_msm_pwr_irq(int irq, void *data)
 	}
 	if (irq_status & CORE_PWRCTL_IO_HIGH) {
 		/* Switch voltage High */
+#ifdef CONFIG_SMS_SIANO_IO_VOLTAGE_1P8
+		if(host->mmc->index ==1)
+			ret = sdhci_msm_set_vdd_io_vol(msm_host->pdata, VDD_IO_LOW, 0);
+		else
+			ret = sdhci_msm_set_vdd_io_vol(msm_host->pdata, VDD_IO_HIGH, 0);
+#else
 		ret = sdhci_msm_set_vdd_io_vol(msm_host->pdata, VDD_IO_HIGH, 0);
+#endif
 		if (ret)
 			irq_ack |= CORE_PWRCTL_IO_FAIL;
 		else
 			irq_ack |= CORE_PWRCTL_IO_SUCCESS;
 
+#ifdef CONFIG_SMS_SIANO_IO_VOLTAGE_1P8
+		if(host->mmc->index ==1)
+			io_level = REQ_IO_LOW;
+		else
+			io_level = REQ_IO_HIGH;
+#else
 		io_level = REQ_IO_HIGH;
+#endif
 	}
 
 	/* ACK status to the core */
@@ -2844,6 +2878,36 @@ static void sdhci_set_default_hw_caps(struct sdhci_msm_host *msm_host,
 	}
 }
 
+#ifdef CONFIG_SMS_SIANO_POWER
+typedef void (*pm_callback_t)(pm_message_t state, void *data);
+extern void sms_sdio_register_pm(pm_callback_t pm_cb, void *data);
+extern void mmc_sdio_card_remove(struct mmc_host *host);
+static void sdhci_msm_pm(pm_message_t state, void *data)
+{
+	struct sdhci_msm_host *msm_host = (struct sdhci_msm_host *)data;
+	int evt = state.event;
+	int card_nonremovable = !!(msm_host->mmc->caps & MMC_CAP_NONREMOVABLE);
+	pr_info("sdhci_msm_pm: mmc host has caps card nonremovable %d \n", card_nonremovable);
+
+	if ((evt == PM_EVENT_USER_SUSPEND)  && msm_host->mmc->card) {
+		pr_info("go to detect remove sdio devices and devices type is %d\n", msm_host->mmc->card->type);
+		//msm_host->mmc->caps &= ~MMC_CAP_NONREMOVABLE;
+		msm_host->mmc->rescan_entered = 0;
+		msm_host->mmc->rescan_disable= 0;
+		mmc_detect_change(msm_host->mmc, 0);
+		mmc_sdio_card_remove(msm_host->mmc);
+	} else if ((evt == PM_EVENT_USER_RESUME)) {
+		pr_info("go to detect sdio devices\n");
+		msm_host->mmc->caps |= MMC_CAP_NONREMOVABLE;
+		msm_host->mmc->rescan_entered = 0;
+		msm_host->mmc->rescan_disable= 0;
+		mmc_detect_change(msm_host->mmc, 0);
+	} else {
+		pr_err("%s: get an error pm state\n", mmc_hostname(msm_host->mmc));
+	}
+}
+#endif
+
 static int sdhci_msm_probe(struct platform_device *pdev)
 {
 	struct sdhci_host *host;
@@ -3216,6 +3280,10 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 			msm_host->pdata->mpm_sdiowakeup_int = -1;
 		}
 	}
+
+	#ifdef CONFIG_SMS_SIANO_POWER
+		sms_sdio_register_pm(sdhci_msm_pm, (void*)msm_host);
+	#endif
 
 	device_enable_async_suspend(&pdev->dev);
 	/* Successful initialization */

@@ -163,6 +163,9 @@ static int modem_ramdump(int enable, const struct subsys_desc *subsys)
 	if (ret < 0)
 		pr_err("Unable to dump modem fw memory (rc = %d).\n", ret);
 
+	dma_free_coherent(&drv->mba_mem_dev, drv->q6->mba_size,
+				drv->q6->mba_virt, drv->q6->mba_phys);
+
 	pil_mss_shutdown(&drv->q6->desc);
 	pil_mss_remove_proxy_votes(&drv->q6->desc);
 	return ret;
@@ -251,6 +254,12 @@ static int pil_mss_loadable_init(struct modem_data *drv,
 	}
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "restart_reg");
+	if (!res) {
+		res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
+							"restart_reg_sec");
+		q6->restart_reg_sec = true;
+	}
+
 	q6->restart_reg = devm_request_and_ioremap(&pdev->dev, res);
 	if (!q6->restart_reg)
 		return -ENOMEM;

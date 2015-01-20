@@ -171,7 +171,7 @@ static inline struct diag_context *func_to_diag(struct usb_function *f)
 {
 	return container_of(f, struct diag_context, function);
 }
-
+#if 0
 static void diag_update_pid_and_serial_num(struct diag_context *ctxt)
 {
 	struct usb_composite_dev *cdev = ctxt->cdev;
@@ -208,7 +208,7 @@ static void diag_update_pid_and_serial_num(struct diag_context *ctxt)
 			break;
 		}
 }
-
+#endif
 static void diag_write_complete(struct usb_ep *ep,
 		struct usb_request *req)
 {
@@ -681,7 +681,7 @@ static int diag_function_bind(struct usb_configuration *c,
 		if (!f->ss_descriptors)
 			goto fail;
 	}
-	diag_update_pid_and_serial_num(ctxt);
+	//diag_update_pid_and_serial_num(ctxt);
 	return 0;
 fail:
 	if (f->ss_descriptors)

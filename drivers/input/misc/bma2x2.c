@@ -1262,7 +1262,10 @@
 #define BOSCH_SENSOR_PLACE_UNKNOWN (-1)
 /*! Bosch sensor remapping table size P0~P7*/
 #define MAX_AXIS_REMAP_TAB_SZ 8
-
+#define BOSCH_SENSOR_PLANE	0
+#define BOSCH_SENSOR_UP	1
+#define BOSCH_SENSOR_DOWN	2
+#define RETRY_TIME	50
 /*!
  * @brief:BMI058 feature
  *  macro definition
@@ -1277,6 +1280,7 @@
 #define C_BMI058_Two_U8X                                 2
 #define BMI058_OFFSET_TRIGGER_X                BMA2X2_OFFSET_TRIGGER_Y
 #define BMI058_OFFSET_TRIGGER_Y                BMA2X2_OFFSET_TRIGGER_X
+#define BMI058_OFFSET_TRIGGER_Z                BMA2X2_OFFSET_TRIGGER_Z
 
 /*! BMI058 X AXIS OFFSET REG definition*/
 #define BMI058_OFFSET_X_AXIS_REG              BMA2X2_OFFSET_Y_AXIS_REG
@@ -1441,6 +1445,10 @@ struct bma2x2_platform_data {
 	bool use_int;
 };
 
+struct bma2x2_suspend_state {
+	bool powerEn;
+};
+
 struct bma2x2_data {
 	struct i2c_client *bma2x2_client;
 	struct sensors_classdev cdev;
@@ -1472,6 +1480,7 @@ struct bma2x2_data {
 #endif
 	int IRQ;
 	struct bma2x2_platform_data *pdata;
+	struct bma2x2_suspend_state suspend_state;
 
 	int ref_count;
 	struct input_dev *dev_interrupt;
@@ -1511,6 +1520,7 @@ static int bma2x2_normal_to_suspend(struct bma2x2_data *bma2x2,
 static int bma2x2_store_state(struct i2c_client *client,
 			struct bma2x2_data *data);
 static int bma2x2_power_ctl(struct bma2x2_data *data, bool on);
+static int bma2x2_eeprom_prog(struct i2c_client *client);
 
 static struct sensors_classdev sensors_cdev = {
 		.name = "bma2x2-accel",
@@ -1528,6 +1538,7 @@ static struct sensors_classdev sensors_cdev = {
 		.delay_msec = POLL_DEFAULT_INTERVAL_MS, /* in millisecond */
 		.sensors_enable = NULL,
 		.sensors_poll_delay = NULL,
+		.sensors_self_test = NULL,
 };
 
 /*Remapping for BMA2X2*/
@@ -4809,6 +4820,15 @@ static int bma2x2_read_accel_xyz(struct i2c_client *client,
 	acc->y = (data[3]<<8)|data[2];
 	acc->z = (data[5]<<8)|data[4];
 
+#if defined(CONFIG_L6300_COMMON) || defined(CONFIG_L6140_COMMON)
+{
+    s16 value = 0;
+	value = -acc->y;
+    acc->y = value;		
+	acc->z = -acc->z;
+}
+#endif
+
 #ifndef BMA2X2_SENSOR_IDENTIFICATION_ENABLE
 	bitwidth = bma2x2_sensor_bitwidth[sensor_type];
 
@@ -5149,6 +5169,11 @@ static int bma2x2_cdev_enable(struct sensors_classdev *sensors_cdev,
 	return 0;
 }
 
+static int bma2x2_is_power_enabled(struct bma2x2_data *data)
+{
+	return atomic_read(&data->enable);
+}
+
 static int bma2x2_cdev_poll_delay(struct sensors_classdev *sensors_cdev,
 				unsigned int delay_ms)
 {
@@ -5162,6 +5187,197 @@ static int bma2x2_cdev_poll_delay(struct sensors_classdev *sensors_cdev,
 	atomic_set(&data->delay, (unsigned int) delay_ms);
 
 	return 0;
+}
+
+#ifdef CONFIG_SENSORS_BMI058
+static int bma2x2_select_chanel(struct i2c_client *client)
+{
+	unsigned char data_ore[3] = { BOSCH_SENSOR_PLANE };
+	signed char tmp;
+	int error, i;
+	int timeout;
+	struct bma2x2_data *bma2x2 = i2c_get_clientdata(client);
+	unsigned char bmi058_channel_tb[] = {BMI058_OFFSET_TRIGGER_X,
+			BMI058_OFFSET_TRIGGER_Y, BMI058_OFFSET_TRIGGER_Z};
+
+	if (bma2x2->pdata->place > 3 && bma2x2->pdata->place < 8)
+		data_ore[2] = BOSCH_SENSOR_DOWN;
+	else if (bma2x2->pdata->place >= 0 && bma2x2->pdata->place < 4)
+		data_ore[2] = BOSCH_SENSOR_UP;
+	else {
+		dev_err(&client->dev, "unknown sensor place\n");
+		return -EINVAL;
+	}
+	for (i = 0; i < 3; i++) {
+		if (bma2x2_set_offset_target(client, bmi058_channel_tb[i],
+					(unsigned char)data_ore[i]) < 0) {
+			dev_err(&client->dev,
+					"set offset target error\n");
+			return -EINVAL;
+		}
+		if (bma2x2_set_cal_trigger(bma2x2->bma2x2_client,
+					(i + 1)) < 0) {
+			dev_err(&client->dev,
+					"read calibration state error\n");
+			return -EINVAL;
+		}
+		timeout = 0;
+		do {
+			WAIT_CAL_READY();
+			error = bma2x2_get_cal_ready(bma2x2->bma2x2_client,
+					&tmp);
+			if (error < 0) {
+				dev_err(&client->dev,
+						"read cal_ready error\n");
+				return error;
+			}
+			timeout++;
+			if (timeout == RETRY_TIME) {
+				dev_err(&client->dev,
+					"get fast calibration ready error\n");
+				return -EINVAL;
+			};
+
+		} while (tmp == 0);
+	}
+	return 0;
+}
+#else
+static int bma2x2_select_chanel(struct i2c_client *client)
+{
+	unsigned char data_ore[3] = { BOSCH_SENSOR_PLANE };
+	signed char tmp;
+	int error, i;
+	int timeout;
+	struct bma2x2_data *bma2x2 = i2c_get_clientdata(client);
+	unsigned char channel_tab[] = {BMA2X2_OFFSET_TRIGGER_X,
+			BMA2X2_OFFSET_TRIGGER_Y, BMA2X2_OFFSET_TRIGGER_Z};
+
+	if (bma2x2->pdata->place > 3 && bma2x2->pdata->place < 8)
+		data_ore[2] = BOSCH_SENSOR_DOWN;
+	else if (bma2x2->pdata->place >= 0 && bma2x2->pdata->place < 4)
+		data_ore[2] = BOSCH_SENSOR_UP;
+	else {
+		dev_err(&client->dev, "unknown sensor place\n");
+		return -EINVAL;
+	}
+	for (i = 0; i < 3; i++) {
+		if (bma2x2_set_offset_target(client, channel_tab[i],
+			(unsigned char)data_ore[i]) < 0) {
+			dev_err(&client->dev,
+					"set offset target error\n");
+			return -EINVAL;
+		}
+		if (bma2x2_set_cal_trigger(bma2x2->bma2x2_client,
+					(i + 1)) < 0) {
+			dev_err(&client->dev,
+					"read calibration state error\n");
+			return -EINVAL;
+		}
+		timeout = 0;
+		do {
+			WAIT_CAL_READY();
+			error = bma2x2_get_cal_ready(bma2x2->bma2x2_client,
+					&tmp);
+			if (error < 0) {
+				dev_err(&client->dev,
+						"read cal_ready error\n");
+				return error;
+			}
+			timeout++;
+			if (timeout == RETRY_TIME) {
+				dev_err(&client->dev,
+					"get fast calibration ready error\n");
+				return -EINVAL;
+			};
+
+		} while (tmp == 0);
+	}
+	return 0;
+}
+#endif
+
+static int bma2x2_self_calibration_xyz(struct sensors_classdev *sensors_cdev)
+{
+	int error;
+	struct bma2x2_data *data = container_of(sensors_cdev,
+					struct bma2x2_data, cdev);
+	struct i2c_client *client = data->bma2x2_client;
+	error = bma2x2_select_chanel(client);
+	if (error < 0) {
+		dev_err(&client->dev, "xyz calibration error\n");
+		return error;
+	}
+	dev_dbg(&client->dev, "xyz axis fast calibration finished\n");
+	error = bma2x2_eeprom_prog(client);
+	if (error < 0) {
+		dev_err(&client->dev, "wirte calibration to eeprom failed\n");
+		return error;
+	}
+
+	return error;
+}
+
+static int bma2x2_eeprom_prog(struct i2c_client *client)
+{
+	int res = 0, timeout = 0;
+	unsigned char databuf;
+	res = bma2x2_smbus_read_byte(client, BMA2X2_EEPROM_CTRL_REG,
+					&databuf);
+	if (res < 0) {
+		dev_err(&client->dev, "read eeprom control reg error1\n");
+		return res;
+	}
+	databuf |= 0x01;
+	res = bma2x2_smbus_write_byte(client, BMA2X2_EEPROM_CTRL_REG,
+					&databuf);
+	if (res < 0) {
+		dev_err(&client->dev, "write eeprom control reg error1\n");
+		return res;
+	}
+
+	res = bma2x2_smbus_read_byte(client, BMA2X2_EEPROM_CTRL_REG,
+					&databuf);
+	if (res < 0) {
+		dev_err(&client->dev, "read eeprom control reg error2\n");
+		return res;
+	}
+	databuf |= 0x02;
+	res = bma2x2_smbus_write_byte(client, BMA2X2_EEPROM_CTRL_REG,
+					&databuf);
+	if (res < 0) {
+		dev_err(&client->dev, "write eeprom control reg error2\n");
+		return res;
+	}
+	do {
+		WAIT_CAL_READY();
+		res = bma2x2_smbus_read_byte(client, BMA2X2_EEPROM_CTRL_REG,
+					&databuf);
+		if (res < 0) {
+			dev_err(&client->dev, "read nvm_rdy error\n");
+			return res;
+		}
+		databuf = (databuf >> 2) & 0x01;
+		if (++timeout == 50) {
+			dev_err(&client->dev, "check nvm_rdy time out\n");
+			break;
+		}
+	} while (databuf == 0);
+
+	res = bma2x2_smbus_read_byte(client, BMA2X2_EEPROM_CTRL_REG,
+					&databuf);
+	if (res < 0) {
+		dev_err(&client->dev, "read eeprom control reg error3\n");
+		return res;
+	}
+	databuf |= 0xFE;
+	res = bma2x2_smbus_write_byte(client, BMA2X2_EEPROM_CTRL_REG,
+					&databuf);
+	if (res < 0) {
+		dev_err(&client->dev, "write eeprom control reg error3\n");
+		return res;
+	}
+	return res;
 }
 
 static ssize_t bma2x2_fast_calibration_x_show(struct device *dev,
@@ -6069,116 +6285,116 @@ static void bma2x2_tap_timeout_handle(unsigned long data)
 }
 #endif
 
-static DEVICE_ATTR(range, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(range, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_range_show, bma2x2_range_store);
-static DEVICE_ATTR(bandwidth, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(bandwidth, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_bandwidth_show, bma2x2_bandwidth_store);
-static DEVICE_ATTR(op_mode, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(op_mode, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_mode_show, bma2x2_mode_store);
-static DEVICE_ATTR(value, S_IRUGO,
+static DEVICE_ATTR(value, S_IRUSR|S_IRGRP,
 		bma2x2_value_show, NULL);
-static DEVICE_ATTR(value_cache, S_IRUGO,
+static DEVICE_ATTR(value_cache, S_IRUSR|S_IRGRP,
 		bma2x2_value_cache_show, NULL);
-static DEVICE_ATTR(delay, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(delay, S_IRUSR|S_IRGRP|S_IWUSR|S_IWGRP,
 		bma2x2_delay_show, bma2x2_delay_store);
-static DEVICE_ATTR(enable, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(enable, S_IRUSR|S_IRGRP|S_IWUSR|S_IWGRP,
 		bma2x2_enable_show, bma2x2_enable_store);
-static DEVICE_ATTR(SleepDur, S_IRUGO|S_IWUSR|S_IWGRP,
+static DEVICE_ATTR(SleepDur, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_SleepDur_show, bma2x2_SleepDur_store);
-static DEVICE_ATTR(fast_calibration_x, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(fast_calibration_x, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_fast_calibration_x_show,
 		bma2x2_fast_calibration_x_store);
-static DEVICE_ATTR(fast_calibration_y, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(fast_calibration_y, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_fast_calibration_y_show,
 		bma2x2_fast_calibration_y_store);
-static DEVICE_ATTR(fast_calibration_z, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(fast_calibration_z, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_fast_calibration_z_show,
 		bma2x2_fast_calibration_z_store);
-static DEVICE_ATTR(fifo_mode, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(fifo_mode, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_fifo_mode_show, bma2x2_fifo_mode_store);
-static DEVICE_ATTR(fifo_framecount, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(fifo_framecount, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_fifo_framecount_show, bma2x2_fifo_framecount_store);
-static DEVICE_ATTR(fifo_trig, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(fifo_trig, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_fifo_trig_show, bma2x2_fifo_trig_store);
-static DEVICE_ATTR(fifo_trig_src, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(fifo_trig_src, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_fifo_trig_src_show, bma2x2_fifo_trig_src_store);
-static DEVICE_ATTR(fifo_data_sel, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(fifo_data_sel, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_fifo_data_sel_show, bma2x2_fifo_data_sel_store);
-static DEVICE_ATTR(fifo_data_frame, S_IRUGO,
+static DEVICE_ATTR(fifo_data_frame, S_IRUSR|S_IRGRP,
 		bma2x2_fifo_data_out_frame_show, NULL);
-static DEVICE_ATTR(reg, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(reg, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_register_show, bma2x2_register_store);
-static DEVICE_ATTR(chip_id, S_IRUGO,
+static DEVICE_ATTR(chip_id, S_IRUSR|S_IRGRP,
 		bma2x2_chip_id_show, NULL);
-static DEVICE_ATTR(offset_x, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(offset_x, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_offset_x_show,
 		bma2x2_offset_x_store);
-static DEVICE_ATTR(offset_y, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(offset_y, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_offset_y_show,
 		bma2x2_offset_y_store);
-static DEVICE_ATTR(offset_z, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(offset_z, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_offset_z_show,
 		bma2x2_offset_z_store);
-static DEVICE_ATTR(enable_int, S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(enable_int, S_IWUSR,
 		NULL, bma2x2_enable_int_store);
-static DEVICE_ATTR(int_mode, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(int_mode, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_int_mode_show, bma2x2_int_mode_store);
-static DEVICE_ATTR(slope_duration, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(slope_duration, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_slope_duration_show, bma2x2_slope_duration_store);
-static DEVICE_ATTR(slope_threshold, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(slope_threshold, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_slope_threshold_show, bma2x2_slope_threshold_store);
-static DEVICE_ATTR(slope_no_mot_duration, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(slope_no_mot_duration, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_slope_no_mot_duration_show,
 			bma2x2_slope_no_mot_duration_store);
-static DEVICE_ATTR(slope_no_mot_threshold, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(slope_no_mot_threshold, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_slope_no_mot_threshold_show,
 			bma2x2_slope_no_mot_threshold_store);
-static DEVICE_ATTR(high_g_duration, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(high_g_duration, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_high_g_duration_show, bma2x2_high_g_duration_store);
-static DEVICE_ATTR(high_g_threshold, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(high_g_threshold, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_high_g_threshold_show, bma2x2_high_g_threshold_store);
-static DEVICE_ATTR(low_g_duration, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(low_g_duration, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_low_g_duration_show, bma2x2_low_g_duration_store);
-static DEVICE_ATTR(low_g_threshold, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(low_g_threshold, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_low_g_threshold_show, bma2x2_low_g_threshold_store);
-static DEVICE_ATTR(tap_duration, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(tap_duration, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_tap_duration_show, bma2x2_tap_duration_store);
-static DEVICE_ATTR(tap_threshold, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(tap_threshold, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_tap_threshold_show, bma2x2_tap_threshold_store);
-static DEVICE_ATTR(tap_quiet, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(tap_quiet, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_tap_quiet_show, bma2x2_tap_quiet_store);
-static DEVICE_ATTR(tap_shock, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(tap_shock, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_tap_shock_show, bma2x2_tap_shock_store);
-static DEVICE_ATTR(tap_samp, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(tap_samp, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_tap_samp_show, bma2x2_tap_samp_store);
-static DEVICE_ATTR(orient_mode, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(orient_mode, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_orient_mode_show, bma2x2_orient_mode_store);
-static DEVICE_ATTR(orient_blocking, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(orient_blocking, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_orient_blocking_show, bma2x2_orient_blocking_store);
-static DEVICE_ATTR(orient_hyst, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(orient_hyst, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_orient_hyst_show, bma2x2_orient_hyst_store);
-static DEVICE_ATTR(orient_theta, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(orient_theta, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_orient_theta_show, bma2x2_orient_theta_store);
-static DEVICE_ATTR(flat_theta, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(flat_theta, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_flat_theta_show, bma2x2_flat_theta_store);
-static DEVICE_ATTR(flat_hold_time, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(flat_hold_time, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_flat_hold_time_show, bma2x2_flat_hold_time_store);
-static DEVICE_ATTR(selftest, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(selftest, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_selftest_show, bma2x2_selftest_store);
-static DEVICE_ATTR(softreset, S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(softreset, S_IWUSR,
 		NULL, bma2x2_softreset_store);
-static DEVICE_ATTR(temperature, S_IRUGO,
+static DEVICE_ATTR(temperature, S_IRUSR|S_IRGRP,
 		bma2x2_temperature_show, NULL);
-static DEVICE_ATTR(place, S_IRUGO,
+static DEVICE_ATTR(place, S_IRUSR|S_IRGRP,
 		bma2x2_place_show, NULL);
 #ifdef CONFIG_SIG_MOTION
-static DEVICE_ATTR(en_sig_motion, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(en_sig_motion, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_en_sig_motion_show, bma2x2_en_sig_motion_store);
 #endif
 #ifdef CONFIG_DOUBLE_TAP
-static DEVICE_ATTR(tap_time_period, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(tap_time_period, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_tap_time_period_show, bma2x2_tap_time_period_store);
-static DEVICE_ATTR(en_double_tap, S_IRUGO|S_IWUSR|S_IWGRP|S_IWOTH,
+static DEVICE_ATTR(en_double_tap, S_IRUSR|S_IRGRP|S_IWUSR,
 		bma2x2_en_double_tap_show, bma2x2_en_double_tap_store);
 #endif
 
@@ -7144,6 +7360,7 @@ static int bma2x2_probe(struct i2c_client *client,
 	data->cdev.delay_msec = pdata->poll_interval;
 	data->cdev.sensors_enable = bma2x2_cdev_enable;
 	data->cdev.sensors_poll_delay = bma2x2_cdev_poll_delay;
+	data->cdev.sensors_self_test = bma2x2_self_calibration_xyz;
 	err = sensors_classdev_register(&client->dev, &data->cdev);
 	if (err) {
 		dev_err(&client->dev, "create class device file failed!\n");
@@ -7200,7 +7417,7 @@ free_input_dev_exit:
 	input_free_device(dev);
 free_irq_exit:
 disable_power_exit:
-		bma2x2_power_ctl(data, false);
+	bma2x2_power_ctl(data, false);
 deinit_power_exit:
 	bma2x2_power_deinit(data);
 free_i2c_clientdata_exit:
@@ -7279,7 +7496,6 @@ static int bma2x2_remove(struct i2c_client *client)
 	}
 
 	bma2x2_set_enable(&client->dev, 0);
-	bma2x2_power_ctl(data, false);
 	bma2x2_power_deinit(data);
 	i2c_set_clientdata(client, NULL);
 	if (data->pdata && (client->dev.of_node))
@@ -7320,13 +7536,20 @@ static int bma2x2_store_state(struct i2c_client *client,
 #ifdef CONFIG_PM
 static int bma2x2_suspend(struct i2c_client *client, pm_message_t mesg)
 {
+	struct bma2x2_data *data = i2c_get_clientdata(client);
+
+	data->suspend_state.powerEn = bma2x2_is_power_enabled(data);
 	bma2x2_set_enable(&client->dev, 0);
 	return 0;
 }
 
 static int bma2x2_resume(struct i2c_client *client)
 {
-	bma2x2_set_enable(&client->dev, 1);
+	struct bma2x2_data *data = i2c_get_clientdata(client);
+
+	if (data->suspend_state.powerEn)
+		bma2x2_set_enable(&client->dev, 1);
+
 	return 0;
 }
 
