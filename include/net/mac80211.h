@@ -376,6 +376,12 @@ enum ieee80211_rssi_event {
  * @ssid_len: Length of SSID given in @ssid.
  * @hidden_ssid: The SSID of the current vif is hidden. Only valid in AP-mode.
  * @txpower: TX power in dBm
+ * @txpower_type: TX power adjustment used to control per packet Transmit
+ *	Power Control (TPC) in lower driver for the current vif. In particular
+ *	TPC is enabled if value passed in %txpower_type is
+ *	NL80211_TX_POWER_LIMITED (allow using less than specified from
+ *	userspace), whereas TPC is disabled if %txpower_type is set to
+ *	NL80211_TX_POWER_FIXED (use value configured from userspace)
  * @p2p_noa_attr: P2P NoA attribute for P2P powersave
  */
 struct ieee80211_bss_conf {
@@ -411,6 +417,7 @@ struct ieee80211_bss_conf {
 	size_t ssid_len;
 	bool hidden_ssid;
 	int txpower;
+	enum nl80211_tx_power_setting txpower_type;
 	struct ieee80211_p2p_noa_attr p2p_noa_attr;
 };
 
@@ -1634,6 +1641,12 @@ struct ieee80211_tx_control {
  *	be created.  It is expected user-space will create vifs as
  *	desired (and thus have them named as desired).
  *
+ * @IEEE80211_HW_SW_CRYPTO_CONTROL: The driver wants to control which of the
+ *	crypto algorithms can be done in software - so don't automatically
+ *	try to fall back to it if hardware crypto fails, but do so only if
+ *	the driver returns 1. This also forces the driver to advertise its
+ *	supported cipher suites.
+ *
  * @IEEE80211_HW_QUEUE_CONTROL: The driver wants to control per-interface
  *	queue mapping in order to use different queues (not just one per AC)
  *	for different virtual interfaces. See the doc section on HW queue
@@ -1681,6 +1694,7 @@ enum ieee80211_hw_flags {
 	IEEE80211_HW_MFP_CAPABLE			= 1<<13,
 	IEEE80211_HW_WANT_MONITOR_VIF			= 1<<14,
 	IEEE80211_HW_NO_AUTO_VIF			= 1<<15,
+	IEEE80211_HW_SW_CRYPTO_CONTROL			= 1<<16,
 	/* free slots */
 	IEEE80211_HW_REPORTS_TX_ACK_STATUS		= 1<<18,
 	IEEE80211_HW_CONNECTION_MONITOR			= 1<<19,
@@ -1954,6 +1968,11 @@ void ieee80211_free_txskb(struct ieee80211_hw *hw, struct sk_buff *skb);
  * the key is now in use, -%EOPNOTSUPP or -%ENOSPC if it couldn't be
  * added; if you return 0 then hw_key_idx must be assigned to the
  * hardware key index, you are free to use the full u8 range.
+ *
+ * Note that in the case that the @IEEE80211_HW_SW_CRYPTO_CONTROL flag is
+ * set, mac80211 will not automatically fall back to software crypto if
+ * enabling hardware crypto failed. The set_key() call may also return the
+ * value 1 to permit this specific key/algorithm to be done in software.
  *
  * When the cmd is %DISABLE_KEY then it must succeed.
  *
