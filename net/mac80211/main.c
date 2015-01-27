@@ -666,9 +666,15 @@ static int ieee80211_init_cipher_suites(struct ieee80211_local *local)
 		WLAN_CIPHER_SUITE_WEP104,
 		WLAN_CIPHER_SUITE_TKIP,
 		WLAN_CIPHER_SUITE_CCMP,
+		WLAN_CIPHER_SUITE_CCMP_256,
+		WLAN_CIPHER_SUITE_GCMP,
+		WLAN_CIPHER_SUITE_GCMP_256,
 
 		/* keep last -- depends on hw flags! */
-		WLAN_CIPHER_SUITE_AES_CMAC
+		WLAN_CIPHER_SUITE_AES_CMAC,
+		WLAN_CIPHER_SUITE_BIP_CMAC_256,
+		WLAN_CIPHER_SUITE_BIP_GMAC_128,
+		WLAN_CIPHER_SUITE_BIP_GMAC_256,
 	};
 
 	if (local->hw.flags & IEEE80211_HW_SW_CRYPTO_CONTROL ||
@@ -707,7 +713,7 @@ static int ieee80211_init_cipher_suites(struct ieee80211_local *local)
 		local->hw.wiphy->n_cipher_suites = ARRAY_SIZE(cipher_suites);
 
 		if (!have_mfp)
-			local->hw.wiphy->n_cipher_suites--;
+			local->hw.wiphy->n_cipher_suites -= 4;
 
 		if (!have_wep) {
 			local->hw.wiphy->cipher_suites += 2;
@@ -724,32 +730,42 @@ static int ieee80211_init_cipher_suites(struct ieee80211_local *local)
 		/* Driver specifies cipher schemes only (but not cipher suites
 		 * including the schemes)
 		 *
-		 * We start counting ciphers defined by schemes, TKIP and CCMP
+		 * We start counting ciphers defined by schemes, TKIP, CCMP,
+		 * CCMP-256, GCMP, and GCMP-256
 		 */
-		n_suites = local->hw.n_cipher_schemes + 2;
+		n_suites = local->hw.n_cipher_schemes + 5;
 
 		/* check if we have WEP40 and WEP104 */
 		if (have_wep)
 			n_suites += 2;
 
-		/* check if we have AES_CMAC */
+		/* check if we have AES_CMAC, BIP-CMAC-256, BIP-GMAC-128,
+		 * BIP-GMAC-256
+		 */
 		if (have_mfp)
-			n_suites++;
+			n_suites += 4;
 
 		suites = kmalloc(sizeof(u32) * n_suites, GFP_KERNEL);
 		if (!suites)
 			return -ENOMEM;
 
 		suites[w++] = WLAN_CIPHER_SUITE_CCMP;
+		suites[w++] = WLAN_CIPHER_SUITE_CCMP_256;
 		suites[w++] = WLAN_CIPHER_SUITE_TKIP;
+		suites[w++] = WLAN_CIPHER_SUITE_GCMP;
+		suites[w++] = WLAN_CIPHER_SUITE_GCMP_256;
 
 		if (have_wep) {
 			suites[w++] = WLAN_CIPHER_SUITE_WEP40;
 			suites[w++] = WLAN_CIPHER_SUITE_WEP104;
 		}
 
-		if (have_mfp)
+		if (have_mfp) {
 			suites[w++] = WLAN_CIPHER_SUITE_AES_CMAC;
+			suites[w++] = WLAN_CIPHER_SUITE_BIP_CMAC_256;
+			suites[w++] = WLAN_CIPHER_SUITE_BIP_GMAC_128;
+			suites[w++] = WLAN_CIPHER_SUITE_BIP_GMAC_256;
+		}
 
 		for (r = 0; r < local->hw.n_cipher_schemes; r++)
 			suites[w++] = cs[r].cipher;
