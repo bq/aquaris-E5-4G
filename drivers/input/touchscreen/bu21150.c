@@ -36,9 +36,12 @@
 
 /* define */
 #define DEVICE_NAME   "jdi-bu21150"
+#define REG_INT_RUN_ENB (0x00CE)
 #define REG_READ_DATA (0x0400)
 #define MAX_FRAME_SIZE (8*1024+16)  /* byte */
 #define SPI_HEADER_SIZE (3)
+#define SPI_BITS_PER_WORD_READ (8)
+#define SPI_BITS_PER_WORD_WRITE (8)
 #define FRAME_HEADER_SIZE (16)  /* byte */
 #define GPIO_LOW  (0)
 #define GPIO_HIGH (1)
@@ -50,6 +53,10 @@
 #define APQ8074_DRAGONBOARD (0x01)
 #define MSM8974_FLUID       (0x02)
 #define TIMEOUT_SCALE       (20)
+#define BU21150_VTG_MIN_UV (2700000)
+#define BU21150_VTG_MAX_UV (3300000)
+#define BU21150_VTG_DIG_MIN_UV (1800000)
+#define BU21150_VTG_DIG_MAX_UV (1800000)
 
 /* struct */
 struct bu21150_data {
@@ -57,6 +64,7 @@ struct bu21150_data {
 	struct spi_device *client;
 	struct workqueue_struct *workq;
 	struct work_struct work;
+	u16 scan_mode;
 	/* frame */
 	struct bu21150_ioctl_get_frame_data req_get;
 	u8 frame[MAX_FRAME_SIZE];
@@ -72,7 +80,7 @@ struct bu21150_data {
 	/* reset */
 	u8 reset_flag;
 	/* timeout */
-	u8 timeout_enb_flag;
+	u8 timeout_enb;
 	u8 set_timer_flag;
 	u8 timeout_flag;
 	u32 timeout;
@@ -80,13 +88,15 @@ struct bu21150_data {
 	u8 spi_buf[MAX_FRAME_SIZE];
     /* power */
 	struct regulator *vcc_ana;
+	struct regulator *vcc_dig;
 	/* dtsi */
 	int irq_gpio;
 	int rst_gpio;
 	int power_supply;
-	u16 scan_mode;
 	/* suspend */
 	struct notifier_block fb_notif;
+	u8 unblock_flag;
+	u8 force_unblock_flag;
 };
 
 struct ser_req {
@@ -122,7 +132,7 @@ static void swap_2byte(unsigned char *buf, unsigned int size);
 static int bu21150_read_register(u32 addr, u16 size, u8 *data);
 static int bu21150_write_register(u32 addr, u16 size, u8 *data);
 static void wake_up_frame_waitq(struct bu21150_data *ts);
-static long wait_frame_waitq(struct bu21150_data *ts);
+static long wait_frame_waitq(struct bu21150_data *ts, u8 flag);
 static int is_same_bu21150_ioctl_get_frame_data(
 	struct bu21150_ioctl_get_frame_data *data1,
 	struct bu21150_ioctl_get_frame_data *data2);
@@ -173,8 +183,6 @@ static struct spi_driver g_bu21150_spi_driver = {
 		.of_match_table = g_bu21150_psoc_match_table,
 	},
 };
-
-static int g_bu21150_ioctl_unblock;
 
 module_spi_driver(g_bu21150_spi_driver);
 MODULE_AUTHOR("Japan Display Inc");
@@ -231,6 +239,72 @@ static int bu21150_probe(struct spi_device *client)
 		gpio_direction_output(0, 1);
 		gpio_set_value(0, 1);
 		usleep(1000);
+
+		ts->vcc_ana = regulator_get(&client->dev, "vdd_ana");
+		if (IS_ERR(ts->vcc_ana)) {
+			rc = PTR_ERR(ts->vcc_ana);
+			dev_err(&client->dev,
+				"Regulator get failed vcc_ana rc=%d\n", rc);
+			error = -EINVAL;
+			goto error_get_vcc_ana;
+		}
+		if (regulator_count_voltages(ts->vcc_ana) > 0) {
+			rc = regulator_set_voltage(ts->vcc_ana,
+				BU21150_VTG_MIN_UV, BU21150_VTG_MAX_UV);
+			if (rc) {
+				dev_err(&client->dev,
+					"regulator set_vtg failed rc=%d\n", rc);
+				error = -EINVAL;
+				goto error_set_vtg_vcc_ana;
+			}
+		}
+		rc = reg_set_optimum_mode_check(ts->vcc_ana, 150000);
+		if (rc < 0) {
+			dev_err(&client->dev,
+				"Regulator vcc_ana set_opt failed rc=%d\n", rc);
+			error = -EINVAL;
+			goto error_set_vtg_vcc_ana;
+		}
+		rc = regulator_enable(ts->vcc_ana);
+		if (rc) {
+			dev_err(&client->dev,
+				"Regulator vcc_ana enable failed rc=%d\n", rc);
+			error = -EINVAL;
+			goto error_reg_en_vcc_ana;
+		}
+
+		ts->vcc_dig = regulator_get(&client->dev, "vdd_dig");
+		if (IS_ERR(ts->vcc_dig)) {
+			rc = PTR_ERR(ts->vcc_dig);
+			dev_err(&client->dev,
+				"Regulator get failed vcc_dig rc=%d\n", rc);
+			error = -EINVAL;
+			goto error_get_vcc_dig;
+		}
+		if (regulator_count_voltages(ts->vcc_dig) > 0) {
+			rc = regulator_set_voltage(ts->vcc_dig,
+				BU21150_VTG_DIG_MIN_UV, BU21150_VTG_DIG_MAX_UV);
+			if (rc) {
+				dev_err(&client->dev,
+					"regulator set_vtg failed rc=%d\n", rc);
+				error = -EINVAL;
+				goto error_set_vtg_vcc_dig;
+			}
+		}
+		rc = reg_set_optimum_mode_check(ts->vcc_dig, 100000);
+		if (rc < 0) {
+			dev_err(&client->dev,
+				"Regulator vcc_dig set_opt failed rc=%d\n", rc);
+			error = -EINVAL;
+			goto error_set_vtg_vcc_dig;
+		}
+		rc = regulator_enable(ts->vcc_dig);
+		if (rc) {
+			dev_err(&client->dev,
+				"Regulator vcc_dig enable failed rc=%d\n", rc);
+			error = -EINVAL;
+			goto error_reg_en_vcc_dig;
+		}
 	} else if (ts->power_supply == MSM8974_FLUID) {
 		ts->vcc_ana = regulator_get(&client->dev, "vdd_ana");
 		if (IS_ERR(ts->vcc_ana)) {
@@ -334,14 +408,34 @@ err4:
 err3:
 	destroy_workqueue(ts->workq);
 err2:
-	if (ts->power_supply == MSM8974_FLUID)
+	if (ts->power_supply == APQ8074_DRAGONBOARD || MSM8974_FLUID) {
 		regulator_disable(ts->vcc_ana);
+		regulator_disable(ts->vcc_dig);
+	}
+error_get_vcc_ana:
+	if (ts->power_supply == APQ8074_DRAGONBOARD || MSM8974_FLUID)
+		kfree(ts);
 error_reg_en_vcc_ana:
-	if (ts->power_supply == MSM8974_FLUID)
+	if (ts->power_supply == APQ8074_DRAGONBOARD || MSM8974_FLUID)
 		reg_set_optimum_mode_check(ts->vcc_ana, 0);
 error_set_vtg_vcc_ana:
-	if (ts->power_supply == MSM8974_FLUID)
+	if (ts->power_supply == APQ8074_DRAGONBOARD || MSM8974_FLUID)
 		regulator_put(ts->vcc_ana);
+error_get_vcc_dig:
+	if (ts->power_supply == APQ8074_DRAGONBOARD) {
+		regulator_disable(ts->vcc_ana);
+		kfree(ts);
+	}
+error_reg_en_vcc_dig:
+	if (ts->power_supply == APQ8074_DRAGONBOARD) {
+		regulator_disable(ts->vcc_ana);
+		reg_set_optimum_mode_check(ts->vcc_dig, 0);
+	}
+error_set_vtg_vcc_dig:
+	if (ts->power_supply == APQ8074_DRAGONBOARD) {
+		regulator_disable(ts->vcc_ana);
+		regulator_put(ts->vcc_dig);
+	}
 err1:
 	kfree(ts);
 	return error;
@@ -349,20 +443,21 @@ err1:
 
 static int bu21150_suspend(struct device *dev)
 {
+	struct spi_device *client = to_spi_device(dev);
+	struct bu21150_data *ts = spi_get_drvdata(client);
+
+	ts->unblock_flag = 1;
+	/* wake up */
+	wake_up_frame_waitq(ts);
+
 	return 0;
 }
 
 static int bu21150_resume(struct device *dev)
 {
-	struct spi_device *client = to_spi_device(dev);
-	struct bu21150_data *ts = spi_get_drvdata(client);
+	u8 buf[2] = {0x01, 0x00};
 
-	if (ts->scan_mode == BU21150_GESTURE_SELF) {
-		gpio_set_value(ts->rst_gpio, BU21150_RESET_LOW);
-		usleep(DUR_RESET_LOW);
-		gpio_set_value(ts->rst_gpio, BU21150_RESET_HIGH);
-		usleep(DUR_RESET_HIGH);
-	}
+	bu21150_write_register(REG_INT_RUN_ENB, (u16)sizeof(buf), buf);
 
 	return 0;
 }
@@ -452,12 +547,13 @@ static int bu21150_open(struct inode *inode, struct file *filp)
 	}
 	++g_io_opened;
 
-	g_bu21150_ioctl_unblock = 0;
 	get_frame_timer_delete();
 	ts->reset_flag = 0;
 	ts->set_timer_flag = 0;
 	ts->timeout_flag = 0;
-	ts->timeout_enb_flag = 0;
+	ts->timeout_enb = 0;
+	ts->unblock_flag = 0;
+	ts->force_unblock_flag = 0;
 	ts->scan_mode = BU21150_MUTUAL;
 	memset(&(ts->req_get), 0, sizeof(struct bu21150_ioctl_get_frame_data));
 	/* set default value. */
@@ -466,11 +562,6 @@ static int bu21150_open(struct inode *inode, struct file *filp)
 		sizeof(struct bu21150_ioctl_get_frame_data));
 	memset(&(ts->frame_work_get), 0,
 		sizeof(struct bu21150_ioctl_get_frame_data));
-
-	gpio_set_value(ts->rst_gpio, BU21150_RESET_LOW);
-	usleep(DUR_RESET_LOW);
-	gpio_set_value(ts->rst_gpio, BU21150_RESET_HIGH);
-	usleep(DUR_RESET_HIGH);
 
 	enable_irq(client->irq);
 	return 0;
@@ -489,9 +580,6 @@ static int bu21150_release(struct inode *inode, struct file *filp)
 
 	if (g_io_opened < 0)
 		g_io_opened = 0;
-
-	gpio_set_value(ts->rst_gpio, BU21150_RESET_LOW);
-	usleep(DUR_RESET_LOW);
 
 	disable_irq(client->irq);
 
@@ -565,18 +653,19 @@ static long bu21150_ioctl_get_frame(unsigned long arg)
 		return -EINVAL;
 	}
 
-	if (ts->timeout_enb_flag == 1)
+	if (ts->timeout_enb == 1)
 		get_frame_timer_init();
 
 	do {
 		ts->req_get = data;
-		ret = wait_frame_waitq(ts);
+		ret = wait_frame_waitq(ts, data.keep_block_flag);
+		ts->unblock_flag = 0;
 		if (ret != 0)
 			return ret;
 	} while (!is_same_bu21150_ioctl_get_frame_data(&data,
 				&(ts->frame_get)));
 
-	if (ts->timeout_enb_flag == 1)
+	if (ts->timeout_enb == 1)
 		get_frame_timer_delete();
 
 	/* copy frame */
@@ -680,7 +769,7 @@ static long bu21150_ioctl_unblock(void)
 {
 	struct bu21150_data *ts = spi_get_drvdata(g_client_bu21150);
 
-	g_bu21150_ioctl_unblock = 1;
+	ts->force_unblock_flag = 1;
 	/* wake up */
 	wake_up_frame_waitq(ts);
 
@@ -689,7 +778,10 @@ static long bu21150_ioctl_unblock(void)
 
 static long bu21150_ioctl_unblock_release(void)
 {
-	g_bu21150_ioctl_unblock = 0;
+	struct bu21150_data *ts = spi_get_drvdata(g_client_bu21150);
+
+	ts->force_unblock_flag = 0;
+
 	return 0;
 }
 
@@ -709,7 +801,7 @@ static long bu21150_ioctl_resume(void)
 	struct bu21150_data *ts = spi_get_drvdata(g_client_bu21150);
 	struct spi_device *client = ts->client;
 
-	g_bu21150_ioctl_unblock = 0;
+	ts->force_unblock_flag = 0;
 	enable_irq(client->irq);
 
 	return 0;
@@ -727,8 +819,8 @@ static long bu21150_ioctl_set_timeout(unsigned long arg)
 		return -EFAULT;
 	}
 
-	ts->timeout_enb_flag = data.timeout_enb_flag;
-	if (data.timeout_enb_flag == 1) {
+	ts->timeout_enb = data.timeout_enb;
+	if (data.timeout_enb == 1) {
 		ts->timeout = (unsigned int)(data.report_interval_us
 			* TIMEOUT_SCALE * HZ / 1000000);
 	} else {
@@ -811,7 +903,7 @@ static int bu21150_read_register(u32 addr, u16 size, u8 *data)
 	req->xfer[0].rx_buf = output;
 	req->xfer[0].len = size+SPI_HEADER_SIZE;
 	req->xfer[0].cs_change = 0;
-	req->xfer[0].bits_per_word = 32;
+	req->xfer[0].bits_per_word = SPI_BITS_PER_WORD_READ;
 	spi_message_add_tail(&req->xfer[0], &req->msg);
 	ret = spi_sync(client, &req->msg);
 	if (ret)
@@ -853,7 +945,7 @@ static int bu21150_write_register(u32 addr, u16 size, u8 *data)
 	req->xfer[0].rx_buf = NULL;
 	req->xfer[0].len = size+SPI_HEADER_SIZE;
 	req->xfer[0].cs_change = 0;
-	req->xfer[0].bits_per_word = 8;
+	req->xfer[0].bits_per_word = SPI_BITS_PER_WORD_WRITE;
 	spi_message_add_tail(&req->xfer[0], &req->msg);
 	ret = spi_sync(client, &req->msg);
 	if (ret)
@@ -871,9 +963,12 @@ static void wake_up_frame_waitq(struct bu21150_data *ts)
 	wake_up_interruptible(&(ts->frame_waitq));
 }
 
-static long wait_frame_waitq(struct bu21150_data *ts)
+static long wait_frame_waitq(struct bu21150_data *ts, u8 flag)
 {
-	if (g_bu21150_ioctl_unblock == 1)
+	if (ts->force_unblock_flag == 1)
+		return BU21150_UNBLOCK;
+
+	if (ts->unblock_flag == 1 && flag == 0)
 		return BU21150_UNBLOCK;
 
 	/* wait event */
@@ -884,7 +979,7 @@ static long wait_frame_waitq(struct bu21150_data *ts)
 	}
 	ts->frame_waitq_flag = WAITQ_WAIT;
 
-	if (ts->timeout_enb_flag == 1) {
+	if (ts->timeout_enb == 1) {
 		if (ts->timeout_flag == 1) {
 			ts->set_timer_flag = 0;
 			ts->timeout_flag = 0;
@@ -892,7 +987,10 @@ static long wait_frame_waitq(struct bu21150_data *ts)
 		}
 	}
 
-	if (g_bu21150_ioctl_unblock == 1)
+	if (ts->force_unblock_flag == 1)
+		return BU21150_UNBLOCK;
+
+	if (ts->unblock_flag == 1 && flag == 0)
 		return BU21150_UNBLOCK;
 
 	return 0;
