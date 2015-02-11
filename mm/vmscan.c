@@ -148,7 +148,7 @@ static bool global_reclaim(struct scan_control *sc)
 }
 #endif
 
-unsigned long zone_reclaimable_pages(struct zone *zone)
+static unsigned long zone_reclaimable_pages(struct zone *zone)
 {
 	int nr;
 
@@ -1527,8 +1527,7 @@ shrink_inactive_list(unsigned long nr_to_scan, struct lruvec *lruvec,
 	 * of pages under pages flagged for immediate reclaim and stall if any
 	 * are encountered in the nr_immediate check below.
 	 */
-	if (nr_writeback && nr_writeback >=
-			(nr_taken >> (DEF_PRIORITY - sc->priority)))
+	if (nr_writeback && nr_writeback == nr_taken)
 		zone_set_flag(zone, ZONE_WRITEBACK);
 
 	/*
@@ -2480,7 +2479,7 @@ static unsigned long do_try_to_free_pages(struct zonelist *zonelist,
 						WB_REASON_TRY_TO_FREE_PAGES);
 			sc->may_writepage = 1;
 		}
-	} while (--sc->priority >= 0);
+	} while (--sc->priority >= 0 && !aborted_reclaim);
 
 out:
 	delayacct_freepages_end();
@@ -2912,8 +2911,6 @@ static bool kswapd_shrink_zone(struct zone *zone,
 	/* Account for the number of pages attempted to reclaim */
 	*nr_attempted += sc->nr_to_reclaim;
 
-	if (nr_slab == 0 && !zone_reclaimable(zone))
-		zone->all_unreclaimable = 1;
 	zone_clear_flag(zone, ZONE_WRITEBACK);
 
 	/*
@@ -2922,7 +2919,7 @@ static bool kswapd_shrink_zone(struct zone *zone,
  	 * BDIs but as pressure is relieved, speculatively avoid congestion
  	 * waits.
  	 */
-	if (!zone->all_unreclaimable &&
+	if (zone_reclaimable(zone) &&
 	    zone_balanced(zone, testorder, 0, classzone_idx)) {
 		zone_clear_flag(zone, ZONE_CONGESTED);
 		zone_clear_flag(zone, ZONE_TAIL_LRU_DIRTY);
