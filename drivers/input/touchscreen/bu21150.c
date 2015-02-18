@@ -36,6 +36,7 @@
 
 /* define */
 #define DEVICE_NAME   "jdi-bu21150"
+#define REG_SENS_START (0x0086)
 #define REG_INT_RUN_ENB (0x00CE)
 #define REG_READ_DATA (0x0400)
 #define MAX_FRAME_SIZE (8*1024+16)  /* byte */
@@ -445,10 +446,16 @@ static int bu21150_suspend(struct device *dev)
 {
 	struct spi_device *client = to_spi_device(dev);
 	struct bu21150_data *ts = spi_get_drvdata(client);
+	u8 buf1[2] = {0x00, 0x00};
+	u8 buf2[2] = {0x04, 0x00};
+
+	bu21150_write_register(REG_SENS_START, (u16)sizeof(buf1), buf1);
 
 	ts->unblock_flag = 1;
 	/* wake up */
 	wake_up_frame_waitq(ts);
+
+	bu21150_write_register(REG_INT_RUN_ENB, (u16)sizeof(buf2), buf2);
 
 	return 0;
 }
@@ -470,12 +477,13 @@ static int fb_notifier_callback(struct notifier_block *self,
 	struct bu21150_data *bu21150_dev_data =
 		container_of(self, struct bu21150_data, fb_notif);
 
-	if (evdata && evdata->data && event == FB_EVENT_BLANK &&
-			bu21150_dev_data && bu21150_dev_data->client) {
+	if (evdata && evdata->data &&
+		bu21150_dev_data && bu21150_dev_data->client) {
 		blank = evdata->data;
-		if (*blank == FB_BLANK_UNBLANK)
+		if (event == FB_EARLY_EVENT_BLANK && *blank == FB_BLANK_UNBLANK)
 			bu21150_resume(&bu21150_dev_data->client->dev);
-		else if (*blank == FB_BLANK_POWERDOWN)
+		else if (event == FB_EVENT_BLANK &&
+			*blank == FB_BLANK_POWERDOWN)
 			bu21150_suspend(&bu21150_dev_data->client->dev);
 	}
 	return 0;
