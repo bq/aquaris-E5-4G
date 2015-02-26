@@ -4,11 +4,11 @@
 #include <net/iw_handler.h>
 #include <linux/wireless.h>
 
-#ifdef CFG80211_WEXT_EXPORT
+#ifdef CONFIG_CFG80211_WEXT_EXPORT
 #define EXPORT_WEXT_HANDLER(h) EXPORT_SYMBOL_GPL(h)
 #else
 #define EXPORT_WEXT_HANDLER(h)
-#endif /* CFG80211_WEXT_EXPORT */
+#endif /* CONFIG_CFG80211_WEXT_EXPORT */
 
 int cfg80211_ibss_wext_siwfreq(struct net_device *dev,
 			       struct iw_request_info *info,
