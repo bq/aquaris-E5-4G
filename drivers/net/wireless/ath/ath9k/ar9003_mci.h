@@ -92,13 +92,35 @@ enum mci_gpm_coex_bt_update_flags_op {
 #define ATH_MCI_CONFIG_CLK_DIV              0x00003000
 #define ATH_MCI_CONFIG_CLK_DIV_S            12
 #define ATH_MCI_CONFIG_DISABLE_TUNING       0x00004000
+#define ATH_MCI_CONFIG_DISABLE_AIC          0x00008000
+#define ATH_MCI_CONFIG_AIC_CAL_NUM_CHAN     0x007f0000
+#define ATH_MCI_CONFIG_AIC_CAL_NUM_CHAN_S   16
+#define ATH_MCI_CONFIG_NO_QUIET_ACK         0x00800000
+#define ATH_MCI_CONFIG_NO_QUIET_ACK_S       23
+#define ATH_MCI_CONFIG_ANT_ARCH             0x07000000
+#define ATH_MCI_CONFIG_ANT_ARCH_S           24
+#define ATH_MCI_CONFIG_FORCE_QUIET_ACK      0x08000000
+#define ATH_MCI_CONFIG_FORCE_QUIET_ACK_S    27
+#define ATH_MCI_CONFIG_FORCE_2CHAIN_ACK     0x10000000
+#define ATH_MCI_CONFIG_MCI_STAT_DBG         0x20000000
 #define ATH_MCI_CONFIG_MCI_WEIGHT_DBG       0x40000000
 #define ATH_MCI_CONFIG_DISABLE_MCI          0x80000000
 
 #define ATH_MCI_CONFIG_MCI_OBS_MASK     (ATH_MCI_CONFIG_MCI_OBS_MCI  | \
 					 ATH_MCI_CONFIG_MCI_OBS_TXRX | \
 					 ATH_MCI_CONFIG_MCI_OBS_BT)
+
 #define ATH_MCI_CONFIG_MCI_OBS_GPIO     0x0000002F
+
+#define ATH_MCI_ANT_ARCH_1_ANT_PA_LNA_NON_SHARED 0x00
+#define ATH_MCI_ANT_ARCH_1_ANT_PA_LNA_SHARED     0x01
+#define ATH_MCI_ANT_ARCH_2_ANT_PA_LNA_NON_SHARED 0x02
+#define ATH_MCI_ANT_ARCH_2_ANT_PA_LNA_SHARED     0x03
+#define ATH_MCI_ANT_ARCH_3_ANT                   0x04
+
+#define MCI_ANT_ARCH_PA_LNA_SHARED(mci)					\
+	((MS(mci->config, ATH_MCI_CONFIG_ANT_ARCH) == ATH_MCI_ANT_ARCH_1_ANT_PA_LNA_SHARED) || \
+	 (MS(mci->config, ATH_MCI_CONFIG_ANT_ARCH) == ATH_MCI_ANT_ARCH_2_ANT_PA_LNA_SHARED))
 
 enum mci_message_header {		/* length of payload */
 	MCI_LNA_CTRL     = 0x10,        /* len = 0 */
@@ -290,7 +312,7 @@ int ar9003_mci_setup(struct ath_hw *ah, u32 gpm_addr, void *gpm_buf,
 void ar9003_mci_cleanup(struct ath_hw *ah);
 void ar9003_mci_get_interrupt(struct ath_hw *ah, u32 *raw_intr,
 			      u32 *rx_msg_intr);
-u32 ar9003_mci_get_next_gpm_offset(struct ath_hw *ah, bool first, u32 *more);
+u32 ar9003_mci_get_next_gpm_offset(struct ath_hw *ah, u32 *more);
 void ar9003_mci_set_bt_version(struct ath_hw *ah, u8 major, u8 minor);
 void ar9003_mci_send_wlan_channels(struct ath_hw *ah);
 /*
