@@ -7265,8 +7265,18 @@ static int nl80211_join_ibss(struct sk_buff *skb, struct genl_info *info)
 		break;
 	case NL80211_CHAN_WIDTH_20:
 	case NL80211_CHAN_WIDTH_40:
-		if (rdev->wiphy.features & NL80211_FEATURE_HT_IBSS)
-			break;
+		if (!(rdev->wiphy.features & NL80211_FEATURE_HT_IBSS))
+			return -EINVAL;
+		break;
+	case NL80211_CHAN_WIDTH_80:
+	case NL80211_CHAN_WIDTH_80P80:
+	case NL80211_CHAN_WIDTH_160:
+		if (!(rdev->wiphy.features & NL80211_FEATURE_HT_IBSS))
+			return -EINVAL;
+		if (!wiphy_ext_feature_isset(&rdev->wiphy,
+					     NL80211_EXT_FEATURE_VHT_IBSS))
+			return -EINVAL;
+		break;
 	default:
 		return -EINVAL;
 	}
@@ -7379,8 +7389,8 @@ static int nl80211_set_mcast_rate(struct sk_buff *skb, struct genl_info *info)
 
 static struct sk_buff *
 __cfg80211_alloc_vendor_skb(struct cfg80211_registered_device *rdev,
-			    int approxlen, u32 portid, u32 seq,
-			    enum nl80211_commands cmd,
+			    struct wireless_dev *wdev, int approxlen,
+			    u32 portid, u32 seq, enum nl80211_commands cmd,
 			    enum nl80211_attrs attr,
 			    const struct nl80211_vendor_cmd_info *info,
 			    gfp_t gfp)
@@ -7411,6 +7421,16 @@ __cfg80211_alloc_vendor_skb(struct cfg80211_registered_device *rdev,
 			goto nla_put_failure;
 	}
 
+	if (wdev) {
+		if (nla_put_u64(skb, NL80211_ATTR_WDEV,
+				wdev_id(wdev)))
+			goto nla_put_failure;
+		if (wdev->netdev &&
+		    nla_put_u32(skb, NL80211_ATTR_IFINDEX,
+				wdev->netdev->ifindex))
+			goto nla_put_failure;
+	}
+
 	data = nla_nest_start(skb, attr);
 
 	((void **)skb->cb)[0] = rdev;
@@ -7425,6 +7445,7 @@ __cfg80211_alloc_vendor_skb(struct cfg80211_registered_device *rdev,
 }
 
 struct sk_buff *__cfg80211_alloc_event_skb(struct wiphy *wiphy,
+					   struct wireless_dev *wdev,
 					   enum nl80211_commands cmd,
 					   enum nl80211_attrs attr,
 					   int vendor_event_idx,
@@ -7450,7 +7471,7 @@ struct sk_buff *__cfg80211_alloc_event_skb(struct wiphy *wiphy,
 		return NULL;
 	}
 
-	return __cfg80211_alloc_vendor_skb(rdev, approxlen, 0, 0,
+	return __cfg80211_alloc_vendor_skb(rdev, wdev, approxlen, 0, 0,
 					   cmd, attr, info, gfp);
 }
 EXPORT_SYMBOL(__cfg80211_alloc_event_skb);
@@ -9084,6 +9105,7 @@ static int nl80211_set_wowlan(struct sk_buff *skb, struct genl_info *info)
 	const struct wiphy_wowlan_support *wowlan = rdev->wiphy.wowlan;
 	int err, i;
 	bool prev_enabled = rdev->wiphy.wowlan_config;
+	bool regular = false;
 
 	if (!wowlan)
 		return -EOPNOTSUPP;
@@ -9111,12 +9133,14 @@ static int nl80211_set_wowlan(struct sk_buff *skb, struct genl_info *info)
 		if (!(wowlan->flags & WIPHY_WOWLAN_DISCONNECT))
 			return -EINVAL;
 		new_triggers.disconnect = true;
+		regular = true;
 	}
 
 	if (tb[NL80211_WOWLAN_TRIG_MAGIC_PKT]) {
 		if (!(wowlan->flags & WIPHY_WOWLAN_MAGIC_PKT))
 			return -EINVAL;
 		new_triggers.magic_pkt = true;
+		regular = true;
 	}
 
 	if (tb[NL80211_WOWLAN_TRIG_GTK_REKEY_SUPPORTED])
@@ -9126,24 +9150,28 @@ static int nl80211_set_wowlan(struct sk_buff *skb, struct genl_info *info)
 		if (!(wowlan->flags & WIPHY_WOWLAN_GTK_REKEY_FAILURE))
 			return -EINVAL;
 		new_triggers.gtk_rekey_failure = true;
+		regular = true;
 	}
 
 	if (tb[NL80211_WOWLAN_TRIG_EAP_IDENT_REQUEST]) {
 		if (!(wowlan->flags & WIPHY_WOWLAN_EAP_IDENTITY_REQ))
 			return -EINVAL;
 		new_triggers.eap_identity_req = true;
+		regular = true;
 	}
 
 	if (tb[NL80211_WOWLAN_TRIG_4WAY_HANDSHAKE]) {
 		if (!(wowlan->flags & WIPHY_WOWLAN_4WAY_HANDSHAKE))
 			return -EINVAL;
 		new_triggers.four_way_handshake = true;
+		regular = true;
 	}
 
 	if (tb[NL80211_WOWLAN_TRIG_RFKILL_RELEASE]) {
 		if (!(wowlan->flags & WIPHY_WOWLAN_RFKILL_RELEASE))
 			return -EINVAL;
 		new_triggers.rfkill_release = true;
+		regular = true;
 	}
 
 	if (tb[NL80211_WOWLAN_TRIG_PKT_PATTERN]) {
@@ -9151,6 +9179,8 @@ static int nl80211_set_wowlan(struct sk_buff *skb, struct genl_info *info)
 		int n_patterns = 0;
 		int rem, pat_len, mask_len, pkt_offset;
 		struct nlattr *pat_tb[NUM_NL80211_PKTPAT];
+
+		regular = true;
 
 		nla_for_each_nested(pat, tb[NL80211_WOWLAN_TRIG_PKT_PATTERN],
 				    rem)
@@ -9213,6 +9243,7 @@ static int nl80211_set_wowlan(struct sk_buff *skb, struct genl_info *info)
 	}
 
 	if (tb[NL80211_WOWLAN_TRIG_TCP_CONNECTION]) {
+		regular = true;
 		err = nl80211_parse_wowlan_tcp(
 			rdev, tb[NL80211_WOWLAN_TRIG_TCP_CONNECTION],
 			&new_triggers);
@@ -9221,11 +9252,23 @@ static int nl80211_set_wowlan(struct sk_buff *skb, struct genl_info *info)
 	}
 
 	if (tb[NL80211_WOWLAN_TRIG_NET_DETECT]) {
+		regular = true;
 		err = nl80211_parse_wowlan_nd(
 			rdev, wowlan, tb[NL80211_WOWLAN_TRIG_NET_DETECT],
 			&new_triggers);
 		if (err)
 			goto error;
+	}
+
+	/* The 'any' trigger means the device continues operating more or less
+	 * as in its normal operation mode and wakes up the host on most of the
+	 * normal interrupts (like packet RX, ...)
+	 * It therefore makes little sense to combine with the more constrained
+	 * wakeup trigger modes.
+	 */
+	if (new_triggers.any && regular) {
+		err = -EINVAL;
+		goto error;
 	}
 
 	ntrig = kmemdup(&new_triggers, sizeof(new_triggers), GFP_KERNEL);
@@ -9896,7 +9939,7 @@ struct sk_buff *__cfg80211_alloc_reply_skb(struct wiphy *wiphy,
 	if (WARN_ON(!rdev->cur_cmd_info))
 		return NULL;
 
-	return __cfg80211_alloc_vendor_skb(rdev, approxlen,
+	return __cfg80211_alloc_vendor_skb(rdev, NULL, approxlen,
 					   rdev->cur_cmd_info->snd_portid,
 					   rdev->cur_cmd_info->snd_seq,
 					   cmd, attr, NULL, GFP_KERNEL);
