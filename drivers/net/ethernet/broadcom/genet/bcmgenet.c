@@ -54,6 +54,8 @@
 /* Default highest priority queue for multi queue support */
 #define GENET_Q0_PRIORITY	0
 
+#define GENET_Q16_RX_BD_CNT	\
+	(TOTAL_DESC - priv->hw_params->rx_queues * priv->hw_params->rx_bds_per_q)
 #define GENET_Q16_TX_BD_CNT	\
 	(TOTAL_DESC - priv->hw_params->tx_queues * priv->hw_params->tx_bds_per_q)
 
@@ -978,39 +980,32 @@ static unsigned int __bcmgenet_tx_reclaim(struct net_device *dev,
 					  struct bcmgenet_tx_ring *ring)
 {
 	struct bcmgenet_priv *priv = netdev_priv(dev);
-	int last_tx_cn, last_c_index, num_tx_bds;
 	struct enet_cb *tx_cb_ptr;
 	struct netdev_queue *txq;
 	unsigned int pkts_compl = 0;
-	unsigned int bds_compl;
 	unsigned int c_index;
+	unsigned int txbds_ready;
+	unsigned int txbds_processed = 0;
 
 	/* Compute how many buffers are transmitted since last xmit call */
 	c_index = bcmgenet_tdma_ring_readl(priv, ring->index, TDMA_CONS_INDEX);
-	txq = netdev_get_tx_queue(dev, ring->queue);
+	c_index &= DMA_C_INDEX_MASK;
 
-	last_c_index = ring->c_index;
-	num_tx_bds = ring->size;
-
-	c_index &= (num_tx_bds - 1);
-
-	if (c_index >= last_c_index)
-		last_tx_cn = c_index - last_c_index;
+	if (likely(c_index >= ring->c_index))
+		txbds_ready = c_index - ring->c_index;
 	else
-		last_tx_cn = num_tx_bds - last_c_index + c_index;
+		txbds_ready = (DMA_C_INDEX_MASK + 1) - ring->c_index + c_index;
 
 	netif_dbg(priv, tx_done, dev,
-		  "%s ring=%d index=%d last_tx_cn=%d last_index=%d\n",
-		  __func__, ring->index,
-		  c_index, last_tx_cn, last_c_index);
+		  "%s ring=%d old_c_index=%u c_index=%u txbds_ready=%u\n",
+		  __func__, ring->index, ring->c_index, c_index, txbds_ready);
 
 	/* Reclaim transmitted buffers */
-	while (last_tx_cn-- > 0) {
-		tx_cb_ptr = ring->cbs + last_c_index;
-		bds_compl = 0;
+	while (txbds_processed < txbds_ready) {
+		tx_cb_ptr = &priv->tx_cbs[ring->clean_ptr];
 		if (tx_cb_ptr->skb) {
 			pkts_compl++;
-			bds_compl = skb_shinfo(tx_cb_ptr->skb)->nr_frags + 1;
+			dev->stats.tx_packets++;
 			dev->stats.tx_bytes += tx_cb_ptr->skb->len;
 			dma_unmap_single(&dev->dev,
 					 dma_unmap_addr(tx_cb_ptr, dma_addr),
@@ -1026,19 +1021,22 @@ static unsigned int __bcmgenet_tx_reclaim(struct net_device *dev,
 				       DMA_TO_DEVICE);
 			dma_unmap_addr_set(tx_cb_ptr, dma_addr, 0);
 		}
-		dev->stats.tx_packets++;
-		ring->free_bds += bds_compl;
 
-		last_c_index++;
-		last_c_index &= (num_tx_bds - 1);
+		txbds_processed++;
+		if (likely(ring->clean_ptr < ring->end_ptr))
+			ring->clean_ptr++;
+		else
+			ring->clean_ptr = ring->cb_ptr;
 	}
 
+	ring->free_bds += txbds_processed;
+	ring->c_index = (ring->c_index + txbds_processed) & DMA_C_INDEX_MASK;
+
 	if (ring->free_bds > (MAX_SKB_FRAGS + 1)) {
+		txq = netdev_get_tx_queue(dev, ring->queue);
 		if (netif_tx_queue_stopped(txq))
 			netif_tx_wake_queue(txq);
 	}
-
-	ring->c_index = c_index;
 
 	return pkts_compl;
 }
@@ -1734,6 +1732,7 @@ static void bcmgenet_init_tx_ring(struct bcmgenet_priv *priv,
 	}
 	ring->cbs = priv->tx_cbs + start_ptr;
 	ring->size = size;
+	ring->clean_ptr = start_ptr;
 	ring->c_index = 0;
 	ring->free_bds = size;
 	ring->write_ptr = start_ptr;
@@ -2491,6 +2490,7 @@ static struct bcmgenet_hw_params bcmgenet_hw_params[] = {
 		.tx_queues = 0,
 		.tx_bds_per_q = 0,
 		.rx_queues = 0,
+		.rx_bds_per_q = 0,
 		.bp_in_en_shift = 16,
 		.bp_in_mask = 0xffff,
 		.hfb_filter_cnt = 16,
@@ -2503,7 +2503,8 @@ static struct bcmgenet_hw_params bcmgenet_hw_params[] = {
 	[GENET_V2] = {
 		.tx_queues = 4,
 		.tx_bds_per_q = 32,
-		.rx_queues = 4,
+		.rx_queues = 0,
+		.rx_bds_per_q = 0,
 		.bp_in_en_shift = 16,
 		.bp_in_mask = 0xffff,
 		.hfb_filter_cnt = 16,
@@ -2519,7 +2520,8 @@ static struct bcmgenet_hw_params bcmgenet_hw_params[] = {
 	[GENET_V3] = {
 		.tx_queues = 4,
 		.tx_bds_per_q = 32,
-		.rx_queues = 4,
+		.rx_queues = 0,
+		.rx_bds_per_q = 0,
 		.bp_in_en_shift = 17,
 		.bp_in_mask = 0x1ffff,
 		.hfb_filter_cnt = 48,
@@ -2535,7 +2537,8 @@ static struct bcmgenet_hw_params bcmgenet_hw_params[] = {
 	[GENET_V4] = {
 		.tx_queues = 4,
 		.tx_bds_per_q = 32,
-		.rx_queues = 4,
+		.rx_queues = 0,
+		.rx_bds_per_q = 0,
 		.bp_in_en_shift = 17,
 		.bp_in_mask = 0x1ffff,
 		.hfb_filter_cnt = 48,
@@ -2635,7 +2638,7 @@ static void bcmgenet_set_hw_params(struct bcmgenet_priv *priv)
 #endif
 
 	pr_debug("Configuration for version: %d\n"
-		"TXq: %1d, TXqBDs: %1d, RXq: %1d\n"
+		"TXq: %1d, TXqBDs: %1d, RXq: %1d, RXqBDs: %1d\n"
 		"BP << en: %2d, BP msk: 0x%05x\n"
 		"HFB count: %2d, QTAQ msk: 0x%05x\n"
 		"TBUF: 0x%04x, HFB: 0x%04x, HFBreg: 0x%04x\n"
@@ -2643,7 +2646,7 @@ static void bcmgenet_set_hw_params(struct bcmgenet_priv *priv)
 		"Words/BD: %d\n",
 		priv->version,
 		params->tx_queues, params->tx_bds_per_q,
-		params->rx_queues,
+		params->rx_queues, params->rx_bds_per_q,
 		params->bp_in_en_shift, params->bp_in_mask,
 		params->hfb_filter_cnt, params->qtag_mask,
 		params->tbuf_offset, params->hfb_offset,
@@ -2671,8 +2674,9 @@ static int bcmgenet_probe(struct platform_device *pdev)
 	struct resource *r;
 	int err = -EIO;
 
-	/* Up to GENET_MAX_MQ_CNT + 1 TX queues and a single RX queue */
-	dev = alloc_etherdev_mqs(sizeof(*priv), GENET_MAX_MQ_CNT + 1, 1);
+	/* Up to GENET_MAX_MQ_CNT + 1 TX queues and RX queues */
+	dev = alloc_etherdev_mqs(sizeof(*priv), GENET_MAX_MQ_CNT + 1,
+				 GENET_MAX_MQ_CNT + 1);
 	if (!dev) {
 		dev_err(&pdev->dev, "can't allocate net device\n");
 		return -ENOMEM;

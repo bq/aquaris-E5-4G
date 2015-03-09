@@ -259,6 +259,7 @@ static void i40e_get_settings_link_up(struct i40e_hw *hw,
 		break;
 	case I40E_PHY_TYPE_XLAUI:
 	case I40E_PHY_TYPE_XLPPI:
+	case I40E_PHY_TYPE_40GBASE_AOC:
 		ecmd->supported = SUPPORTED_40000baseCR4_Full;
 		break;
 	case I40E_PHY_TYPE_40GBASE_KR4:
@@ -328,6 +329,7 @@ static void i40e_get_settings_link_up(struct i40e_hw *hw,
 	case I40E_PHY_TYPE_XFI:
 	case I40E_PHY_TYPE_SFI:
 	case I40E_PHY_TYPE_10GBASE_SFPP_CU:
+	case I40E_PHY_TYPE_10GBASE_AOC:
 		ecmd->supported = SUPPORTED_10000baseT_Full;
 		break;
 	case I40E_PHY_TYPE_SGMII:
@@ -1413,6 +1415,8 @@ static void i40e_get_strings(struct net_device *netdev, u32 stringset,
 			data += ETH_GSTRING_LEN;
 		}
 		break;
+	default:
+		break;
 	}
 }
 
@@ -1528,6 +1532,7 @@ static void i40e_diag_test(struct net_device *netdev,
 			   struct ethtool_test *eth_test, u64 *data)
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
+	bool if_running = netif_running(netdev);
 	struct i40e_pf *pf = np->vsi->back;
 
 	if (eth_test->flags == ETH_TEST_FL_OFFLINE) {
@@ -1535,6 +1540,12 @@ static void i40e_diag_test(struct net_device *netdev,
 		netif_info(pf, drv, netdev, "offline testing starting\n");
 
 		set_bit(__I40E_TESTING, &pf->state);
+		/* If the device is online then take it offline */
+		if (if_running)
+			/* indicate we're in test mode */
+			dev_close(netdev);
+		else
+			i40e_do_reset(pf, (1 << __I40E_PF_RESET_REQUESTED));
 
 		/* Link test performed before hardware reset
 		 * so autoneg doesn't interfere with test result
@@ -1557,6 +1568,9 @@ static void i40e_diag_test(struct net_device *netdev,
 
 		clear_bit(__I40E_TESTING, &pf->state);
 		i40e_do_reset(pf, (1 << __I40E_PF_RESET_REQUESTED));
+
+		if (if_running)
+			dev_open(netdev);
 	} else {
 		/* Online tests */
 		netif_info(pf, drv, netdev, "online testing starting\n");
@@ -1653,6 +1667,8 @@ static int i40e_set_phys_id(struct net_device *netdev,
 		break;
 	case ETHTOOL_ID_INACTIVE:
 		i40e_led_set(hw, pf->led_status, false);
+		break;
+	default:
 		break;
 	}
 
@@ -2344,10 +2360,6 @@ static int i40e_set_channels(struct net_device *dev,
 	/* update feature limits from largest to smallest supported values */
 	/* TODO: Flow director limit, DCB etc */
 
-	/* cap RSS limit */
-	if (count > pf->rss_size_max)
-		count = pf->rss_size_max;
-
 	/* use rss_reconfig to rebuild with new queue count and update traffic
 	 * class queue mapping
 	 */
@@ -2368,7 +2380,7 @@ static int i40e_set_channels(struct net_device *dev,
  *
  * Returns a u32 bitmap of flags.
  **/
-u32 i40e_get_priv_flags(struct net_device *dev)
+static u32 i40e_get_priv_flags(struct net_device *dev)
 {
 	struct i40e_netdev_priv *np = netdev_priv(dev);
 	struct i40e_vsi *vsi = np->vsi;

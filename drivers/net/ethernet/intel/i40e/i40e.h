@@ -72,6 +72,7 @@
 
 #define I40E_MAX_NUM_DESCRIPTORS      4096
 #define I40E_MAX_REGISTER     0x800000
+#define I40E_MAX_CSR_SPACE (4 * 1024 * 1024 - 64 * 1024)
 #define I40E_DEFAULT_NUM_DESCRIPTORS  512
 #define I40E_REQ_DESCRIPTOR_MULTIPLE  32
 #define I40E_MIN_NUM_DESCRIPTORS      64
@@ -471,6 +472,9 @@ struct i40e_vsi {
 	u16 rx_itr_setting;
 	u16 tx_itr_setting;
 
+	u16 rss_table_size;
+	u16 rss_size;
+
 	u16 max_frame;
 	u16 rx_hdr_len;
 	u16 rx_buf_len;
@@ -488,6 +492,7 @@ struct i40e_vsi {
 
 	u16 base_queue;      /* vsi's first queue in hw array */
 	u16 alloc_queue_pairs; /* Allocated Tx/Rx queues */
+	u16 req_queue_pairs; /* User requested queue pairs */
 	u16 num_queue_pairs; /* Used tx and rx pairs */
 	u16 num_desc;
 	enum i40e_vsi_type type;  /* VSI type, e.g., LAN, FCoE, etc */
@@ -557,14 +562,14 @@ static inline char *i40e_fw_version_str(struct i40e_hw *hw)
 	static char buf[32];
 
 	snprintf(buf, sizeof(buf),
-		 "f%d.%d a%d.%d n%02x.%02x e%08x",
-		 hw->aq.fw_maj_ver, hw->aq.fw_min_ver,
+		 "f%d.%d.%05d a%d.%d n%x.%02x e%x",
+		 hw->aq.fw_maj_ver, hw->aq.fw_min_ver, hw->aq.fw_build,
 		 hw->aq.api_maj_ver, hw->aq.api_min_ver,
 		 (hw->nvm.version & I40E_NVM_VERSION_HI_MASK) >>
 			I40E_NVM_VERSION_HI_SHIFT,
 		 (hw->nvm.version & I40E_NVM_VERSION_LO_MASK) >>
 			I40E_NVM_VERSION_LO_SHIFT,
-		 hw->nvm.eetrack);
+		 (hw->nvm.eetrack & 0xffffff));
 
 	return buf;
 }
@@ -725,6 +730,7 @@ void i40e_fcoe_handle_status(struct i40e_ring *rx_ring,
 void i40e_vlan_stripping_enable(struct i40e_vsi *vsi);
 #ifdef CONFIG_I40E_DCB
 void i40e_dcbnl_flush_apps(struct i40e_pf *pf,
+			   struct i40e_dcbx_config *old_cfg,
 			   struct i40e_dcbx_config *new_cfg);
 void i40e_dcbnl_set_all(struct i40e_vsi *vsi);
 void i40e_dcbnl_setup(struct i40e_vsi *vsi);
@@ -741,10 +747,10 @@ int i40e_ptp_get_ts_config(struct i40e_pf *pf, struct ifreq *ifr);
 void i40e_ptp_init(struct i40e_pf *pf);
 void i40e_ptp_stop(struct i40e_pf *pf);
 int i40e_is_vsi_uplink_mode_veb(struct i40e_vsi *vsi);
-#if IS_ENABLED(CONFIG_CONFIGFS_FS)
+#if IS_ENABLED(CONFIG_I40E_CONFIGFS_FS)
 int i40e_configfs_init(void);
 void i40e_configfs_exit(void);
-#endif /* CONFIG_CONFIGFS_FS */
+#endif /* CONFIG_I40E_CONFIGFS_FS */
 i40e_status i40e_get_npar_bw_setting(struct i40e_pf *pf);
 i40e_status i40e_set_npar_bw_setting(struct i40e_pf *pf);
 i40e_status i40e_commit_npar_bw_setting(struct i40e_pf *pf);

@@ -541,7 +541,6 @@ struct i40e_rx_ptype_decoded i40e_ptype_lookup[] = {
 	I40E_PTT_UNUSED_ENTRY(255)
 };
 
-
 /**
  * i40e_init_shared_code - Initialize the shared code
  * @hw: pointer to hardware structure
@@ -834,6 +833,8 @@ static enum i40e_media_type i40e_get_media_type(struct i40e_hw *hw)
 	case I40E_PHY_TYPE_10GBASE_CR1:
 	case I40E_PHY_TYPE_40GBASE_CR4:
 	case I40E_PHY_TYPE_10GBASE_SFPP_CU:
+	case I40E_PHY_TYPE_40GBASE_AOC:
+	case I40E_PHY_TYPE_10GBASE_AOC:
 		media = I40E_MEDIA_TYPE_DA;
 		break;
 	case I40E_PHY_TYPE_1000BASE_KX:
@@ -1083,8 +1084,11 @@ static u32 i40e_led_is_mine(struct i40e_hw *hw, int idx)
 	return gpio_val;
 }
 
-#define I40E_LED0 22
+#define I40E_COMBINED_ACTIVITY 0xA
+#define I40E_FILTER_ACTIVITY 0xE
 #define I40E_LINK_ACTIVITY 0xC
+#define I40E_MAC_ACTIVITY 0xD
+#define I40E_LED0 22
 
 /**
  * i40e_led_get - return current on/off mode
@@ -1097,6 +1101,7 @@ static u32 i40e_led_is_mine(struct i40e_hw *hw, int idx)
  **/
 u32 i40e_led_get(struct i40e_hw *hw)
 {
+	u32 current_mode = 0;
 	u32 mode = 0;
 	int i;
 
@@ -1108,6 +1113,20 @@ u32 i40e_led_get(struct i40e_hw *hw)
 
 		if (!gpio_val)
 			continue;
+
+		/* ignore gpio LED src mode entries related to the activity
+		 * LEDs
+		 */
+		current_mode = ((gpio_val & I40E_GLGEN_GPIO_CTL_LED_MODE_MASK)
+				>> I40E_GLGEN_GPIO_CTL_LED_MODE_SHIFT);
+		switch (current_mode) {
+		case I40E_COMBINED_ACTIVITY:
+		case I40E_FILTER_ACTIVITY:
+		case I40E_MAC_ACTIVITY:
+			continue;
+		default:
+			break;
+		}
 
 		mode = (gpio_val & I40E_GLGEN_GPIO_CTL_LED_MODE_MASK) >>
 			I40E_GLGEN_GPIO_CTL_LED_MODE_SHIFT;
@@ -1128,6 +1147,7 @@ u32 i40e_led_get(struct i40e_hw *hw)
  **/
 void i40e_led_set(struct i40e_hw *hw, u32 mode, bool blink)
 {
+	u32 current_mode = 0;
 	int i;
 
 	if (mode & 0xfffffff0)
@@ -1141,6 +1161,20 @@ void i40e_led_set(struct i40e_hw *hw, u32 mode, bool blink)
 
 		if (!gpio_val)
 			continue;
+
+		/* ignore gpio LED src mode entries related to the activity
+		 * LEDs
+		 */
+		current_mode = ((gpio_val & I40E_GLGEN_GPIO_CTL_LED_MODE_MASK)
+				>> I40E_GLGEN_GPIO_CTL_LED_MODE_SHIFT);
+		switch (current_mode) {
+		case I40E_COMBINED_ACTIVITY:
+		case I40E_FILTER_ACTIVITY:
+		case I40E_MAC_ACTIVITY:
+			continue;
+		default:
+			break;
+		}
 
 		gpio_val &= ~I40E_GLGEN_GPIO_CTL_LED_MODE_MASK;
 		/* this & is a bit of paranoia, but serves as a range check */
@@ -1448,6 +1482,10 @@ i40e_status i40e_aq_get_link_info(struct i40e_hw *hw,
 	else
 		hw_link_info->lse_enable = false;
 
+	if ((hw->aq.fw_maj_ver < 4 || (hw->aq.fw_maj_ver == 4 &&
+	     hw->aq.fw_min_ver < 40)) && hw_link_info->phy_type == 0xE)
+		hw_link_info->phy_type = I40E_PHY_TYPE_10GBASE_SFPP_CU;
+
 	/* save link status information */
 	if (link)
 		*link = *hw_link_info;
@@ -1738,6 +1776,7 @@ i40e_status i40e_aq_get_switch_config(struct i40e_hw *hw,
  * @hw: pointer to the hw struct
  * @fw_major_version: firmware major version
  * @fw_minor_version: firmware minor version
+ * @fw_build: firmware build number
  * @api_major_version: major queue version
  * @api_minor_version: minor queue version
  * @cmd_details: pointer to command details structure or NULL
@@ -1746,6 +1785,7 @@ i40e_status i40e_aq_get_switch_config(struct i40e_hw *hw,
  **/
 i40e_status i40e_aq_get_firmware_version(struct i40e_hw *hw,
 				u16 *fw_major_version, u16 *fw_minor_version,
+				u32 *fw_build,
 				u16 *api_major_version, u16 *api_minor_version,
 				struct i40e_asq_cmd_details *cmd_details)
 {
@@ -1759,13 +1799,15 @@ i40e_status i40e_aq_get_firmware_version(struct i40e_hw *hw,
 	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
 
 	if (!status) {
-		if (fw_major_version != NULL)
+		if (fw_major_version)
 			*fw_major_version = le16_to_cpu(resp->fw_major);
-		if (fw_minor_version != NULL)
+		if (fw_minor_version)
 			*fw_minor_version = le16_to_cpu(resp->fw_minor);
-		if (api_major_version != NULL)
+		if (fw_build)
+			*fw_build = le32_to_cpu(resp->fw_build);
+		if (api_major_version)
 			*api_major_version = le16_to_cpu(resp->api_major);
-		if (api_minor_version != NULL)
+		if (api_minor_version)
 			*api_minor_version = le16_to_cpu(resp->api_minor);
 	}
 
