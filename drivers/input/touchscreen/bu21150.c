@@ -96,6 +96,7 @@ struct bu21150_data {
 	int power_supply;
 	/* suspend */
 	struct notifier_block fb_notif;
+	u8 suspended_flag;
 	u8 unblock_flag;
 	u8 force_unblock_flag;
 };
@@ -451,8 +452,8 @@ static int bu21150_suspend(struct device *dev)
 
 	bu21150_write_register(REG_SENS_START, (u16)sizeof(buf1), buf1);
 
+	ts->suspended_flag = 1;
 	ts->unblock_flag = 1;
-	/* wake up */
 	wake_up_frame_waitq(ts);
 
 	bu21150_write_register(REG_INT_RUN_ENB, (u16)sizeof(buf2), buf2);
@@ -462,9 +463,13 @@ static int bu21150_suspend(struct device *dev)
 
 static int bu21150_resume(struct device *dev)
 {
+	struct spi_device *client = to_spi_device(dev);
+	struct bu21150_data *ts = spi_get_drvdata(client);
 	u8 buf[2] = {0x01, 0x00};
 
 	bu21150_write_register(REG_INT_RUN_ENB, (u16)sizeof(buf), buf);
+
+	ts->suspended_flag = 0;
 
 	return 0;
 }
@@ -518,7 +523,6 @@ static void get_frame_timer_handler(unsigned long data)
 	struct bu21150_data *ts = spi_get_drvdata(g_client_bu21150);
 
 	ts->timeout_flag = 1;
-	/* wake up */
 	wake_up_frame_waitq(ts);
 }
 
@@ -560,6 +564,7 @@ static int bu21150_open(struct inode *inode, struct file *filp)
 	ts->set_timer_flag = 0;
 	ts->timeout_flag = 0;
 	ts->timeout_enb = 0;
+	ts->suspended_flag = 0;
 	ts->unblock_flag = 0;
 	ts->force_unblock_flag = 0;
 	ts->scan_mode = BU21150_MUTUAL;
@@ -763,6 +768,16 @@ static long bu21150_ioctl_spi_write(unsigned long arg)
 		pr_err("%s: data.buf == 0 ...\n", __func__);
 		return -EINVAL;
 	}
+	if ((ts->suspended_flag == 0 &&
+		(data.next_mode == BU21150_GESTURE_SELF ||
+		data.next_mode == BU21150_GESTURE_MUTUAL)) ||
+		(ts->suspended_flag == 1 &&
+		(data.next_mode == BU21150_SELF ||
+		data.next_mode == BU21150_MUTUAL))) {
+		pr_err("%s: invalid ts->suspended_flag = %d, mode = %d\n",
+				__func__, ts->suspended_flag, data.next_mode);
+		return -EINVAL;
+	}
 	if (copy_from_user(ts->spi_buf, data.buf, data.count)) {
 		pr_err("%s: Failed to copy_from_user()..\n", __func__);
 		return -EFAULT;
@@ -778,7 +793,7 @@ static long bu21150_ioctl_unblock(void)
 	struct bu21150_data *ts = spi_get_drvdata(g_client_bu21150);
 
 	ts->force_unblock_flag = 1;
-	/* wake up */
+	ts->frame_waitq_flag = WAITQ_WAIT;
 	wake_up_frame_waitq(ts);
 
 	return 0;
@@ -789,6 +804,7 @@ static long bu21150_ioctl_unblock_release(void)
 	struct bu21150_data *ts = spi_get_drvdata(g_client_bu21150);
 
 	ts->force_unblock_flag = 0;
+	ts->frame_waitq_flag = WAITQ_WAIT;
 
 	return 0;
 }
@@ -809,7 +825,7 @@ static long bu21150_ioctl_resume(void)
 	struct bu21150_data *ts = spi_get_drvdata(g_client_bu21150);
 	struct spi_device *client = ts->client;
 
-	ts->force_unblock_flag = 0;
+	bu21150_ioctl_unblock_release();
 	enable_irq(client->irq);
 
 	return 0;
