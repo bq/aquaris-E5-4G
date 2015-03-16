@@ -64,8 +64,10 @@ static int cls_bpf_classify(struct sk_buff *skb, const struct tcf_proto *tp,
 {
 	struct cls_bpf_head *head = rcu_dereference_bh(tp->root);
 	struct cls_bpf_prog *prog;
-	int ret;
+	int ret = -1;
 
+	/* Needed here for accessing maps. */
+	rcu_read_lock();
 	list_for_each_entry_rcu(prog, &head->plist, link) {
 		int filter_res = BPF_PROG_RUN(prog->filter, skb);
 
@@ -80,10 +82,11 @@ static int cls_bpf_classify(struct sk_buff *skb, const struct tcf_proto *tp,
 		if (ret < 0)
 			continue;
 
-		return ret;
+		break;
 	}
+	rcu_read_unlock();
 
-	return -1;
+	return ret;
 }
 
 static bool cls_bpf_is_ebpf(const struct cls_bpf_prog *prog)
@@ -137,10 +140,13 @@ static int cls_bpf_delete(struct tcf_proto *tp, unsigned long arg)
 	return 0;
 }
 
-static void cls_bpf_destroy(struct tcf_proto *tp)
+static bool cls_bpf_destroy(struct tcf_proto *tp, bool force)
 {
 	struct cls_bpf_head *head = rtnl_dereference(tp->root);
 	struct cls_bpf_prog *prog, *tmp;
+
+	if (!force && !list_empty(&head->plist))
+		return false;
 
 	list_for_each_entry_safe(prog, tmp, &head->plist, link) {
 		list_del_rcu(&prog->link);
@@ -150,6 +156,7 @@ static void cls_bpf_destroy(struct tcf_proto *tp)
 
 	RCU_INIT_POINTER(tp->root, NULL);
 	kfree_rcu(head, rcu);
+	return true;
 }
 
 static unsigned long cls_bpf_get(struct tcf_proto *tp, u32 handle)

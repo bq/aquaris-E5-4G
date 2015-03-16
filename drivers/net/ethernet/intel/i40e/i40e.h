@@ -175,6 +175,9 @@ struct i40e_lump_tracking {
 #define I40E_FDIR_MAX_RAW_PACKET_SIZE	512
 #define I40E_FDIR_BUFFER_FULL_MARGIN	10
 #define I40E_FDIR_BUFFER_HEAD_ROOM	32
+#define I40E_FDIR_BUFFER_HEAD_ROOM_FOR_ATR (I40E_FDIR_BUFFER_HEAD_ROOM * 4)
+
+#define I40E_HKEY_ARRAY_SIZE ((I40E_PFQF_HKEY_MAX_INDEX + 1) * 4)
 
 enum i40e_fd_stat_idx {
 	I40E_FD_STAT_ATR,
@@ -239,17 +242,17 @@ struct i40e_pf {
 	bool fc_autoneg_status;
 
 	u16 eeprom_version;
-	u16 num_vmdq_vsis;         /* num vmdq vsis this pf has set up */
+	u16 num_vmdq_vsis;         /* num vmdq vsis this PF has set up */
 	u16 num_vmdq_qps;          /* num queue pairs per vmdq pool */
 	u16 num_vmdq_msix;         /* num queue vectors per vmdq pool */
-	u16 num_req_vfs;           /* num vfs requested for this vf */
-	u16 num_vf_qps;            /* num queue pairs per vf */
+	u16 num_req_vfs;           /* num VFs requested for this VF */
+	u16 num_vf_qps;            /* num queue pairs per VF */
 #ifdef I40E_FCOE
-	u16 num_fcoe_qps;          /* num fcoe queues this pf has set up */
+	u16 num_fcoe_qps;          /* num fcoe queues this PF has set up */
 	u16 num_fcoe_msix;         /* num queue vectors per fcoe pool */
 #endif /* I40E_FCOE */
-	u16 num_lan_qps;           /* num lan queues this pf has set up */
-	u16 num_lan_msix;          /* num queue vectors for the base pf vsi */
+	u16 num_lan_qps;           /* num lan queues this PF has set up */
+	u16 num_lan_msix;          /* num queue vectors for the base PF vsi */
 	int queues_left;           /* queues left unclaimed */
 	u16 rss_size;              /* num queues in the RSS array */
 	u16 rss_size_max;          /* HW defined max RSS queues */
@@ -276,7 +279,7 @@ struct i40e_pf {
 	enum i40e_interrupt_policy int_policy;
 	u16 rx_itr_default;
 	u16 tx_itr_default;
-	u16 msg_enable;
+	u32 msg_enable;
 	char int_name[I40E_INT_NAME_STR_LEN];
 	u16 adminq_work_limit; /* num of admin receive queue desc to process */
 	unsigned long service_timer_period;
@@ -611,7 +614,7 @@ static inline bool i40e_rx_is_programming_status(u64 qw)
 
 /**
  * i40e_get_fd_cnt_all - get the total FD filter space available
- * @pf: pointer to the pf struct
+ * @pf: pointer to the PF struct
  **/
 static inline int i40e_get_fd_cnt_all(struct i40e_pf *pf)
 {
@@ -636,9 +639,10 @@ int i40e_program_fdir_filter(struct i40e_fdir_filter *fdir_data, u8 *raw_packet,
 int i40e_add_del_fdir(struct i40e_vsi *vsi,
 		      struct i40e_fdir_filter *input, bool add);
 void i40e_fdir_check_and_reenable(struct i40e_pf *pf);
-int i40e_get_current_fd_count(struct i40e_pf *pf);
-int i40e_get_cur_guaranteed_fd_count(struct i40e_pf *pf);
-int i40e_get_current_atr_cnt(struct i40e_pf *pf);
+u32 i40e_get_current_fd_count(struct i40e_pf *pf);
+u32 i40e_get_cur_guaranteed_fd_count(struct i40e_pf *pf);
+u32 i40e_get_current_atr_cnt(struct i40e_pf *pf);
+u32 i40e_get_global_fd_count(struct i40e_pf *pf);
 bool i40e_set_ntuple(struct i40e_pf *pf, netdev_features_t features);
 void i40e_set_ethtool_ops(struct net_device *netdev);
 struct i40e_mac_filter *i40e_add_filter(struct i40e_vsi *vsi,
@@ -747,10 +751,6 @@ int i40e_ptp_get_ts_config(struct i40e_pf *pf, struct ifreq *ifr);
 void i40e_ptp_init(struct i40e_pf *pf);
 void i40e_ptp_stop(struct i40e_pf *pf);
 int i40e_is_vsi_uplink_mode_veb(struct i40e_vsi *vsi);
-#if IS_ENABLED(CONFIG_I40E_CONFIGFS_FS)
-int i40e_configfs_init(void);
-void i40e_configfs_exit(void);
-#endif /* CONFIG_I40E_CONFIGFS_FS */
 i40e_status i40e_get_npar_bw_setting(struct i40e_pf *pf);
 i40e_status i40e_set_npar_bw_setting(struct i40e_pf *pf);
 i40e_status i40e_commit_npar_bw_setting(struct i40e_pf *pf);
