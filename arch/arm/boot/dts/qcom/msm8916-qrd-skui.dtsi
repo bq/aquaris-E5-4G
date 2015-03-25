@@ -17,8 +17,6 @@
 #include "dsi-panel-trulyHX8394D-720p-video.dtsi"
 #include "dsi-panel-boyiotm1284a-720p-video.dtsi"
 #include "dsi-panel-trulyotm1288a-720p-cmd.dtsi"
-#include "dsi-panel-new-trulyotm1288a-720p-cmd.dtsi"
-#include "dsi-panel-trulyotm1288a-720p-video.dtsi"
 &soc {
 	flash_ocp8110:flashlight {
 		compatible = "qcom,leds-gpio-flash";
@@ -44,20 +42,19 @@
 		vdd-emi-supply = <&pm8916_l16>;
 	};
 
-	gpio-leds {
+	/*gpio-leds {
 		compatible = "gpio-leds";
 		status = "okay";
 		pinctrl-names = "default";
 		pinctrl-0 = <&button_backlight_off>;
 
 		keypad-backlight {
-			gpios = <&msm_gpio 34 0>;
+			gpios = <&msm_gpio 119 0>;
 			label = "button-backlight";
 			linux,default-trigger = "none";
 		};
-	};
+	};*/
 
-/*
 	sound {
 		compatible = "qcom,msm8x16-audio-codec";
 		qcom,model = "msm8x16-skui-snd-card";
@@ -83,36 +80,6 @@
 		pinctrl-0 = <&cdc_pdm_lines_act>;
 		pinctrl-1 = <&cdc_pdm_lines_sus>;
 	};
-	*/
-
-	// add for dual mic, 20140913, yinhaitao 
-	sound{
-		compatible = "qcom,msm8x16-audio-codec";
-		qcom,model = "msm8x16-skui-snd-card";
-		qcom,msm-snd-card-id = <0>;
-		qcom,msm-codec-type = "internal";
-		qcom,msm-ext-pa = "primary";
-		qcom,msm-mclk-freq = <9600000>;
-		qcom,msm-mbhc-hphl-swh = <0>;
-		qcom,msm-mbhc-gnd-swh = <1>;
-		qcom,msm-hs-micbias-type = "internal";
-		qcom,audio-routing =
-			"RX_BIAS", "MCLK",
-			"SPK_RX_BIAS", "MCLK",
-			"INT_LDO_H", "MCLK",
-			"MIC BIAS Internal1", "Handset Mic", //changed here
-			"MIC BIAS Internal2", "Headset Mic",
-			"MIC BIAS Internal1", "Secondary Mic", //changed here
-			"AMIC1", "MIC BIAS Internal1", //changed here
-			"AMIC2", "MIC BIAS Internal2",
-			"AMIC3", "MIC BIAS Internal1";//changed here
-		pinctrl-names = "cdc_lines_act",
-				"cdc_lines_sus";
-		pinctrl-0 = <&cdc_pdm_lines_act>;
-		pinctrl-1 = <&cdc_pdm_lines_sus>;
-		qcom,cdc_ext_earphone_pa = <&msm_gpio 51 0x0>;
-		qcom,cdc_ext_earphone_pa_pwr = <&msm_gpio 52 0x0>;
-	};
 };
 
 &pm8916_mpps {
@@ -135,17 +102,12 @@
 	qcom,pins = <&gp 25>;
 };
 
-&pmx_mdss_te {
-	qcom,num-grp-pins = <1>;
-	qcom,pins = <&gp 24>;
-};
-
 &mdss_dsi0 {
 	qcom,regulator-ldo-mode;
 	qcom,dsi-pref-prim-pan = <&dsi_otm8019a_fwvga_video>;
 	pinctrl-names = "mdss_default", "mdss_sleep";
-	pinctrl-0 = <&mdss_dsi_active &mdss_te_active>;
-	pinctrl-1 = <&mdss_dsi_suspend &mdss_te_suspend>;
+	pinctrl-0 = <&mdss_dsi_active>;
+	pinctrl-1 = <&mdss_dsi_suspend>;
 
 	qcom,platform-reset-gpio = <&msm_gpio 25 0>;
 };
@@ -227,7 +189,7 @@
 	};
 };
 
-&i2c_3{ /* BLSP1 QUP3 */
+&i2c_0 { /* BLSP1 QUP2 */
 		awinic@45 { /* Breath Light-Driven */
 			/*
 			led_Imax				current;         //0=omA, 1=5mA, 2=10mA, 3=15mA,
@@ -241,24 +203,11 @@
 			compatible = "awinic,aw2013";
 			reg = <0x45>;
 			vdd-supply = <&pm8916_l17>;
-			vcc_i2c-supply = <&pm8916_l6>;
-			awinic,ledr-parameter_array = <3 0 3 0 5 0 0>;
-			awinic,ledg-parameter_array = <3 0 3 0 5 0 0>;
-			awinic,ledb-parameter_array = <3 0 3 0 5 0 0>;
+			awinic,ledr-parameter_array = <1 0 3 0 5 0 0>;
+			awinic,ledg-parameter_array = <1 0 3 0 5 0 0>;
+			awinic,ledb-parameter_array = <1 0 3 0 5 0 0>;
 		};
-};
 
-&i2c_6{ /* BLSP1 QUP6 */
-		tfa98xx@34 { /* nxp ext codec tfa98xx */
-
-			compatible = "nxp,i2c_smartpa";
-			reg = <0x34>;
-		};
-};
-
-
-
-&i2c_0{ /* BLSP1 QUP2 */
 	        ltr@23 { /* Ambient light and proximity sensor */
 	                compatible = "ltr,ltr559";
 	                reg = <0x23>;
@@ -276,26 +225,7 @@
 	                ltr,als-polling-time = <200>;
 	        };
 
-			stk@48 {
-				compatible = "stk,stk3x1x";
-				reg = <0x48>;
-				interrupt-parent = <&msm_gpio>;
-				interrupts = <113 0x2>;
-				vdd-supply = <&pm8916_l17>;
-				vio-supply = <&pm8916_l6>;
-				stk,irq-gpio = <&msm_gpio 113 0x02>;
-				stk,transmittance = <340>;
-				stk,state-reg = <0x00>;
-				stk,psctrl-reg = <0x71>;
-				stk,alsctrl-reg = <0x38>;
-				stk,ledctrl-reg = <0xFF>;
-				stk,wait-reg = <0x07>;
-				stk,ps-thdh = <150>;
-				stk,ps-thdl = <100>;
-				stk,use-fir;
-			};
-/*
-		bosch@18 { // Accelerometer sensor 
+		bosch@18 { /* Accelerometer sensor */
 			compatible = "bosch,bma2x2";
 			reg = <0x18>;
 			vdd-supply = <&pm8916_l17>;
@@ -304,7 +234,7 @@
 			bosch,place = <7>;
 		};
 
-		bosch@68 { // Gyroscope sensor 
+		bosch@68 { /* Gyroscope sensor */
 			compatible = "bosch,bmg160";
 			reg = <0x68>;
 			vdd-supply = <&pm8916_l17>;
@@ -313,7 +243,7 @@
 			bosch,place = <7>;
 		};
 
-		bosch@10 {// Magnetic sensor 
+		bosch@10 {/* Magnetic sensor */
 			compatible = "bosch,bmm050";
 			reg = <0x10>;
 			vdd-supply = <&pm8916_l17>;
@@ -323,7 +253,7 @@
 			bosch,auto-report;
 		};
 
-		consensic@6c {// Barometer sensor 
+		consensic@6c {/* Barometer sensor */
 			compatible = "consensic,cps121";
 			reg = <0x6c>;
 			vdd-supply = <&pm8916_l17>;
@@ -331,7 +261,6 @@
 			consensic,polling-time = <3000>;
 			consensic,measure-time = <50>;
 		};
-*/
 	/*
 	avago@39 { // Ambient light and proximity sensor
 		compatible = "avago,apds9930";
@@ -394,47 +323,17 @@
 	};*/
 };
 
-&i2c_1{ /* BLSP1 QUP1 */
-		bosch@18 { /* Accelerometer sensor */
-			compatible = "bosch,bma2x2";
-			reg = <0x18>;
-			vdd-supply = <&pm8916_l17>;
-			vio-supply = <&pm8916_l6>;
-			bosch,init-interval = <200>;
-			bosch,place = <2>;
-		};
-
-		bosch@68 { /* Gyroscope sensor */
-			compatible = "bosch,bmg160";
-			reg = <0x68>;
-			vdd-supply = <&pm8916_l17>;
-			vio-supply = <&pm8916_l6>;
-			bosch,init-interval = <200>;
-			bosch,place = <2>;
-		};
-
-		bosch@10 {/* Magnetic sensor */
-			compatible = "bosch,bmm050";
-			reg = <0x10>;
-			vdd-supply = <&pm8916_l17>;
-			vio-supply = <&pm8916_l6>;
-			bosch,init-interval = <200>;
-			bosch,layout = <0x6>;
-			bosch,auto-report;
-		};
-};
-
 &spmi_bus {
         qcom,pm8916@0 {
                 qcom,leds@a100 {
-                        status = "disabled";
+                        status = "okay";
                         qcom,led_mpp_2 {
                                 label = "mpp";
                                 linux,name = "button-backlight";
                                 linux,default-trigger = "none";
                                 qcom,default-state = "off";
-                                qcom,max-current = <15>;
-                                qcom,current-setting = <5>;
+                                qcom,max-current = <20>;
+                                qcom,current-setting = <20>;
                                 qcom,id = <6>;
                                 qcom,mode = "manual";
                                 qcom,source-sel = <1>;
@@ -445,29 +344,14 @@
 };
 
 &sdhc_2 {
-	vdd-supply = <&pm8916_l11>;
-	qcom,vdd-voltage-level = <2800000 2950000>;
-	qcom,vdd-current-level = <15000 400000>;
+	qcom,nonremovable;
 
-	vdd-io-supply = <&pm8916_l12>;
-	qcom,vdd-io-voltage-level = <1800000 2950000>;
-	qcom,vdd-io-current-level = <200 50000>;
-
-	pinctrl-names = "active", "sleep";
-	pinctrl-0 = <&sdc2_clk_on &sdc2_cmd_on &sdc2_data_on &sdc2_cd_on>;
-	pinctrl-1 = <&sdc2_clk_off &sdc2_cmd_off &sdc2_data_off &sdc2_cd_off>;
-
-	#address-cells = <0>;
-	interrupt-parent = <&sdhc_2>;
-	interrupts = <0 1 2>;
-	#interrupt-cells = <1>;
-	interrupt-map-mask = <0xffffffff>;
+	interrupts = <0 1>;
 	interrupt-map = <0 &intc 0 125 0
-			1 &intc 0 221 0
-			2 &msm_gpio 38 0>;
-	interrupt-names = "hc_irq", "pwr_irq", "status_irq";
-	cd-gpios = <&msm_gpio 38 0x1>;
-
-	status = "ok";
+		1 &intc 0 221 0>;
+	interrupt-names = "hc_irq", "pwr_irq";
+	
+	qcom,clk-rates = <400000 15000000>;
+	/delete-property/ cd-gpios;
 };
 
