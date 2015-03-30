@@ -2456,6 +2456,7 @@ struct cfg80211_ops {
 
 	struct wireless_dev * (*add_virtual_intf)(struct wiphy *wiphy,
 						  const char *name,
+						  unsigned char name_assign_type,
 						  enum nl80211_iftype type,
 						  u32 *flags,
 						  struct vif_params *params);
@@ -4900,6 +4901,17 @@ void cfg80211_ch_switch_started_notify(struct net_device *dev,
  */
 bool ieee80211_operating_class_to_band(u8 operating_class,
 				       enum ieee80211_band *band);
+
+/**
+ * ieee80211_chandef_to_operating_class - convert chandef to operation class
+ *
+ * @chandef: the chandef to convert
+ * @op_class: a pointer to the resulting operating class
+ *
+ * Returns %true if the conversion was successful, %false otherwise.
+ */
+bool ieee80211_chandef_to_operating_class(struct cfg80211_chan_def *chandef,
+					  u8 *op_class);
 
 /*
  * cfg80211_tdls_oper_request - request userspace to perform TDLS operation
