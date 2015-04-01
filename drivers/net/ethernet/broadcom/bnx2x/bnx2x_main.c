@@ -11610,7 +11610,7 @@ static bool bnx2x_get_dropless_info(struct bnx2x *bp)
 	u32 cfg;
 
 	if (IS_VF(bp))
-		return 0;
+		return false;
 
 	if (IS_MF(bp) && !CHIP_IS_E1x(bp)) {
 		/* Take function: tmp = func */
@@ -11649,6 +11649,13 @@ static int bnx2x_get_hwinfo(struct bnx2x *bp)
 	int vn;
 	u32 val = 0, val2 = 0;
 	int rc = 0;
+
+	/* Validate that chip access is feasible */
+	if (REG_RD(bp, MISC_REG_CHIP_NUM) == 0xffffffff) {
+		dev_err(&bp->pdev->dev,
+			"Chip read returns all Fs. Preventing probe from continuing\n");
+		return -EINVAL;
+	}
 
 	bnx2x_get_common_hwinfo(bp);
 
@@ -12557,6 +12564,7 @@ static netdev_features_t bnx2x_features_check(struct sk_buff *skb,
 					      struct net_device *dev,
 					      netdev_features_t features)
 {
+	features = vlan_features_check(skb, features);
 	return vxlan_features_check(skb, features);
 }
 
@@ -13278,30 +13286,27 @@ static int bnx2x_ptp_adjtime(struct ptp_clock_info *ptp, s64 delta)
 	return 0;
 }
 
-static int bnx2x_ptp_gettime(struct ptp_clock_info *ptp, struct timespec *ts)
+static int bnx2x_ptp_gettime(struct ptp_clock_info *ptp, struct timespec64 *ts)
 {
 	struct bnx2x *bp = container_of(ptp, struct bnx2x, ptp_clock_info);
 	u64 ns;
-	u32 remainder;
 
 	ns = timecounter_read(&bp->timecounter);
 
 	DP(BNX2X_MSG_PTP, "PTP gettime called, ns = %llu\n", ns);
 
-	ts->tv_sec = div_u64_rem(ns, 1000000000ULL, &remainder);
-	ts->tv_nsec = remainder;
+	*ts = ns_to_timespec64(ns);
 
 	return 0;
 }
 
 static int bnx2x_ptp_settime(struct ptp_clock_info *ptp,
-			     const struct timespec *ts)
+			     const struct timespec64 *ts)
 {
 	struct bnx2x *bp = container_of(ptp, struct bnx2x, ptp_clock_info);
 	u64 ns;
 
-	ns = ts->tv_sec * 1000000000ULL;
-	ns += ts->tv_nsec;
+	ns = timespec64_to_ns(ts);
 
 	DP(BNX2X_MSG_PTP, "PTP settime called, ns = %llu\n", ns);
 
@@ -13333,8 +13338,8 @@ static void bnx2x_register_phc(struct bnx2x *bp)
 	bp->ptp_clock_info.pps = 0;
 	bp->ptp_clock_info.adjfreq = bnx2x_ptp_adjfreq;
 	bp->ptp_clock_info.adjtime = bnx2x_ptp_adjtime;
-	bp->ptp_clock_info.gettime = bnx2x_ptp_gettime;
-	bp->ptp_clock_info.settime = bnx2x_ptp_settime;
+	bp->ptp_clock_info.gettime64 = bnx2x_ptp_gettime;
+	bp->ptp_clock_info.settime64 = bnx2x_ptp_settime;
 	bp->ptp_clock_info.enable = bnx2x_ptp_enable;
 
 	bp->ptp_clock = ptp_clock_register(&bp->ptp_clock_info, &bp->pdev->dev);

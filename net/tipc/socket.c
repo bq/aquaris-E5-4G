@@ -35,7 +35,6 @@
  */
 
 #include <linux/rhashtable.h>
-#include <linux/jhash.h>
 #include "core.h"
 #include "name_table.h"
 #include "node.h"
@@ -74,6 +73,7 @@
  * @link_cong: non-zero if owner must sleep because of link congestion
  * @sent_unacked: # messages sent by socket, and not yet acked by peer
  * @rcv_unacked: # messages read by user, but not yet acked back to peer
+ * @remote: 'connected' peer for dgram/rdm
  * @node: hash table node
  * @rcu: rcu struct for tipc_sock
  */
@@ -96,6 +96,7 @@ struct tipc_sock {
 	bool link_cong;
 	uint sent_unacked;
 	uint rcv_unacked;
+	struct sockaddr_tipc remote;
 	struct rhash_head node;
 	struct rcu_head rcu;
 };
@@ -121,9 +122,7 @@ static int __tipc_sendmsg(struct socket *sock, struct msghdr *m, size_t dsz);
 static const struct proto_ops packet_ops;
 static const struct proto_ops stream_ops;
 static const struct proto_ops msg_ops;
-
 static struct proto tipc_proto;
-static struct proto tipc_proto_kern;
 
 static const struct nla_policy tipc_nl_sock_policy[TIPC_NLA_SOCK_MAX + 1] = {
 	[TIPC_NLA_SOCK_UNSPEC]		= { .type = NLA_UNSPEC },
@@ -132,6 +131,8 @@ static const struct nla_policy tipc_nl_sock_policy[TIPC_NLA_SOCK_MAX + 1] = {
 	[TIPC_NLA_SOCK_CON]		= { .type = NLA_NESTED },
 	[TIPC_NLA_SOCK_HAS_PUBL]	= { .type = NLA_FLAG }
 };
+
+static const struct rhashtable_params tsk_rht_params;
 
 /*
  * Revised TIPC socket locking policy:
@@ -341,11 +342,7 @@ static int tipc_sk_create(struct net *net, struct socket *sock,
 	}
 
 	/* Allocate socket's protocol area */
-	if (!kern)
-		sk = sk_alloc(net, AF_TIPC, GFP_KERNEL, &tipc_proto);
-	else
-		sk = sk_alloc(net, AF_TIPC, GFP_KERNEL, &tipc_proto_kern);
-
+	sk = sk_alloc(net, AF_TIPC, GFP_KERNEL, &tipc_proto);
 	if (sk == NULL)
 		return -ENOMEM;
 
@@ -381,75 +378,6 @@ static int tipc_sk_create(struct net *net, struct socket *sock,
 			tsk_set_unreliable(tsk, true);
 	}
 	return 0;
-}
-
-/**
- * tipc_sock_create_local - create TIPC socket from inside TIPC module
- * @type: socket type - SOCK_RDM or SOCK_SEQPACKET
- *
- * We cannot use sock_creat_kern here because it bumps module user count.
- * Since socket owner and creator is the same module we must make sure
- * that module count remains zero for module local sockets, otherwise
- * we cannot do rmmod.
- *
- * Returns 0 on success, errno otherwise
- */
-int tipc_sock_create_local(struct net *net, int type, struct socket **res)
-{
-	int rc;
-
-	rc = sock_create_lite(AF_TIPC, type, 0, res);
-	if (rc < 0) {
-		pr_err("Failed to create kernel socket\n");
-		return rc;
-	}
-	tipc_sk_create(net, *res, 0, 1);
-
-	return 0;
-}
-
-/**
- * tipc_sock_release_local - release socket created by tipc_sock_create_local
- * @sock: the socket to be released.
- *
- * Module reference count is not incremented when such sockets are created,
- * so we must keep it from being decremented when they are released.
- */
-void tipc_sock_release_local(struct socket *sock)
-{
-	tipc_release(sock);
-	sock->ops = NULL;
-	sock_release(sock);
-}
-
-/**
- * tipc_sock_accept_local - accept a connection on a socket created
- * with tipc_sock_create_local. Use this function to avoid that
- * module reference count is inadvertently incremented.
- *
- * @sock:    the accepting socket
- * @newsock: reference to the new socket to be created
- * @flags:   socket flags
- */
-
-int tipc_sock_accept_local(struct socket *sock, struct socket **newsock,
-			   int flags)
-{
-	struct sock *sk = sock->sk;
-	int ret;
-
-	ret = sock_create_lite(sk->sk_family, sk->sk_type,
-			       sk->sk_protocol, newsock);
-	if (ret < 0)
-		return ret;
-
-	ret = tipc_accept(sock, *newsock, flags);
-	if (ret < 0) {
-		sock_release(*newsock);
-		return ret;
-	}
-	(*newsock)->ops = sock->ops;
-	return ret;
 }
 
 static void tipc_sk_callback(struct rcu_head *head)
@@ -929,22 +857,23 @@ static int __tipc_sendmsg(struct socket *sock, struct msghdr *m, size_t dsz)
 	u32 dnode, dport;
 	struct sk_buff_head *pktchain = &sk->sk_write_queue;
 	struct sk_buff *skb;
-	struct tipc_name_seq *seq = &dest->addr.nameseq;
+	struct tipc_name_seq *seq;
 	struct iov_iter save;
 	u32 mtu;
 	long timeo;
 	int rc;
 
-	if (unlikely(!dest))
-		return -EDESTADDRREQ;
-
-	if (unlikely((m->msg_namelen < sizeof(*dest)) ||
-		     (dest->family != AF_TIPC)))
-		return -EINVAL;
-
 	if (dsz > TIPC_MAX_USER_MSG_SIZE)
 		return -EMSGSIZE;
-
+	if (unlikely(!dest)) {
+		if (tsk->connected && sock->state == SS_READY)
+			dest = &tsk->remote;
+		else
+			return -EDESTADDRREQ;
+	} else if (unlikely(m->msg_namelen < sizeof(*dest)) ||
+		   dest->family != AF_TIPC) {
+		return -EINVAL;
+	}
 	if (unlikely(sock->state != SS_READY)) {
 		if (sock->state == SS_LISTENING)
 			return -EPIPE;
@@ -957,7 +886,7 @@ static int __tipc_sendmsg(struct socket *sock, struct msghdr *m, size_t dsz)
 			tsk->conn_instance = dest->addr.name.name.instance;
 		}
 	}
-
+	seq = &dest->addr.nameseq;
 	timeo = sock_sndtimeo(sk, m->msg_flags & MSG_DONTWAIT);
 
 	if (dest->addrtype == TIPC_ADDR_MCAST) {
@@ -1908,17 +1837,26 @@ static int tipc_connect(struct socket *sock, struct sockaddr *dest,
 			int destlen, int flags)
 {
 	struct sock *sk = sock->sk;
+	struct tipc_sock *tsk = tipc_sk(sk);
 	struct sockaddr_tipc *dst = (struct sockaddr_tipc *)dest;
 	struct msghdr m = {NULL,};
-	long timeout = (flags & O_NONBLOCK) ? 0 : tipc_sk(sk)->conn_timeout;
+	long timeout = (flags & O_NONBLOCK) ? 0 : tsk->conn_timeout;
 	socket_state previous;
-	int res;
+	int res = 0;
 
 	lock_sock(sk);
 
-	/* For now, TIPC does not allow use of connect() with DGRAM/RDM types */
+	/* DGRAM/RDM connect(), just save the destaddr */
 	if (sock->state == SS_READY) {
-		res = -EOPNOTSUPP;
+		if (dst->family == AF_UNSPEC) {
+			memset(&tsk->remote, 0, sizeof(struct sockaddr_tipc));
+			tsk->connected = 0;
+		} else if (destlen != sizeof(struct sockaddr_tipc)) {
+			res = -EINVAL;
+		} else {
+			memcpy(&tsk->remote, dest, destlen);
+			tsk->connected = 1;
+		}
 		goto exit;
 	}
 
@@ -2153,7 +2091,6 @@ restart:
 					     TIPC_CONN_SHUTDOWN))
 				tipc_link_xmit_skb(net, skb, dnode,
 						   tsk->portid);
-			tipc_node_remove_conn(net, dnode, tsk->portid);
 		} else {
 			dnode = tsk_peer_node(tsk);
 
@@ -2311,7 +2248,7 @@ static struct tipc_sock *tipc_sk_lookup(struct net *net, u32 portid)
 	struct tipc_sock *tsk;
 
 	rcu_read_lock();
-	tsk = rhashtable_lookup(&tn->sk_rht, &portid);
+	tsk = rhashtable_lookup_fast(&tn->sk_rht, &portid, tsk_rht_params);
 	if (tsk)
 		sock_hold(&tsk->sk);
 	rcu_read_unlock();
@@ -2333,7 +2270,8 @@ static int tipc_sk_insert(struct tipc_sock *tsk)
 			portid = TIPC_MIN_PORT;
 		tsk->portid = portid;
 		sock_hold(&tsk->sk);
-		if (rhashtable_lookup_insert(&tn->sk_rht, &tsk->node))
+		if (!rhashtable_lookup_insert_fast(&tn->sk_rht, &tsk->node,
+						   tsk_rht_params))
 			return 0;
 		sock_put(&tsk->sk);
 	}
@@ -2346,26 +2284,27 @@ static void tipc_sk_remove(struct tipc_sock *tsk)
 	struct sock *sk = &tsk->sk;
 	struct tipc_net *tn = net_generic(sock_net(sk), tipc_net_id);
 
-	if (rhashtable_remove(&tn->sk_rht, &tsk->node)) {
+	if (!rhashtable_remove_fast(&tn->sk_rht, &tsk->node, tsk_rht_params)) {
 		WARN_ON(atomic_read(&sk->sk_refcnt) == 1);
 		__sock_put(sk);
 	}
 }
 
+static const struct rhashtable_params tsk_rht_params = {
+	.nelem_hint = 192,
+	.head_offset = offsetof(struct tipc_sock, node),
+	.key_offset = offsetof(struct tipc_sock, portid),
+	.key_len = sizeof(u32), /* portid */
+	.max_size = 1048576,
+	.min_size = 256,
+	.automatic_shrinking = true,
+};
+
 int tipc_sk_rht_init(struct net *net)
 {
 	struct tipc_net *tn = net_generic(net, tipc_net_id);
-	struct rhashtable_params rht_params = {
-		.nelem_hint = 192,
-		.head_offset = offsetof(struct tipc_sock, node),
-		.key_offset = offsetof(struct tipc_sock, portid),
-		.key_len = sizeof(u32), /* portid */
-		.hashfn = jhash,
-		.max_shift = 20, /* 1M */
-		.min_shift = 8,  /* 256 */
-	};
 
-	return rhashtable_init(&tn->sk_rht, &rht_params);
+	return rhashtable_init(&tn->sk_rht, &tsk_rht_params);
 }
 
 void tipc_sk_rht_destroy(struct net *net)
@@ -2604,12 +2543,6 @@ static const struct net_proto_family tipc_family_ops = {
 static struct proto tipc_proto = {
 	.name		= "TIPC",
 	.owner		= THIS_MODULE,
-	.obj_size	= sizeof(struct tipc_sock),
-	.sysctl_rmem	= sysctl_tipc_rmem
-};
-
-static struct proto tipc_proto_kern = {
-	.name		= "TIPC",
 	.obj_size	= sizeof(struct tipc_sock),
 	.sysctl_rmem	= sysctl_tipc_rmem
 };

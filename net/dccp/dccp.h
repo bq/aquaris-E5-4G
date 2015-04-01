@@ -280,8 +280,7 @@ struct sock *dccp_v4_request_recv_sock(struct sock *sk, struct sk_buff *skb,
 				       struct request_sock *req,
 				       struct dst_entry *dst);
 struct sock *dccp_check_req(struct sock *sk, struct sk_buff *skb,
-			    struct request_sock *req,
-			    struct request_sock **prev);
+			    struct request_sock *req);
 
 int dccp_child_process(struct sock *parent, struct sock *child,
 		       struct sk_buff *skb);
@@ -318,6 +317,7 @@ int inet_dccp_listen(struct socket *sock, int backlog);
 unsigned int dccp_poll(struct file *file, struct socket *sock,
 		       poll_table *wait);
 int dccp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len);
+void dccp_req_err(struct sock *sk, u64 seq);
 
 struct sk_buff *dccp_ctl_make_reset(struct sock *sk, struct sk_buff *skb);
 int dccp_send_reset(struct sock *sk, enum dccp_reset_codes code);

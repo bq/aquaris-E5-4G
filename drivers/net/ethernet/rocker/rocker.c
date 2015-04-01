@@ -30,6 +30,7 @@
 #include <linux/if_vlan.h>
 #include <linux/if_bridge.h>
 #include <linux/bitops.h>
+#include <linux/ctype.h>
 #include <net/switchdev.h>
 #include <net/rtnetlink.h>
 #include <net/ip_fib.h>
@@ -1630,6 +1631,53 @@ rocker_cmd_get_port_settings_macaddr_proc(struct rocker *rocker,
 	return 0;
 }
 
+struct port_name {
+	char *buf;
+	size_t len;
+};
+
+static int
+rocker_cmd_get_port_settings_phys_name_proc(struct rocker *rocker,
+					    struct rocker_port *rocker_port,
+					    struct rocker_desc_info *desc_info,
+					    void *priv)
+{
+	struct rocker_tlv *info_attrs[ROCKER_TLV_CMD_PORT_SETTINGS_MAX + 1];
+	struct rocker_tlv *attrs[ROCKER_TLV_CMD_MAX + 1];
+	struct port_name *name = priv;
+	struct rocker_tlv *attr;
+	size_t i, j, len;
+	char *str;
+
+	rocker_tlv_parse_desc(attrs, ROCKER_TLV_CMD_MAX, desc_info);
+	if (!attrs[ROCKER_TLV_CMD_INFO])
+		return -EIO;
+
+	rocker_tlv_parse_nested(info_attrs, ROCKER_TLV_CMD_PORT_SETTINGS_MAX,
+				attrs[ROCKER_TLV_CMD_INFO]);
+	attr = info_attrs[ROCKER_TLV_CMD_PORT_SETTINGS_PHYS_NAME];
+	if (!attr)
+		return -EIO;
+
+	len = min_t(size_t, rocker_tlv_len(attr), name->len);
+	str = rocker_tlv_data(attr);
+
+	/* make sure name only contains alphanumeric characters */
+	for (i = j = 0; i < len; ++i) {
+		if (isalnum(str[i])) {
+			name->buf[j] = str[i];
+			j++;
+		}
+	}
+
+	if (j == 0)
+		return -EIO;
+
+	name->buf[j] = '\0';
+
+	return 0;
+}
+
 static int
 rocker_cmd_set_port_settings_ethtool_prep(struct rocker *rocker,
 					  struct rocker_port *rocker_port,
@@ -2955,10 +3003,15 @@ static int rocker_port_vlan_flood_group(struct rocker_port *rocker_port,
 	struct rocker_port *p;
 	struct rocker *rocker = rocker_port->rocker;
 	u32 group_id = ROCKER_GROUP_L2_FLOOD(vlan_id, 0);
-	u32 group_ids[ROCKER_FP_PORTS_MAX];
+	u32 *group_ids;
 	u8 group_count = 0;
-	int err;
+	int err = 0;
 	int i;
+
+	group_ids = kcalloc(rocker->port_count, sizeof(u32),
+			    rocker_op_flags_gfp(flags));
+	if (!group_ids)
+		return -ENOMEM;
 
 	/* Adjust the flood group for this VLAN.  The flood group
 	 * references an L2 interface group for each port in this
@@ -2977,7 +3030,7 @@ static int rocker_port_vlan_flood_group(struct rocker_port *rocker_port,
 
 	/* If there are no bridged ports in this VLAN, we're done */
 	if (group_count == 0)
-		return 0;
+		goto no_ports_in_vlan;
 
 	err = rocker_group_l2_flood(rocker_port, flags, vlan_id,
 				    group_count, group_ids,
@@ -2986,6 +3039,8 @@ static int rocker_port_vlan_flood_group(struct rocker_port *rocker_port,
 		netdev_err(rocker_port->dev,
 			   "Error (%d) port VLAN l2 flood group\n", err);
 
+no_ports_in_vlan:
+	kfree(group_ids);
 	return err;
 }
 
@@ -4131,47 +4186,19 @@ static int rocker_port_bridge_getlink(struct sk_buff *skb, u32 pid, u32 seq,
 				       rocker_port->brport_flags, mask);
 }
 
-static int rocker_port_switch_parent_id_get(struct net_device *dev,
-					    struct netdev_phys_item_id *psid)
+static int rocker_port_get_phys_port_name(struct net_device *dev,
+					  char *buf, size_t len)
 {
 	struct rocker_port *rocker_port = netdev_priv(dev);
-	struct rocker *rocker = rocker_port->rocker;
+	struct port_name name = { .buf = buf, .len = len };
+	int err;
 
-	psid->id_len = sizeof(rocker->hw.id);
-	memcpy(&psid->id, &rocker->hw.id, psid->id_len);
-	return 0;
-}
+	err = rocker_cmd_exec(rocker_port->rocker, rocker_port,
+			      rocker_cmd_get_port_settings_prep, NULL,
+			      rocker_cmd_get_port_settings_phys_name_proc,
+			      &name, false);
 
-static int rocker_port_switch_port_stp_update(struct net_device *dev, u8 state)
-{
-	struct rocker_port *rocker_port = netdev_priv(dev);
-
-	return rocker_port_stp_update(rocker_port, state);
-}
-
-static int rocker_port_switch_fib_ipv4_add(struct net_device *dev,
-					   __be32 dst, int dst_len,
-					   struct fib_info *fi,
-					   u8 tos, u8 type,
-					   u32 nlflags, u32 tb_id)
-{
-	struct rocker_port *rocker_port = netdev_priv(dev);
-	int flags = 0;
-
-	return rocker_port_fib_ipv4(rocker_port, dst, dst_len,
-				    fi, tb_id, flags);
-}
-
-static int rocker_port_switch_fib_ipv4_del(struct net_device *dev,
-					   __be32 dst, int dst_len,
-					   struct fib_info *fi,
-					   u8 tos, u8 type, u32 tb_id)
-{
-	struct rocker_port *rocker_port = netdev_priv(dev);
-	int flags = ROCKER_OP_FLAG_REMOVE;
-
-	return rocker_port_fib_ipv4(rocker_port, dst, dst_len,
-				    fi, tb_id, flags);
+	return err ? -EOPNOTSUPP : 0;
 }
 
 static const struct net_device_ops rocker_port_netdev_ops = {
@@ -4186,10 +4213,61 @@ static const struct net_device_ops rocker_port_netdev_ops = {
 	.ndo_fdb_dump			= rocker_port_fdb_dump,
 	.ndo_bridge_setlink		= rocker_port_bridge_setlink,
 	.ndo_bridge_getlink		= rocker_port_bridge_getlink,
-	.ndo_switch_parent_id_get	= rocker_port_switch_parent_id_get,
-	.ndo_switch_port_stp_update	= rocker_port_switch_port_stp_update,
-	.ndo_switch_fib_ipv4_add	= rocker_port_switch_fib_ipv4_add,
-	.ndo_switch_fib_ipv4_del	= rocker_port_switch_fib_ipv4_del,
+	.ndo_get_phys_port_name		= rocker_port_get_phys_port_name,
+};
+
+/********************
+ * swdev interface
+ ********************/
+
+static int rocker_port_swdev_parent_id_get(struct net_device *dev,
+					   struct netdev_phys_item_id *psid)
+{
+	struct rocker_port *rocker_port = netdev_priv(dev);
+	struct rocker *rocker = rocker_port->rocker;
+
+	psid->id_len = sizeof(rocker->hw.id);
+	memcpy(&psid->id, &rocker->hw.id, psid->id_len);
+	return 0;
+}
+
+static int rocker_port_swdev_port_stp_update(struct net_device *dev, u8 state)
+{
+	struct rocker_port *rocker_port = netdev_priv(dev);
+
+	return rocker_port_stp_update(rocker_port, state);
+}
+
+static int rocker_port_swdev_fib_ipv4_add(struct net_device *dev,
+					  __be32 dst, int dst_len,
+					  struct fib_info *fi,
+					  u8 tos, u8 type,
+					  u32 nlflags, u32 tb_id)
+{
+	struct rocker_port *rocker_port = netdev_priv(dev);
+	int flags = 0;
+
+	return rocker_port_fib_ipv4(rocker_port, dst, dst_len,
+				    fi, tb_id, flags);
+}
+
+static int rocker_port_swdev_fib_ipv4_del(struct net_device *dev,
+					  __be32 dst, int dst_len,
+					  struct fib_info *fi,
+					  u8 tos, u8 type, u32 tb_id)
+{
+	struct rocker_port *rocker_port = netdev_priv(dev);
+	int flags = ROCKER_OP_FLAG_REMOVE;
+
+	return rocker_port_fib_ipv4(rocker_port, dst, dst_len,
+				    fi, tb_id, flags);
+}
+
+static const struct swdev_ops rocker_port_swdev_ops = {
+	.swdev_parent_id_get		= rocker_port_swdev_parent_id_get,
+	.swdev_port_stp_update		= rocker_port_swdev_port_stp_update,
+	.swdev_fib_ipv4_add		= rocker_port_swdev_fib_ipv4_add,
+	.swdev_fib_ipv4_del		= rocker_port_swdev_fib_ipv4_del,
 };
 
 /********************
@@ -4544,6 +4622,7 @@ static int rocker_probe_port(struct rocker *rocker, unsigned int port_number)
 	rocker_port_dev_addr_init(rocker, rocker_port);
 	dev->netdev_ops = &rocker_port_netdev_ops;
 	dev->ethtool_ops = &rocker_port_ethtool_ops;
+	dev->swdev_ops = &rocker_port_swdev_ops;
 	netif_napi_add(dev, &rocker_port->napi_tx, rocker_port_poll_tx,
 		       NAPI_POLL_WEIGHT);
 	netif_napi_add(dev, &rocker_port->napi_rx, rocker_port_poll_rx,

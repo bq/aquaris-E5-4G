@@ -928,8 +928,6 @@ set_rcvbuf:
 			sk->sk_mark = val;
 		break;
 
-		/* We implement the SO_SNDLOWAT etc to
-		   not be settable (1003.1g 5.3) */
 	case SO_RXQ_OVFL:
 		sock_valbool_flag(sk, SOCK_RXQ_OVFL, valbool);
 		break;
@@ -1234,6 +1232,9 @@ int sock_getsockopt(struct socket *sock, int level, int optname,
 		break;
 
 	default:
+		/* We implement the SO_SNDLOWAT etc to not be settable
+		 * (1003.1g 7).
+		 */
 		return -ENOPROTOOPT;
 	}
 
@@ -1454,8 +1455,8 @@ void sk_release_kernel(struct sock *sk)
 		return;
 
 	sock_hold(sk);
-	sock_release(sk->sk_socket);
 	sock_net_set(sk, get_net(&init_net));
+	sock_release(sk->sk_socket);
 	sock_put(sk);
 }
 EXPORT_SYMBOL(sk_release_kernel);
@@ -1664,21 +1665,6 @@ void sock_efree(struct sk_buff *skb)
 	sock_put(skb->sk);
 }
 EXPORT_SYMBOL(sock_efree);
-
-#ifdef CONFIG_INET
-void sock_edemux(struct sk_buff *skb)
-{
-	struct sock *sk = skb->sk;
-
-	if (sk->sk_state == TCP_TIME_WAIT)
-		inet_twsk_put(inet_twsk(sk));
-	else if (sk->sk_state == TCP_NEW_SYN_RECV)
-		reqsk_put(inet_reqsk(sk));
-	else
-		sock_put(sk);
-}
-EXPORT_SYMBOL(sock_edemux);
-#endif
 
 kuid_t sock_i_uid(struct sock *sk)
 {
@@ -2758,7 +2744,7 @@ static int req_prot_init(const struct proto *prot)
 
 	rsk_prot->slab = kmem_cache_create(rsk_prot->slab_name,
 					   rsk_prot->obj_size, 0,
-					   SLAB_HWCACHE_ALIGN, NULL);
+					   0, NULL);
 
 	if (!rsk_prot->slab) {
 		pr_crit("%s: Can't create request sock SLAB cache!\n",

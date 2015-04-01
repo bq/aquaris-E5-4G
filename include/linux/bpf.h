@@ -59,6 +59,7 @@ enum bpf_arg_type {
 	ARG_PTR_TO_STACK,	/* any pointer to eBPF program stack */
 	ARG_CONST_STACK_SIZE,	/* number of bytes accessed from stack */
 
+	ARG_PTR_TO_CTX,		/* pointer to context */
 	ARG_ANYTHING,		/* any (initialized) argument is ok */
 };
 
@@ -103,6 +104,9 @@ struct bpf_verifier_ops {
 	 * with 'type' (read or write) is allowed
 	 */
 	bool (*is_valid_access)(int off, int size, enum bpf_access_type type);
+
+	u32 (*convert_ctx_access)(int dst_reg, int src_reg, int ctx_off,
+				  struct bpf_insn *insn);
 };
 
 struct bpf_prog_type_list {
@@ -133,7 +137,7 @@ struct bpf_map *bpf_map_get(struct fd f);
 void bpf_map_put(struct bpf_map *map);
 
 /* verify correctness of eBPF program */
-int bpf_check(struct bpf_prog *fp, union bpf_attr *attr);
+int bpf_check(struct bpf_prog **fp, union bpf_attr *attr);
 #else
 static inline void bpf_register_prog_type(struct bpf_prog_type_list *tl)
 {
@@ -153,5 +157,8 @@ static inline void bpf_prog_put(struct bpf_prog *prog)
 extern const struct bpf_func_proto bpf_map_lookup_elem_proto;
 extern const struct bpf_func_proto bpf_map_update_elem_proto;
 extern const struct bpf_func_proto bpf_map_delete_elem_proto;
+
+extern const struct bpf_func_proto bpf_get_prandom_u32_proto;
+extern const struct bpf_func_proto bpf_get_smp_processor_id_proto;
 
 #endif /* _LINUX_BPF_H */

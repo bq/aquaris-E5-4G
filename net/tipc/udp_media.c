@@ -44,6 +44,7 @@
 #include <net/sock.h>
 #include <net/ip.h>
 #include <net/udp_tunnel.h>
+#include <net/addrconf.h>
 #include <linux/tipc_netlink.h>
 #include "core.h"
 #include "bearer.h"
@@ -192,7 +193,7 @@ static int tipc_udp_send_msg(struct net *net, struct sk_buff *skb,
 			.saddr = src->ipv6,
 			.flowi6_proto = IPPROTO_UDP
 		};
-		err = ip6_dst_lookup(ub->ubsock->sk, &ndst, &fl6);
+		err = ipv6_stub->ipv6_dst_lookup(ub->ubsock->sk, &ndst, &fl6);
 		if (err)
 			goto tx_error;
 		ttl = ip6_dst_hoplimit(ndst);
@@ -246,11 +247,14 @@ static int enable_mcast(struct udp_bearer *ub, struct udp_media_addr *remote)
 			return 0;
 		mreqn.imr_multiaddr = remote->ipv4;
 		mreqn.imr_ifindex = ub->ifindex;
-		err = __ip_mc_join_group(sk, &mreqn);
+		err = ip_mc_join_group(sk, &mreqn);
+#if IS_ENABLED(CONFIG_IPV6)
 	} else {
 		if (!ipv6_addr_is_multicast(&remote->ipv6))
 			return 0;
-		err = __ipv6_sock_mc_join(sk, ub->ifindex, &remote->ipv6);
+		err = ipv6_stub->ipv6_sock_mc_join(sk, ub->ifindex,
+						   &remote->ipv6);
+#endif
 	}
 	return err;
 }

@@ -587,6 +587,7 @@ struct netdev_queue {
 #ifdef CONFIG_BQL
 	struct dql		dql;
 #endif
+	unsigned long		tx_maxrate;
 } ____cacheline_aligned_in_smp;
 
 static inline int netdev_queue_numa_node_read(const struct netdev_queue *q)
@@ -767,8 +768,6 @@ struct netdev_phys_item_id {
 
 typedef u16 (*select_queue_fallback_t)(struct net_device *dev,
 				       struct sk_buff *skb);
-
-struct fib_info;
 
 /*
  * This structure defines the management hooks for network devices.
@@ -1027,23 +1026,10 @@ struct fib_info;
  *	be otherwise expressed by feature flags. The check is called with
  *	the set of features that the stack has calculated and it returns
  *	those the driver believes to be appropriate.
- *
- * int (*ndo_switch_parent_id_get)(struct net_device *dev,
- *				   struct netdev_phys_item_id *psid);
- *	Called to get an ID of the switch chip this port is part of.
- *	If driver implements this, it indicates that it represents a port
- *	of a switch chip.
- * int (*ndo_switch_port_stp_update)(struct net_device *dev, u8 state);
- *	Called to notify switch device port of bridge port STP
- *	state change.
- * int (*ndo_sw_parent_fib_ipv4_add)(struct net_device *dev, __be32 dst,
- *				     int dst_len, struct fib_info *fi,
- *				     u8 tos, u8 type, u32 nlflags, u32 tb_id);
- *	Called to add/modify IPv4 route to switch device.
- * int (*ndo_sw_parent_fib_ipv4_del)(struct net_device *dev, __be32 dst,
- *				     int dst_len, struct fib_info *fi,
- *				     u8 tos, u8 type, u32 tb_id);
- *	Called to delete IPv4 route from switch device.
+ * int (*ndo_set_tx_maxrate)(struct net_device *dev,
+ *			     int queue_index, u32 maxrate);
+ *	Called when a user wants to set a max-rate limitation of specific
+ *	TX queue.
  */
 struct net_device_ops {
 	int			(*ndo_init)(struct net_device *dev);
@@ -1181,6 +1167,8 @@ struct net_device_ops {
 						      bool new_carrier);
 	int			(*ndo_get_phys_port_id)(struct net_device *dev,
 							struct netdev_phys_item_id *ppid);
+	int			(*ndo_get_phys_port_name)(struct net_device *dev,
+							  char *name, size_t len);
 	void			(*ndo_add_vxlan_port)(struct  net_device *dev,
 						      sa_family_t sa_family,
 						      __be16 port);
@@ -1200,25 +1188,9 @@ struct net_device_ops {
 	netdev_features_t	(*ndo_features_check) (struct sk_buff *skb,
 						       struct net_device *dev,
 						       netdev_features_t features);
-#ifdef CONFIG_NET_SWITCHDEV
-	int			(*ndo_switch_parent_id_get)(struct net_device *dev,
-							    struct netdev_phys_item_id *psid);
-	int			(*ndo_switch_port_stp_update)(struct net_device *dev,
-							      u8 state);
-	int			(*ndo_switch_fib_ipv4_add)(struct net_device *dev,
-							   __be32 dst,
-							   int dst_len,
-							   struct fib_info *fi,
-							   u8 tos, u8 type,
-							   u32 nlflags,
-							   u32 tb_id);
-	int			(*ndo_switch_fib_ipv4_del)(struct net_device *dev,
-							   __be32 dst,
-							   int dst_len,
-							   struct fib_info *fi,
-							   u8 tos, u8 type,
-							   u32 tb_id);
-#endif
+	int			(*ndo_set_tx_maxrate)(struct net_device *dev,
+						      int queue_index,
+						      u32 maxrate);
 };
 
 /**
@@ -1370,7 +1342,6 @@ enum netdev_priv_flags {
  *	@netdev_ops:	Includes several pointers to callbacks,
  *			if one wants to override the ndo_*() functions
  *	@ethtool_ops:	Management operations
- *	@fwd_ops:	Management operations
  *	@header_ops:	Includes callbacks for creating,parsing,caching,etc
  *			of Layer 2 headers.
  *
@@ -1579,7 +1550,9 @@ struct net_device {
 #endif
 	const struct net_device_ops *netdev_ops;
 	const struct ethtool_ops *ethtool_ops;
-	const struct forwarding_accel_ops *fwd_ops;
+#ifdef CONFIG_NET_SWITCHDEV
+	const struct swdev_ops *swdev_ops;
+#endif
 
 	const struct header_ops *header_ops;
 
@@ -2184,6 +2157,7 @@ struct net_device *__dev_get_by_name(struct net *net, const char *name);
 int dev_alloc_name(struct net_device *dev, const char *name);
 int dev_open(struct net_device *dev);
 int dev_close(struct net_device *dev);
+int dev_close_many(struct list_head *head, bool unlink);
 void dev_disable_lro(struct net_device *dev);
 int dev_loopback_xmit(struct sk_buff *newskb);
 int dev_queue_xmit(struct sk_buff *skb);
@@ -2977,6 +2951,8 @@ int dev_set_mac_address(struct net_device *, struct sockaddr *);
 int dev_change_carrier(struct net_device *, bool new_carrier);
 int dev_get_phys_port_id(struct net_device *dev,
 			 struct netdev_phys_item_id *ppid);
+int dev_get_phys_port_name(struct net_device *dev,
+			   char *name, size_t len);
 struct sk_buff *validate_xmit_skb_list(struct sk_buff *skb, struct net_device *dev);
 struct sk_buff *dev_hard_start_xmit(struct sk_buff *skb, struct net_device *dev,
 				    struct netdev_queue *txq, int *ret);
@@ -3681,6 +3657,9 @@ void netdev_change_features(struct net_device *dev);
 void netif_stacked_transfer_operstate(const struct net_device *rootdev,
 					struct net_device *dev);
 
+netdev_features_t passthru_features_check(struct sk_buff *skb,
+					  struct net_device *dev,
+					  netdev_features_t features);
 netdev_features_t netif_skb_features(struct sk_buff *skb);
 
 static inline bool net_gso_ok(netdev_features_t features, int gso_type)

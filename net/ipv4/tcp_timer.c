@@ -327,7 +327,7 @@ static void tcp_fastopen_synack_timer(struct sock *sk)
 	struct request_sock *req;
 
 	req = tcp_sk(sk)->fastopen_rsk;
-	req->rsk_ops->syn_ack_timeout(sk, req);
+	req->rsk_ops->syn_ack_timeout(req);
 
 	if (req->num_timeout >= max_retries) {
 		tcp_write_err(sk);
@@ -539,19 +539,11 @@ static void tcp_write_timer(unsigned long data)
 	sock_put(sk);
 }
 
-/*
- *	Timer for listening sockets
- */
-
-static void tcp_synack_timer(struct sock *sk)
+void tcp_syn_ack_timeout(const struct request_sock *req)
 {
-	inet_csk_reqsk_queue_prune(sk, TCP_SYNQ_INTERVAL,
-				   TCP_TIMEOUT_INIT, TCP_RTO_MAX);
-}
+	struct net *net = read_pnet(&inet_rsk(req)->ireq_net);
 
-void tcp_syn_ack_timeout(struct sock *sk, struct request_sock *req)
-{
-	NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_TCPTIMEOUTS);
+	NET_INC_STATS_BH(net, LINUX_MIB_TCPTIMEOUTS);
 }
 EXPORT_SYMBOL(tcp_syn_ack_timeout);
 
@@ -583,7 +575,7 @@ static void tcp_keepalive_timer (unsigned long data)
 	}
 
 	if (sk->sk_state == TCP_LISTEN) {
-		tcp_synack_timer(sk);
+		pr_err("Hmm... keepalive on a LISTEN ???\n");
 		goto out;
 	}
 
