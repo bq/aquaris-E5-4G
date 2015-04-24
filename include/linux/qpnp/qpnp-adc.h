@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1127,13 +1127,6 @@ int32_t qpnp_vadc_conv_seq_request(struct qpnp_vadc_chip *dev,
 			enum qpnp_vadc_trigger trigger_channel,
 			enum qpnp_vadc_channels channel,
 			struct qpnp_vadc_result *result);
-
-/**
- * qpnp_vadc_check_result() - Performs check on the ADC raw code.
- * @data:	Data used for verifying the range of the ADC code.
- * @recalib_check:	Recalibration check to ignore result check.
- */
-int32_t qpnp_vadc_check_result(int32_t *data, bool recalib_check);
 
 /**
  * qpnp_adc_get_devicetree_data() - Abstracts the ADC devicetree data.
