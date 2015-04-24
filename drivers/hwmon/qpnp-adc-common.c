@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -30,10 +30,6 @@
 #include <linux/qpnp/qpnp-adc.h>
 #include <linux/platform_device.h>
 
-/* Min ADC code represets 0V */
-#define QPNP_VADC_MIN_ADC_CODE			0x6000
-/* Max ADC code represents full-scale range of 1.8V */
-#define QPNP_VADC_MAX_ADC_CODE			0xA800
 #define KELVINMIL_DEGMIL	273160
 
 /* Units for temperature below (on x axis) is in 0.1DegC as
@@ -1424,17 +1420,6 @@ int32_t qpnp_adc_smb_btm_rscaler(struct qpnp_vadc_chip *chip,
 	return 0;
 }
 EXPORT_SYMBOL(qpnp_adc_smb_btm_rscaler);
-
-int32_t qpnp_vadc_check_result(int32_t *data)
-{
-	if (*data < QPNP_VADC_MIN_ADC_CODE)
-		*data = QPNP_VADC_MIN_ADC_CODE;
-	else if (*data > QPNP_VADC_MAX_ADC_CODE)
-		*data = QPNP_VADC_MAX_ADC_CODE;
-
-	return 0;
-}
-EXPORT_SYMBOL(qpnp_vadc_check_result);
 
 int qpnp_adc_get_revid_version(struct device *dev)
 {

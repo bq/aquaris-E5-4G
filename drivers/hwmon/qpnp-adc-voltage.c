@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -457,12 +457,6 @@ static int32_t qpnp_vadc_read_conversion_result(struct qpnp_vadc_chip *vadc,
 	}
 
 	*data = (rslt_msb << 8) | rslt_lsb;
-
-	status = qpnp_vadc_check_result(data);
-	if (status < 0) {
-		pr_err("VADC data check failed\n");
-		goto fail;
-	}
 
 fail:
 	rc = qpnp_vadc_enable(vadc, false);
