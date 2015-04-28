@@ -41,9 +41,6 @@ void ieee80211_configure_filter(struct ieee80211_local *local)
 	unsigned int changed_flags;
 	unsigned int new_flags = 0;
 
-	if (atomic_read(&local->iff_promiscs))
-		new_flags |= FIF_PROMISC_IN_BSS;
-
 	if (atomic_read(&local->iff_allmultis))
 		new_flags |= FIF_ALLMULTI;
 
@@ -840,7 +837,8 @@ int ieee80211_register_hw(struct ieee80211_hw *hw)
 
 	/* Only HW csum features are currently compatible with mac80211 */
 	feature_whitelist = NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM |
-			    NETIF_F_HW_CSUM;
+			    NETIF_F_HW_CSUM | NETIF_F_SG | NETIF_F_HIGHDMA |
+			    NETIF_F_GSO_SOFTWARE;
 	if (WARN_ON(hw->netdev_features & ~feature_whitelist))
 		return -EINVAL;
 

@@ -1554,8 +1554,6 @@ static void mac80211_hwsim_configure_filter(struct ieee80211_hw *hw,
 	wiphy_debug(hw->wiphy, "%s\n", __func__);
 
 	data->rx_filter = 0;
-	if (*total_flags & FIF_PROMISC_IN_BSS)
-		data->rx_filter |= FIF_PROMISC_IN_BSS;
 	if (*total_flags & FIF_ALLMULTI)
 		data->rx_filter |= FIF_ALLMULTI;
 
@@ -2399,7 +2397,8 @@ static int mac80211_hwsim_new_radio(struct genl_info *info,
 		    IEEE80211_HW_WANT_MONITOR_VIF |
 		    IEEE80211_HW_QUEUE_CONTROL |
 		    IEEE80211_HW_SUPPORTS_HT_CCK_RATES |
-		    IEEE80211_HW_CHANCTX_STA_CSA;
+		    IEEE80211_HW_CHANCTX_STA_CSA |
+		    IEEE80211_HW_SUPPORT_FAST_XMIT;
 	if (rctbl)
 		hw->flags |= IEEE80211_HW_SUPPORTS_RC_TABLE;
 

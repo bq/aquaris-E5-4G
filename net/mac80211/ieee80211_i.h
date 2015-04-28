@@ -181,8 +181,6 @@ typedef unsigned __bitwise__ ieee80211_rx_result;
 
 /**
  * enum ieee80211_packet_rx_flags - packet RX flags
- * @IEEE80211_RX_RA_MATCH: frame is destined to interface currently processed
- *	(incl. multicast frames)
  * @IEEE80211_RX_FRAGMENTED: fragmented frame
  * @IEEE80211_RX_AMSDU: a-MSDU packet
  * @IEEE80211_RX_MALFORMED_ACTION_FRM: action frame is malformed
@@ -192,7 +190,6 @@ typedef unsigned __bitwise__ ieee80211_rx_result;
  * @rx_flags field of &struct ieee80211_rx_status.
  */
 enum ieee80211_packet_rx_flags {
-	IEEE80211_RX_RA_MATCH			= BIT(1),
 	IEEE80211_RX_FRAGMENTED			= BIT(2),
 	IEEE80211_RX_AMSDU			= BIT(3),
 	IEEE80211_RX_MALFORMED_ACTION_FRM	= BIT(4),
@@ -725,7 +722,6 @@ struct ieee80211_if_mesh {
  * enum ieee80211_sub_if_data_flags - virtual interface flags
  *
  * @IEEE80211_SDATA_ALLMULTI: interface wants all multicast packets
- * @IEEE80211_SDATA_PROMISC: interface is promisc
  * @IEEE80211_SDATA_OPERATING_GMODE: operating in G-only mode
  * @IEEE80211_SDATA_DONT_BRIDGE_PACKETS: bridge packets between
  *	associated stations and deliver multicast frames both
@@ -735,7 +731,6 @@ struct ieee80211_if_mesh {
  */
 enum ieee80211_sub_if_data_flags {
 	IEEE80211_SDATA_ALLMULTI		= BIT(0),
-	IEEE80211_SDATA_PROMISC			= BIT(1),
 	IEEE80211_SDATA_OPERATING_GMODE		= BIT(2),
 	IEEE80211_SDATA_DONT_BRIDGE_PACKETS	= BIT(3),
 	IEEE80211_SDATA_DISCONNECT_RESUME	= BIT(4),
@@ -1211,8 +1206,8 @@ struct ieee80211_local {
 
 	atomic_t agg_queue_stop[IEEE80211_MAX_QUEUES];
 
-	/* number of interfaces with corresponding IFF_ flags */
-	atomic_t iff_allmultis, iff_promiscs;
+	/* number of interfaces with allmulti RX */
+	atomic_t iff_allmultis;
 
 	struct rate_control_ref *rate_ctrl;
 
@@ -1650,6 +1645,11 @@ void ieee80211_purge_tx_queue(struct ieee80211_hw *hw,
 struct sk_buff *
 ieee80211_build_data_template(struct ieee80211_sub_if_data *sdata,
 			      struct sk_buff *skb, u32 info_flags);
+
+void ieee80211_check_fast_xmit(struct sta_info *sta);
+void ieee80211_check_fast_xmit_all(struct ieee80211_local *local);
+void ieee80211_check_fast_xmit_iface(struct ieee80211_sub_if_data *sdata);
+void ieee80211_clear_fast_xmit(struct sta_info *sta);
 
 /* HT */
 void ieee80211_apply_htcap_overrides(struct ieee80211_sub_if_data *sdata,

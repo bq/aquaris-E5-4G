@@ -337,10 +337,16 @@ enum ieee80211_bss_change {
  * enum ieee80211_event_type - event to be notified to the low level driver
  * @RSSI_EVENT: AP's rssi crossed the a threshold set by the driver.
  * @MLME_EVENT: event related to MLME
+ * @BAR_RX_EVENT: a BAR was received
+ * @BA_FRAME_TIMEOUT: Frames were released from the reordering buffer because
+ *	they timed out. This won't be called for each frame released, but only
+ *	once each time the timeout triggers.
  */
 enum ieee80211_event_type {
 	RSSI_EVENT,
 	MLME_EVENT,
+	BAR_RX_EVENT,
+	BA_FRAME_TIMEOUT,
 };
 
 /**
@@ -354,7 +360,7 @@ enum ieee80211_rssi_event_data {
 };
 
 /**
- * enum ieee80211_rssi_event - data attached to an %RSSI_EVENT
+ * struct ieee80211_rssi_event - data attached to an %RSSI_EVENT
  * @data: See &enum ieee80211_rssi_event_data
  */
 struct ieee80211_rssi_event {
@@ -388,7 +394,7 @@ enum ieee80211_mlme_event_status {
 };
 
 /**
- * enum ieee80211_mlme_event - data attached to an %MLME_EVENT
+ * struct ieee80211_mlme_event - data attached to an %MLME_EVENT
  * @data: See &enum ieee80211_mlme_event_data
  * @status: See &enum ieee80211_mlme_event_status
  * @reason: the reason code if applicable
@@ -400,16 +406,31 @@ struct ieee80211_mlme_event {
 };
 
 /**
+ * struct ieee80211_ba_event - data attached for BlockAck related events
+ * @sta: pointer to the &ieee80211_sta to which this event relates
+ * @tid: the tid
+ * @ssn: the starting sequence number (for %BAR_RX_EVENT)
+ */
+struct ieee80211_ba_event {
+	struct ieee80211_sta *sta;
+	u16 tid;
+	u16 ssn;
+};
+
+/**
  * struct ieee80211_event - event to be sent to the driver
- * @type The event itself. See &enum ieee80211_event_type.
+ * @type: The event itself. See &enum ieee80211_event_type.
  * @rssi: relevant if &type is %RSSI_EVENT
  * @mlme: relevant if &type is %AUTH_EVENT
+ * @ba: relevant if &type is %BAR_RX_EVENT or %BA_FRAME_TIMEOUT
+ * @u:union holding the fields above
  */
 struct ieee80211_event {
 	enum ieee80211_event_type type;
 	union {
 		struct ieee80211_rssi_event rssi;
 		struct ieee80211_mlme_event mlme;
+		struct ieee80211_ba_event ba;
 	} u;
 };
 
@@ -1795,6 +1816,10 @@ struct ieee80211_txq {
  *	the driver returns 1. This also forces the driver to advertise its
  *	supported cipher suites.
  *
+ * @IEEE80211_HW_SUPPORT_FAST_XMIT: The driver/hardware supports fast-xmit,
+ *	this currently requires only the ability to calculate the duration
+ *	for frames.
+ *
  * @IEEE80211_HW_QUEUE_CONTROL: The driver wants to control per-interface
  *	queue mapping in order to use different queues (not just one per AC)
  *	for different virtual interfaces. See the doc section on HW queue
@@ -1843,7 +1868,7 @@ enum ieee80211_hw_flags {
 	IEEE80211_HW_WANT_MONITOR_VIF			= 1<<14,
 	IEEE80211_HW_NO_AUTO_VIF			= 1<<15,
 	IEEE80211_HW_SW_CRYPTO_CONTROL			= 1<<16,
-	/* free slots */
+	IEEE80211_HW_SUPPORT_FAST_XMIT			= 1<<17,
 	IEEE80211_HW_REPORTS_TX_ACK_STATUS		= 1<<18,
 	IEEE80211_HW_CONNECTION_MONITOR			= 1<<19,
 	IEEE80211_HW_QUEUE_CONTROL			= 1<<20,
@@ -1937,8 +1962,8 @@ enum ieee80211_hw_flags {
  *	Use the %IEEE80211_RADIOTAP_VHT_KNOWN_* values.
  *
  * @netdev_features: netdev features to be set in each netdev created
- *	from this HW. Note only HW checksum features are currently
- *	compatible with mac80211. Other feature bits will be rejected.
+ *	from this HW. Note that not all features are usable with mac80211,
+ *	other features will be rejected during HW registration.
  *
  * @uapsd_queues: This bitmap is included in (re)association frame to indicate
  *	for each access category if it is uAPSD trigger-enabled and delivery-
@@ -2502,10 +2527,6 @@ void ieee80211_free_txskb(struct ieee80211_hw *hw, struct sk_buff *skb);
  * stack. It is always safe to pass more frames than requested,
  * but this has negative impact on power consumption.
  *
- * @FIF_PROMISC_IN_BSS: promiscuous mode within your BSS,
- *	think of the BSS as your network segment and then this corresponds
- *	to the regular ethernet device promiscuous mode.
- *
  * @FIF_ALLMULTI: pass all multicast frames, this is used if requested
  *	by the user or if the hardware is not capable of filtering by
  *	multicast address.
@@ -2522,8 +2543,8 @@ void ieee80211_free_txskb(struct ieee80211_hw *hw, struct sk_buff *skb);
  *	mac80211 needs to do and the amount of CPU wakeups, so you should
  *	honour this flag if possible.
  *
- * @FIF_CONTROL: pass control frames (except for PS Poll), if PROMISC_IN_BSS
- * 	is not set then only those addressed to this station.
+ * @FIF_CONTROL: pass control frames (except for PS Poll) addressed to this
+ *	station
  *
  * @FIF_OTHER_BSS: pass frames destined to other BSSes
  *
@@ -2533,7 +2554,6 @@ void ieee80211_free_txskb(struct ieee80211_hw *hw, struct sk_buff *skb);
  * @FIF_PROBE_REQ: pass probe request frames
  */
 enum ieee80211_filter_flags {
-	FIF_PROMISC_IN_BSS	= 1<<0,
 	FIF_ALLMULTI		= 1<<1,
 	FIF_FCSFAIL		= 1<<2,
 	FIF_PLCPFAIL		= 1<<3,
@@ -3001,7 +3021,7 @@ enum ieee80211_reconfig_type {
  *	The callback can sleep.
  * @event_callback: Notify driver about any event in mac80211. See
  *	&enum ieee80211_event_type for the different types.
- *	The callback can sleep.
+ *	The callback must be atomic.
  *
  * @release_buffered_frames: Release buffered frames according to the given
  *	parameters. In the case where the driver buffers some frames for
