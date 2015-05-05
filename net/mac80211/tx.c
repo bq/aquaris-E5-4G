@@ -997,7 +997,6 @@ ieee80211_tx_h_stats(struct ieee80211_tx_data *tx)
 
 	skb_queue_walk(&tx->skbs, skb) {
 		ac = skb_get_queue_mapping(skb);
-		tx->sta->tx_fragments++;
 		tx->sta->tx_bytes[ac] += skb->len;
 	}
 	if (ac >= 0)
@@ -2804,7 +2803,6 @@ static bool ieee80211_xmit_fast(struct ieee80211_sub_if_data *sdata,
 	/* statistics normally done by ieee80211_tx_h_stats (but that
 	 * has to consider fragmentation, so is more complex)
 	 */
-	sta->tx_fragments++;
 	sta->tx_bytes[skb_get_queue_mapping(skb)] += skb->len;
 	sta->tx_packets[skb_get_queue_mapping(skb)]++;
 
@@ -2895,12 +2893,8 @@ void __ieee80211_subif_start_xmit(struct sk_buff *skb,
 		 * fix it up in software before we handle anything else.
 		 */
 		if (skb->ip_summed == CHECKSUM_PARTIAL) {
-			if (skb->encapsulation)
-				skb_set_inner_transport_header(skb,
-							       skb_checksum_start_offset(skb));
-			else
-				skb_set_transport_header(skb,
-							 skb_checksum_start_offset(skb));
+			skb_set_transport_header(skb,
+						 skb_checksum_start_offset(skb));
 			if (skb_checksum_help(skb))
 				goto out_free;
 		}
