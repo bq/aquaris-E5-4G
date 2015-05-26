@@ -1031,22 +1031,6 @@ static int ath10k_monitor_stop(struct ath10k *ar)
 	return 0;
 }
 
-static bool ath10k_mac_should_disable_promisc(struct ath10k *ar)
-{
-	struct ath10k_vif *arvif;
-
-	if (!ar->num_started_vdevs)
-		return false;
-
-	list_for_each_entry(arvif, &ar->arvifs, list)
-		if (arvif->vdev_type != WMI_VDEV_TYPE_AP)
-			return false;
-
-	ath10k_dbg(ar, ATH10K_DBG_MAC,
-		   "mac disabling promiscuous mode because vdev is started\n");
-	return true;
-}
-
 static bool ath10k_mac_monitor_vdev_is_needed(struct ath10k *ar)
 {
 	int num_ctx;
@@ -1065,7 +1049,6 @@ static bool ath10k_mac_monitor_vdev_is_needed(struct ath10k *ar)
 		return false;
 
 	return ar->monitor ||
-	       !ath10k_mac_should_disable_promisc(ar) ||
 	       test_bit(ATH10K_CAC_RUNNING, &ar->dev_flags);
 }
 
@@ -1267,7 +1250,7 @@ static int ath10k_vdev_start_restart(struct ath10k_vif *arvif,
 {
 	struct ath10k *ar = arvif->ar;
 	struct wmi_vdev_start_request_arg arg = {};
-	int ret = 0, ret2;
+	int ret = 0;
 
 	lockdep_assert_held(&ar->conf_mutex);
 
@@ -1325,16 +1308,6 @@ static int ath10k_vdev_start_restart(struct ath10k_vif *arvif,
 
 	ar->num_started_vdevs++;
 	ath10k_recalc_radar_detection(ar);
-
-	ret = ath10k_monitor_recalc(ar);
-	if (ret) {
-		ath10k_warn(ar, "mac failed to recalc monitor for vdev %i restart %d: %d\n",
-			    arg.vdev_id, restart, ret);
-		ret2 = ath10k_vdev_stop(arvif);
-		if (ret2)
-			ath10k_warn(ar, "mac failed to stop vdev %i restart %d: %d\n",
-				    arg.vdev_id, restart, ret2);
-	}
 
 	return ret;
 }
@@ -1735,7 +1708,14 @@ static int ath10k_mac_vif_setup_ps(struct ath10k_vif *arvif)
 		enable_ps = false;
 	}
 
-	if (enable_ps) {
+	if (!arvif->is_started) {
+		/* mac80211 can update vif powersave state while disconnected.
+		 * Firmware doesn't behave nicely and consumes more power than
+		 * necessary if PS is disabled on a non-started vdev. Hence
+		 * force-enable PS for non-running vdevs.
+		 */
+		psmode = WMI_STA_PS_MODE_ENABLED;
+	} else if (enable_ps) {
 		psmode = WMI_STA_PS_MODE_ENABLED;
 		param = WMI_STA_PS_PARAM_INACTIVITY_TIME;
 
