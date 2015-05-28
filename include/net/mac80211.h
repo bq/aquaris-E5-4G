@@ -422,8 +422,8 @@ struct ieee80211_ba_event {
  * @type: The event itself. See &enum ieee80211_event_type.
  * @rssi: relevant if &type is %RSSI_EVENT
  * @mlme: relevant if &type is %AUTH_EVENT
- * @ba: relevant if &type is %BAR_RX_EVENT or %BA_FRAME_TIMEOUT
- * @u:union holding the fields above
+ * @ba:   relevant if &type is %BAR_RX_EVENT or %BA_FRAME_TIMEOUT
+ * @u:    union holding the fields above
  */
 struct ieee80211_event {
 	enum ieee80211_event_type type;
