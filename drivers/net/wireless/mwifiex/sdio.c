@@ -2177,7 +2177,7 @@ rdwr_status mwifiex_sdio_rdwr_firmware(struct mwifiex_adapter *adapter,
 }
 
 /* This function dump firmware memory to file */
-static void mwifiex_sdio_fw_dump_work(struct mwifiex_adapter *adapter)
+static void mwifiex_sdio_fw_dump(struct mwifiex_adapter *adapter)
 {
 	struct sdio_mmc_card *card = adapter->card;
 	int ret = 0;
@@ -2185,9 +2185,6 @@ static void mwifiex_sdio_fw_dump_work(struct mwifiex_adapter *adapter)
 	u8 *dbg_ptr, *end_ptr, dump_num, idx, i, read_reg, doneflag = 0;
 	enum rdwr_status stat;
 	u32 memory_size;
-	static char *env[] = { "DRIVER=mwifiex_sdio", "EVENT=fw_dump", NULL };
-
-	mwifiex_dump_drv_info(adapter);
 
 	if (!card->can_dump_fw)
 		return;
@@ -2241,6 +2238,13 @@ static void mwifiex_sdio_fw_dump_work(struct mwifiex_adapter *adapter)
 
 		if (memory_size == 0) {
 			mwifiex_dbg(adapter, DUMP, "Firmware dump Finished!\n");
+			ret = mwifiex_write_reg(adapter,
+						card->reg->fw_dump_ctrl,
+						FW_DUMP_READ_DONE);
+			if (ret) {
+				mwifiex_dbg(adapter, ERROR, "SDIO write err\n");
+				return;
+			}
 			break;
 		}
 
@@ -2292,18 +2296,22 @@ static void mwifiex_sdio_fw_dump_work(struct mwifiex_adapter *adapter)
 	}
 	mwifiex_dbg(adapter, MSG, "== mwifiex firmware dump end ==\n");
 
-	kobject_uevent_env(&adapter->wiphy->dev.kobj, KOBJ_CHANGE, env);
-
 done:
 	sdio_release_host(card->func);
-	adapter->curr_mem_idx = 0;
+}
+
+static void mwifiex_sdio_device_dump_work(struct mwifiex_adapter *adapter)
+{
+	mwifiex_drv_info_dump(adapter);
+	mwifiex_sdio_fw_dump(adapter);
+	mwifiex_upload_device_dump(adapter);
 }
 
 static void mwifiex_sdio_work(struct work_struct *work)
 {
-	if (test_and_clear_bit(MWIFIEX_IFACE_WORK_FW_DUMP,
+	if (test_and_clear_bit(MWIFIEX_IFACE_WORK_DEVICE_DUMP,
 			       &iface_work_flags))
-		mwifiex_sdio_fw_dump_work(save_adapter);
+		mwifiex_sdio_device_dump_work(save_adapter);
 	if (test_and_clear_bit(MWIFIEX_IFACE_WORK_CARD_RESET,
 			       &iface_work_flags))
 		mwifiex_sdio_card_reset_work(save_adapter);
@@ -2323,13 +2331,13 @@ static void mwifiex_sdio_card_reset(struct mwifiex_adapter *adapter)
 }
 
 /* This function dumps FW information */
-static void mwifiex_sdio_fw_dump(struct mwifiex_adapter *adapter)
+static void mwifiex_sdio_device_dump(struct mwifiex_adapter *adapter)
 {
 	save_adapter = adapter;
-	if (test_bit(MWIFIEX_IFACE_WORK_FW_DUMP, &iface_work_flags))
+	if (test_bit(MWIFIEX_IFACE_WORK_DEVICE_DUMP, &iface_work_flags))
 		return;
 
-	set_bit(MWIFIEX_IFACE_WORK_FW_DUMP, &iface_work_flags);
+	set_bit(MWIFIEX_IFACE_WORK_DEVICE_DUMP, &iface_work_flags);
 	schedule_work(&sdio_work);
 }
 
@@ -2349,7 +2357,7 @@ mwifiex_sdio_reg_dump(struct mwifiex_adapter *adapter, char *drv_buf)
 	if (!p)
 		return 0;
 
-	mwifiex_dbg(adapter, MSG, "SDIO register DUMP START\n");
+	mwifiex_dbg(adapter, MSG, "SDIO register dump start\n");
 
 	mwifiex_pm_wakeup_card(adapter);
 
@@ -2421,7 +2429,7 @@ mwifiex_sdio_reg_dump(struct mwifiex_adapter *adapter, char *drv_buf)
 
 	sdio_release_host(cardp->func);
 
-	mwifiex_dbg(adapter, MSG, "SDIO register DUMP END\n");
+	mwifiex_dbg(adapter, MSG, "SDIO register dump end\n");
 
 	return p - drv_buf;
 }
@@ -2446,8 +2454,8 @@ static struct mwifiex_if_ops sdio_ops = {
 	.cmdrsp_complete = mwifiex_sdio_cmdrsp_complete,
 	.event_complete = mwifiex_sdio_event_complete,
 	.card_reset = mwifiex_sdio_card_reset,
-	.fw_dump = mwifiex_sdio_fw_dump,
 	.reg_dump = mwifiex_sdio_reg_dump,
+	.device_dump = mwifiex_sdio_device_dump,
 	.deaggr_pkt = mwifiex_deaggr_sdio_pkt,
 };
 
