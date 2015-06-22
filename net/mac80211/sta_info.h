@@ -17,6 +17,7 @@
 #include <linux/average.h>
 #include <linux/etherdevice.h>
 #include <linux/rhashtable.h>
+#include <linux/u64_stats_sync.h>
 #include "key.h"
 
 /**
@@ -290,6 +291,7 @@ struct ieee80211_fast_tx {
  * @nonpeer_pm: STA power save mode towards non-peer neighbors
  * @processed_beacon: set to true after peer rates and capabilities are
  *	processed
+ * @fail_avg: moving percentage of failed MSDUs
  */
 struct mesh_sta {
 	struct timer_list plink_timer;
@@ -312,6 +314,9 @@ struct mesh_sta {
 	enum nl80211_mesh_power_mode local_pm;
 	enum nl80211_mesh_power_mode peer_pm;
 	enum nl80211_mesh_power_mode nonpeer_pm;
+
+	/* moving percentage of failed MSDUs */
+	unsigned int fail_avg;
 };
 
 /**
@@ -369,7 +374,6 @@ struct mesh_sta {
  * @tx_filtered_count: number of frames the hardware filtered for this STA
  * @tx_retry_failed: number of frames that failed retry
  * @tx_retry_count: total number of retries for frames to this STA
- * @fail_avg: moving percentage of failed MSDUs
  * @tx_packets: number of RX/TX MSDUs
  * @tx_bytes: number of bytes transmitted to this STA
  * @tid_seq: per-TID sequence numbers for sending to this STA
@@ -405,6 +409,9 @@ struct mesh_sta {
  * @fast_tx: TX fastpath information
  * @tdls_chandef: a TDLS peer can have a wider chandef that is compatible to
  *	the BSS one.
+ * @tx_sync: u64 statistics sync struct for TX statistics
+ * @rx_sync: u64 statistics sync struct for RX statistics
+ * @status_sync: u64 statistics sync struct for TX status statistics
  */
 struct sta_info {
 	/* General information, mostly static */
@@ -450,7 +457,6 @@ struct sta_info {
 
 	/* Updated from RX path only, no locking requirements */
 	unsigned long rx_packets;
-	u64 rx_bytes;
 	unsigned long last_rx;
 	long last_connected;
 	unsigned long num_duplicates;
@@ -459,6 +465,10 @@ struct sta_info {
 	int last_signal;
 	struct ewma avg_signal;
 	int last_ack_signal;
+
+	struct u64_stats_sync rx_sync;
+	u64 rx_bytes;
+	u64 rx_msdu[IEEE80211_NUM_TIDS + 1];
 
 	u8 chains;
 	s8 chain_signal_last[IEEE80211_MAX_CHAINS];
@@ -470,22 +480,23 @@ struct sta_info {
 	/* Updated from TX status path only, no locking requirements */
 	unsigned long tx_filtered_count;
 	unsigned long tx_retry_failed, tx_retry_count;
-	/* moving percentage of failed MSDUs */
-	unsigned int fail_avg;
+
+	struct u64_stats_sync status_sync;
+	u64 tx_msdu_retries[IEEE80211_NUM_TIDS + 1];
+	u64 tx_msdu_failed[IEEE80211_NUM_TIDS + 1];
 
 	/* Updated from TX path only, no locking requirements */
+	struct u64_stats_sync tx_sync;
 	u64 tx_packets[IEEE80211_NUM_ACS];
 	u64 tx_bytes[IEEE80211_NUM_ACS];
+	u64 tx_msdu[IEEE80211_NUM_TIDS + 1];
+
 	struct ieee80211_tx_rate last_tx_rate;
 	int last_rx_rate_idx;
 	u32 last_rx_rate_flag;
 	u32 last_rx_rate_vht_flag;
 	u8 last_rx_rate_vht_nss;
 	u16 tid_seq[IEEE80211_QOS_CTL_TID_MASK + 1];
-	u64 tx_msdu[IEEE80211_NUM_TIDS + 1];
-	u64 tx_msdu_retries[IEEE80211_NUM_TIDS + 1];
-	u64 tx_msdu_failed[IEEE80211_NUM_TIDS + 1];
-	u64 rx_msdu[IEEE80211_NUM_TIDS + 1];
 
 	/*
 	 * Aggregation information, locked with lock.
