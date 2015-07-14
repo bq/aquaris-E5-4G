@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2008-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -608,13 +608,13 @@ static int diag_remote_init(void)
 	diagmem_setsize(POOL_TYPE_MDM_DCI, itemsize_mdm_dci, poolsize_mdm_dci);
 	diagmem_setsize(POOL_TYPE_MDM2_DCI, itemsize_mdm_dci,
 			poolsize_mdm_dci);
-	diagmem_setsize(POOL_TYPE_MDM_USB, itemsize_mdm_usb, poolsize_mdm_usb);
-	diagmem_setsize(POOL_TYPE_MDM2_USB, itemsize_mdm_usb, poolsize_mdm_usb);
+	diagmem_setsize(POOL_TYPE_MDM_MUX, itemsize_mdm_usb, poolsize_mdm_usb);
+	diagmem_setsize(POOL_TYPE_MDM2_MUX, itemsize_mdm_usb, poolsize_mdm_usb);
 	diagmem_setsize(POOL_TYPE_MDM_DCI_WRITE, itemsize_mdm_dci_write,
 			poolsize_mdm_dci_write);
 	diagmem_setsize(POOL_TYPE_MDM2_DCI_WRITE, itemsize_mdm_dci_write,
 			poolsize_mdm_dci_write);
-	diagmem_setsize(POOL_TYPE_QSC_USB, itemsize_qsc_usb,
+	diagmem_setsize(POOL_TYPE_QSC_MUX, itemsize_qsc_usb,
 			poolsize_qsc_usb);
 	driver->cb_buf = kzalloc(HDLC_OUT_BUF_SIZE, GFP_KERNEL);
 	if (!driver->cb_buf)
@@ -873,6 +873,7 @@ static int diag_switch_logging(int requested_mode)
 	int success = -EINVAL;
 	int temp = 0, status = 0;
 	int new_mode = DIAG_USB_MODE; /* set the mode from diag_mux.h */
+	int old_logging_id;
 
 	switch (requested_mode) {
 	case USB_MODE:
@@ -911,6 +912,7 @@ static int diag_switch_logging(int requested_mode)
 	mutex_lock(&driver->diagchar_mutex);
 	temp = driver->logging_mode;
 	driver->logging_mode = requested_mode;
+	old_logging_id = driver->logging_process_id;
 
 	if (driver->logging_mode == MEMORY_DEVICE_MODE) {
 		driver->mask_check = 1;
@@ -946,8 +948,24 @@ static int diag_switch_logging(int requested_mode)
 	}
 
 	driver->logging_process_id = current->tgid;
-	mutex_unlock(&driver->diagchar_mutex);
 	status = diag_mux_switch_logging(new_mode);
+	if (status) {
+		if (requested_mode == MEMORY_DEVICE_MODE)
+			driver->mask_check = 0;
+		else if (requested_mode == SOCKET_MODE)
+			driver->socket_process = NULL;
+		else if (requested_mode == CALLBACK_MODE)
+			driver->callback_process = NULL;
+
+		driver->logging_process_id = old_logging_id;
+		driver->logging_mode = temp;
+		pr_err("diag: Error switching logging mode, current logging mode: %d\n",
+						driver->logging_mode);
+		mutex_unlock(&driver->diagchar_mutex);
+		success = status ? success : 1;
+		return success;
+	}
+	mutex_unlock(&driver->diagchar_mutex);
 	success = status ? success : 1;
 	return success;
 }
@@ -2285,13 +2303,13 @@ static int __init diagchar_init(void)
 	diagmem_setsize(POOL_TYPE_HDLC, itemsize_hdlc, poolsize_hdlc);
 	diagmem_setsize(POOL_TYPE_USER, itemsize_user, poolsize_user);
 	/*
-	 * POOL_TYPE_USB_APPS is for USB write structures for the Local
-	 * USB channel. The number of items encompasses Diag data generated on
+	 * POOL_TYPE_MUX_APPS is for the buffers in the Diag MUX layer.
+	 * The number of buffers encompasses Diag data generated on
 	 * the Apss processor + 1 for the responses generated exclusively on
 	 * the Apps processor + data from SMD data channels (2 channels per
 	 * peripheral) + data from SMD command channels
 	 */
-	diagmem_setsize(POOL_TYPE_USB_APPS, itemsize_usb_apps,
+	diagmem_setsize(POOL_TYPE_MUX_APPS, itemsize_usb_apps,
 			poolsize_usb_apps + 1 + (NUM_SMD_DATA_CHANNELS * 2) +
 			NUM_SMD_CMD_CHANNELS);
 	diagmem_setsize(POOL_TYPE_DCI, itemsize_dci, poolsize_dci);

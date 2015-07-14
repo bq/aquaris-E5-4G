@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2008-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -300,6 +300,8 @@ static void diag_send_msg_mask_update(struct diag_smd_info *smd_info,
 				pr_debug("diag: In %s, successfully reallocated msg_mask update buffer to len: %d\n",
 					 __func__, msg_mask.update_buf_len);
 			}
+		} else if (msg_mask.status == DIAG_CTRL_MASK_ALL_ENABLED) {
+			mask_size = 1;
 		}
 proceed:
 		header.cmd_type = DIAG_CTRL_MSG_F3_MASK;
