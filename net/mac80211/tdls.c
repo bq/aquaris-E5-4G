@@ -12,6 +12,7 @@
 #include <linux/ieee80211.h>
 #include <linux/log2.h>
 #include <net/cfg80211.h>
+#include <linux/rtnetlink.h>
 #include "ieee80211_i.h"
 #include "driver-ops.h"
 
@@ -1736,6 +1737,31 @@ ieee80211_process_tdls_channel_switch_req(struct ieee80211_sub_if_data *sdata,
 		return -EINVAL;
 	}
 
+	if (!elems.sec_chan_offs) {
+		chan_type = NL80211_CHAN_HT20;
+	} else {
+		switch (elems.sec_chan_offs->sec_chan_offs) {
+		case IEEE80211_HT_PARAM_CHA_SEC_ABOVE:
+			chan_type = NL80211_CHAN_HT40PLUS;
+			break;
+		case IEEE80211_HT_PARAM_CHA_SEC_BELOW:
+			chan_type = NL80211_CHAN_HT40MINUS;
+			break;
+		default:
+			chan_type = NL80211_CHAN_HT20;
+			break;
+		}
+	}
+
+	cfg80211_chandef_create(&chandef, chan, chan_type);
+
+	/* we will be active on the TDLS link */
+	if (!cfg80211_reg_can_beacon_relax(sdata->local->hw.wiphy, &chandef,
+					   sdata->wdev.iftype)) {
+		tdls_dbg(sdata, "TDLS chan switch to forbidden channel\n");
+		return -EINVAL;
+	}
+
 	mutex_lock(&local->sta_mtx);
 	sta = sta_info_get(sdata, tf->sa);
 	if (!sta || !test_sta_flag(sta, WLAN_STA_TDLS_PEER_AUTH)) {
@@ -1756,27 +1782,15 @@ ieee80211_process_tdls_channel_switch_req(struct ieee80211_sub_if_data *sdata,
 		goto out;
 	}
 
-	if (!sta->sta.ht_cap.ht_supported) {
-		chan_type = NL80211_CHAN_NO_HT;
-	} else if (!elems.sec_chan_offs) {
-		chan_type = NL80211_CHAN_HT20;
-	} else {
-		switch (elems.sec_chan_offs->sec_chan_offs) {
-		case IEEE80211_HT_PARAM_CHA_SEC_ABOVE:
-			chan_type = NL80211_CHAN_HT40PLUS;
-			break;
-		case IEEE80211_HT_PARAM_CHA_SEC_BELOW:
-			chan_type = NL80211_CHAN_HT40MINUS;
-			break;
-		default:
-			chan_type = NL80211_CHAN_HT20;
-			break;
-		}
+	/* peer should have known better */
+	if (!sta->sta.ht_cap.ht_supported && elems.sec_chan_offs &&
+	    elems.sec_chan_offs->sec_chan_offs) {
+		tdls_dbg(sdata, "TDLS chan switch - wide chan unsupported\n");
+		ret = -ENOTSUPP;
+		goto out;
 	}
 
-	cfg80211_chandef_create(&chandef, chan, chan_type);
 	params.chandef = &chandef;
-
 	params.switch_time = le16_to_cpu(elems.ch_sw_timing->switch_time);
 	params.switch_timeout = le16_to_cpu(elems.ch_sw_timing->switch_timeout);
 
@@ -1800,11 +1814,14 @@ out:
 	return ret;
 }
 
-void ieee80211_process_tdls_channel_switch(struct ieee80211_sub_if_data *sdata,
-					   struct sk_buff *skb)
+static void
+ieee80211_process_tdls_channel_switch(struct ieee80211_sub_if_data *sdata,
+				      struct sk_buff *skb)
 {
 	struct ieee80211_tdls_data *tf = (void *)skb->data;
 	struct wiphy *wiphy = sdata->local->hw.wiphy;
+
+	ASSERT_RTNL();
 
 	/* make sure the driver supports it */
 	if (!(wiphy->features & NL80211_FEATURE_TDLS_CHANNEL_SWITCH))
@@ -1846,4 +1863,30 @@ void ieee80211_teardown_tdls_peers(struct ieee80211_sub_if_data *sdata)
 					    GFP_ATOMIC);
 	}
 	rcu_read_unlock();
+}
+
+void ieee80211_tdls_chsw_work(struct work_struct *wk)
+{
+	struct ieee80211_local *local =
+		container_of(wk, struct ieee80211_local, tdls_chsw_work);
+	struct ieee80211_sub_if_data *sdata;
+	struct sk_buff *skb;
+	struct ieee80211_tdls_data *tf;
+
+	rtnl_lock();
+	while ((skb = skb_dequeue(&local->skb_queue_tdls_chsw))) {
+		tf = (struct ieee80211_tdls_data *)skb->data;
+		list_for_each_entry(sdata, &local->interfaces, list) {
+			if (!ieee80211_sdata_running(sdata) ||
+			    sdata->vif.type != NL80211_IFTYPE_STATION ||
+			    !ether_addr_equal(tf->da, sdata->vif.addr))
+				continue;
+
+			ieee80211_process_tdls_channel_switch(sdata, skb);
+			break;
+		}
+
+		kfree_skb(skb);
+	}
+	rtnl_unlock();
 }
