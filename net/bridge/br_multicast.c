@@ -1416,13 +1416,15 @@ br_multicast_leave_group(struct net_bridge *br,
 
 	spin_lock(&br->multicast_lock);
 	if (!netif_running(br->dev) ||
-	    (port && port->state == BR_STATE_DISABLED) ||
-	    timer_pending(&other_query->timer))
+	    (port && port->state == BR_STATE_DISABLED))
 		goto out;
 
 	mdb = mlock_dereference(br->mdb, br);
 	mp = br_mdb_ip_get(mdb, group);
 	if (!mp)
+		goto out;
+
+	if (timer_pending(&other_query->timer))
 		goto out;
 
 	if (br->multicast_querier) {
