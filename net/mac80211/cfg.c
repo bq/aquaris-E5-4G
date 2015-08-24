@@ -2504,16 +2504,28 @@ static int ieee80211_set_bitrate_mask(struct wiphy *wiphy,
 		sdata->rc_rateidx_mask[i] = mask->control[i].legacy;
 		memcpy(sdata->rc_rateidx_mcs_mask[i], mask->control[i].ht_mcs,
 		       sizeof(mask->control[i].ht_mcs));
+		memcpy(sdata->rc_rateidx_vht_mcs_mask[i],
+		       mask->control[i].vht_mcs,
+		       sizeof(mask->control[i].vht_mcs));
 
 		sdata->rc_has_mcs_mask[i] = false;
+		sdata->rc_has_vht_mcs_mask[i] = false;
 		if (!sband)
 			continue;
 
-		for (j = 0; j < IEEE80211_HT_MCS_MASK_LEN; j++)
+		for (j = 0; j < IEEE80211_HT_MCS_MASK_LEN; j++) {
 			if (~sdata->rc_rateidx_mcs_mask[i][j]) {
 				sdata->rc_has_mcs_mask[i] = true;
 				break;
 			}
+		}
+
+		for (j = 0; j < NL80211_VHT_NSS_MAX; j++) {
+			if (~sdata->rc_rateidx_vht_mcs_mask[i][j]) {
+				sdata->rc_has_vht_mcs_mask[i] = true;
+				break;
+			}
+		}
 	}
 
 	return 0;
