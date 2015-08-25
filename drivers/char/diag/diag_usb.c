@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -36,7 +36,7 @@ struct diag_usb_info diag_usb[NUM_DIAG_USB_DEV] = {
 		.name = DIAG_LEGACY,
 		.connected = 0,
 		.enabled = 0,
-		.mempool = POOL_TYPE_USB_APPS,
+		.mempool = POOL_TYPE_MUX_APPS,
 		.hdl = NULL,
 		.ops = NULL,
 		.read_buf = NULL,
@@ -52,7 +52,7 @@ struct diag_usb_info diag_usb[NUM_DIAG_USB_DEV] = {
 		.name = DIAG_MDM,
 		.connected = 0,
 		.enabled = 0,
-		.mempool = POOL_TYPE_MDM_USB,
+		.mempool = POOL_TYPE_MDM_MUX,
 		.hdl = NULL,
 		.ops = NULL,
 		.read_buf = NULL,
@@ -67,7 +67,7 @@ struct diag_usb_info diag_usb[NUM_DIAG_USB_DEV] = {
 		.name = DIAG_MDM2,
 		.connected = 0,
 		.enabled = 0,
-		.mempool = POOL_TYPE_MDM2_USB,
+		.mempool = POOL_TYPE_MDM2_MUX,
 		.hdl = NULL,
 		.ops = NULL,
 		.read_buf = NULL,
@@ -82,7 +82,7 @@ struct diag_usb_info diag_usb[NUM_DIAG_USB_DEV] = {
 		.name = DIAG_QSC,
 		.connected = 0,
 		.enabled = 0,
-		.mempool = POOL_TYPE_QSC_USB,
+		.mempool = POOL_TYPE_QSC_MUX,
 		.hdl = NULL,
 		.ops = NULL,
 		.read_buf = NULL,
@@ -105,7 +105,7 @@ static void usb_connect(struct diag_usb_info *ch)
 	int num_write = 0;
 	int num_read = 1; /* Only one read buffer for any USB channel */
 
-	if (!ch)
+	if (!ch || !ch->connected)
 		return;
 
 	num_write = diag_mempools[ch->mempool].poolsize;
@@ -284,11 +284,6 @@ int diag_usb_write(int id, unsigned char *buf, int len, int ctxt)
 	}
 
 	usb_info = &diag_usb[id];
-	if (!usb_info->hdl || !usb_info->connected) {
-		pr_debug_ratelimited("diag: USB ch %s is not connected\n",
-				     usb_info->name);
-		return -ENODEV;
-	}
 
 	req = diagmem_alloc(driver, sizeof(struct diag_request),
 			    usb_info->mempool);
@@ -308,6 +303,12 @@ int diag_usb_write(int id, unsigned char *buf, int len, int ctxt)
 	req->length = len;
 	req->context = (void *)(uintptr_t)ctxt;
 
+	if (!usb_info->hdl || !usb_info->connected) {
+		pr_debug_ratelimited("diag: USB ch %s is not connected\n",
+				     usb_info->name);
+		diagmem_free(driver, req, usb_info->mempool);
+		return -ENODEV;
+	}
 	err = usb_diag_write(usb_info->hdl, req);
 	if (err) {
 		pr_err_ratelimited("diag: In %s, error writing to usb channel %s, err: %d\n",
@@ -326,16 +327,12 @@ int diag_usb_write(int id, unsigned char *buf, int len, int ctxt)
 void diag_usb_connect_all(void)
 {
 	int i = 0;
-	unsigned long flags;
 	struct diag_usb_info *usb_info = NULL;
 
 	for (i = 0; i < NUM_DIAG_USB_DEV; i++) {
 		usb_info = &diag_usb[i];
 		if (!usb_info->enabled)
 			continue;
-		spin_lock_irqsave(&usb_info->lock, flags);
-		usb_info->connected = 1;
-		spin_unlock_irqrestore(&usb_info->lock, flags);
 		usb_connect(usb_info);
 	}
 }
@@ -348,16 +345,12 @@ void diag_usb_connect_all(void)
 void diag_usb_disconnect_all(void)
 {
 	int i = 0;
-	unsigned long flags;
 	struct diag_usb_info *usb_info = NULL;
 
 	for (i = 0; i < NUM_DIAG_USB_DEV; i++) {
 		usb_info = &diag_usb[i];
 		if (!usb_info->enabled)
 			continue;
-		spin_lock_irqsave(&usb_info->lock, flags);
-		usb_info->connected = 0;
-		spin_unlock_irqrestore(&usb_info->lock, flags);
 		usb_disconnect(usb_info);
 	}
 }
