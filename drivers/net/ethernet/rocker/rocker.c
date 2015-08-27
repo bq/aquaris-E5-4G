@@ -4264,6 +4264,16 @@ static int rocker_port_change_proto_down(struct net_device *dev,
 	return 0;
 }
 
+static void rocker_port_neigh_destroy(struct neighbour *n)
+{
+	struct rocker_port *rocker_port = netdev_priv(n->dev);
+	int flags = ROCKER_OP_FLAG_REMOVE | ROCKER_OP_FLAG_NOWAIT;
+	__be32 ip_addr = *(__be32 *)n->primary_key;
+
+	rocker_port_ipv4_neigh(rocker_port, SWITCHDEV_TRANS_NONE,
+			       flags, ip_addr, n->ha);
+}
+
 static const struct net_device_ops rocker_port_netdev_ops = {
 	.ndo_open			= rocker_port_open,
 	.ndo_stop			= rocker_port_stop,
@@ -4278,6 +4288,7 @@ static const struct net_device_ops rocker_port_netdev_ops = {
 	.ndo_fdb_dump			= switchdev_port_fdb_dump,
 	.ndo_get_phys_port_name		= rocker_port_get_phys_port_name,
 	.ndo_change_proto_down		= rocker_port_change_proto_down,
+	.ndo_neigh_destroy		= rocker_port_neigh_destroy,
 };
 
 /********************
@@ -4544,6 +4555,7 @@ static int rocker_port_fdb_dump(const struct rocker_port *rocker_port,
 		if (found->key.pport != rocker_port->pport)
 			continue;
 		fdb->addr = found->key.addr;
+		fdb->ndm_state = NUD_REACHABLE;
 		fdb->vid = rocker_port_vlan_to_vid(rocker_port,
 						   found->key.vlan_id);
 		err = obj->cb(rocker_port->dev, obj);
@@ -4989,7 +5001,7 @@ static int rocker_probe_port(struct rocker *rocker, unsigned int port_number)
 
 	err = rocker_port_ig_tbl(rocker_port, SWITCHDEV_TRANS_NONE, 0);
 	if (err) {
-		dev_err(&pdev->dev, "install ig port table failed\n");
+		netdev_err(rocker_port->dev, "install ig port table failed\n");
 		goto err_port_ig_tbl;
 	}
 
@@ -5009,6 +5021,7 @@ err_untagged_vlan:
 	rocker_port_ig_tbl(rocker_port, SWITCHDEV_TRANS_NONE,
 			   ROCKER_OP_FLAG_REMOVE);
 err_port_ig_tbl:
+	rocker->ports[port_number] = NULL;
 	unregister_netdev(dev);
 err_register_netdev:
 	free_netdev(dev);
@@ -5181,7 +5194,8 @@ static int rocker_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto err_probe_ports;
 	}
 
-	dev_info(&pdev->dev, "Rocker switch with id %016llx\n", rocker->hw.id);
+	dev_info(&pdev->dev, "Rocker switch with id %*phN\n",
+		 (int)sizeof(rocker->hw.id), &rocker->hw.id);
 
 	return 0;
 
