@@ -1156,6 +1156,7 @@ static int sta_apply_parameters(struct ieee80211_local *local,
 		set_sta_flag(sta, WLAN_STA_TDLS_CHAN_SWITCH);
 
 	if (test_sta_flag(sta, WLAN_STA_TDLS_PEER) &&
+	    !sdata->u.mgd.tdls_wider_bw_prohibited &&
 	    ieee80211_hw_check(&local->hw, TDLS_WIDER_BW) &&
 	    params->ext_capab_len >= 8 &&
 	    params->ext_capab[7] & WLAN_EXT_CAPA8_TDLS_WIDE_BW_ENABLED)
@@ -2518,15 +2519,17 @@ static int ieee80211_set_bitrate_mask(struct wiphy *wiphy,
 			continue;
 
 		for (j = 0; j < IEEE80211_HT_MCS_MASK_LEN; j++) {
-			if (~sdata->rc_rateidx_mcs_mask[i][j])
+			if (~sdata->rc_rateidx_mcs_mask[i][j]) {
 				sdata->rc_has_mcs_mask[i] = true;
-
-			if (~sdata->rc_rateidx_vht_mcs_mask[i][j])
-				sdata->rc_has_vht_mcs_mask[i] = true;
-
-			if (sdata->rc_has_mcs_mask[i] &&
-			    sdata->rc_has_vht_mcs_mask[i])
 				break;
+			}
+		}
+
+		for (j = 0; j < NL80211_VHT_NSS_MAX; j++) {
+			if (~sdata->rc_rateidx_vht_mcs_mask[i][j]) {
+				sdata->rc_has_vht_mcs_mask[i] = true;
+				break;
+			}
 		}
 	}
 
@@ -3519,18 +3522,32 @@ static void ieee80211_mgmt_frame_register(struct wiphy *wiphy,
 					  u16 frame_type, bool reg)
 {
 	struct ieee80211_local *local = wiphy_priv(wiphy);
+	struct ieee80211_sub_if_data *sdata = IEEE80211_WDEV_TO_SUB_IF(wdev);
 
 	switch (frame_type) {
 	case IEEE80211_FTYPE_MGMT | IEEE80211_STYPE_PROBE_REQ:
-		if (reg)
+		if (reg) {
 			local->probe_req_reg++;
-		else
-			local->probe_req_reg--;
+			sdata->vif.probe_req_reg++;
+		} else {
+			if (local->probe_req_reg)
+				local->probe_req_reg--;
+
+			if (sdata->vif.probe_req_reg)
+				sdata->vif.probe_req_reg--;
+		}
 
 		if (!local->open_count)
 			break;
 
-		ieee80211_queue_work(&local->hw, &local->reconfig_filter);
+		if (sdata->vif.probe_req_reg == 1)
+			drv_config_iface_filter(local, sdata, FIF_PROBE_REQ,
+						FIF_PROBE_REQ);
+		else if (sdata->vif.probe_req_reg == 0)
+			drv_config_iface_filter(local, sdata, 0,
+						FIF_PROBE_REQ);
+
+		ieee80211_configure_filter(local);
 		break;
 	default:
 		break;

@@ -260,6 +260,22 @@ static inline void drv_configure_filter(struct ieee80211_local *local,
 	trace_drv_return_void(local);
 }
 
+static inline void drv_config_iface_filter(struct ieee80211_local *local,
+					   struct ieee80211_sub_if_data *sdata,
+					   unsigned int filter_flags,
+					   unsigned int changed_flags)
+{
+	might_sleep();
+
+	trace_drv_config_iface_filter(local, sdata, filter_flags,
+				      changed_flags);
+	if (local->ops->config_iface_filter)
+		local->ops->config_iface_filter(&local->hw, &sdata->vif,
+						filter_flags,
+						changed_flags);
+	trace_drv_return_void(local);
+}
+
 static inline int drv_set_tim(struct ieee80211_local *local,
 			      struct ieee80211_sta *sta, bool set)
 {
@@ -718,7 +734,7 @@ static inline int drv_ampdu_action(struct ieee80211_local *local,
 				   struct ieee80211_sub_if_data *sdata,
 				   enum ieee80211_ampdu_mlme_action action,
 				   struct ieee80211_sta *sta, u16 tid,
-				   u16 *ssn, u8 buf_size)
+				   u16 *ssn, u8 buf_size, bool amsdu)
 {
 	int ret = -EOPNOTSUPP;
 
@@ -728,11 +744,12 @@ static inline int drv_ampdu_action(struct ieee80211_local *local,
 	if (!check_sdata_in_driver(sdata))
 		return -EIO;
 
-	trace_drv_ampdu_action(local, sdata, action, sta, tid, ssn, buf_size);
+	trace_drv_ampdu_action(local, sdata, action, sta, tid,
+			       ssn, buf_size, amsdu);
 
 	if (local->ops->ampdu_action)
 		ret = local->ops->ampdu_action(&local->hw, &sdata->vif, action,
-					       sta, tid, ssn, buf_size);
+					       sta, tid, ssn, buf_size, amsdu);
 
 	trace_drv_return_int(local, ret);
 
