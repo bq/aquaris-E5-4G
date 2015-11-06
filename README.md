@@ -19,7 +19,7 @@ After it, choose the version you would like to build:
 
         $ mv aquaris-E5-4G kernel
         $ cd kernel
-        $ git checkout aquaris-E5-4G
+        $ git checkout aquaris-E5-4G_1.x
 
 At the same level of the "kernel" directory:
 
