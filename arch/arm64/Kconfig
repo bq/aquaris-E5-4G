@@ -241,6 +241,118 @@ config ARCH_XGENE
 	help
 	  This enables support for AppliedMicro X-Gene SOC Family
 
+config AUDIO_CODEC_WM8998
+	default n
+	bool "LCT defined gpio for WM8998"
+	select MFD_ARIZONA
+	select MFD_ARIZONA_I2C
+	select MFD_WM8998
+	select SND_SOC_ARIZONA
+	select SWITCH_ARIZONA
+	select REGULATOR_ARIZONA
+	select GPIO_ARIZONA
+	help
+		Support for Wolfson codec WM8998.
+
+config LCT_WM8998_GPIO_CTRL
+	default n
+	bool "LCT defined gpio for WM8998"
+	depends on AUDIO_CODEC_WM8998
+	help
+		Support for Wolfson codec WM8998.
+
+config AUDIO_CODEC_WM8998_SWITCH
+	default n
+	bool "Switch macro for WM8998 in L9100"
+	help
+		Support for Wolfson codec WM8998, and this is a switch macro.		
+
+config AUDIO_CODEC_FLORIDA
+	default n
+	bool "LCT defined gpio for FLORIDA"
+	select MFD_ARIZONA
+	select MFD_ARIZONA_SPI
+	select MFD_FLORIDA
+	select SND_SOC_ARIZONA
+	select SWITCH_ARIZONA
+	select REGULATOR_ARIZONA
+	select GPIO_ARIZONA
+	help
+		Support for Wolfson codec FLORIDA.
+		
+config LCT_FLORIDA_GPIO_CTRL
+	default n
+	bool "LCT defined gpio for FLORIDA"
+	depends on AUDIO_CODEC_FLORIDA
+	help
+		Support for Wolfson codec FLORIDA.
+
+config L8150_COMMON
+    default n
+    bool "Longcheer L8150 board"
+    help
+        Support for the L8150 longcheer board.
+
+config L8700_COMMON
+    default n
+    bool "Longcheer L8700 board"
+    help
+        Support for the L8700 longcheer board.
+
+config L8720_LCT_A01
+    default n
+    bool "Longcheer L8720 board"
+    help
+        Support for the L8720 longcheer board.
+		
+config L9100_COMMON
+    default n
+    bool "Longcheer L8700 board"
+    help
+        Support for the L8700 longcheer board.
+
+config L8150_LCT_A01
+    default n
+    bool "Longcheer L8700 board"
+    help
+        Support for the L8700 longcheer board.  
+	  
+config L9100_MRS_A01
+    default n
+    bool "Longcheer L8720 board"
+    help
+        Support for the L8720 longcheer board.
+		
+config L8720_COMMON
+    default n
+    bool "Longcheer L8720 board"
+    help
+        Support for the L8720 longcheer board.
+		
+config L8720_CTM_A01
+    default n
+    bool "Longcheer L8720 board"
+    help
+        Support for the L8720 longcheer board.
+
+config L8720_MCX_A01
+    default n
+    bool "Micromax L8720 board"
+    help
+        Support for the L8720 longcheer board.
+		
+config L8155_MCX_A01
+    default n
+    bool "Micromax L8720 board"
+    help
+        Support for the L8720 longcheer board.
+
+config L8720_SIM_A01
+    default n
+    bool "Longcheer L8720 board"
+    help
+        Support for the L8720 longcheer board.
+
 endmenu
 
 menu "Bus support"
@@ -300,27 +412,6 @@ config CPU_BIG_ENDIAN
        bool "Build big-endian kernel"
        help
          Say Y if you plan on running a kernel in big-endian mode.
-
-config ARM64_ERRATUM_845719
-	bool "Cortex-A53: 845719: a load might read incorrect data"
-	depends on COMPAT
-	default y
-	help
-	  This option adds an alternative code sequence to work around ARM
-	  erratum 845719 on Cortex-A53 parts up to r0p4.
-
-	  When running a compat (AArch32) userspace on an affected Cortex-A53
-	  part, a load at EL0 from a virtual address that matches the bottom 32
-	  bits of the virtual address used by a recent load at (AArch64) EL1
-	  might return incorrect data.
-
-	  The workaround is to write the contextidr_el1 register on exception
-	  return to a 32-bit task.
-	  Please note that this does not necessarily enable the workaround,
-	  as it depends on the alternative framework, which will only patch
-	  the kernel if an affected CPU is detected.
-
-	  If unsure, say Y.
 
 config ARM64_A57_ERRATA_832075
 	bool "ARMv8 A57 Errata 832075"

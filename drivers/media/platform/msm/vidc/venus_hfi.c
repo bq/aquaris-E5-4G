@@ -33,7 +33,6 @@
 
 #define FIRMWARE_SIZE			0X00A00000
 #define REG_ADDR_OFFSET_BITMASK	0x000FFFFF
-#define VENUS_VERSION_LENGTH 128
 
 #define SHARED_QSIZE 0x1000000
 
@@ -1443,10 +1442,16 @@ static int venus_hfi_halt_axi(struct venus_hfi_device *device)
 		dprintk(VIDC_ERR, "Invalid input: %p\n", device);
 		return -EINVAL;
 	}
-	/*
-	 * Driver needs to make sure that clocks are enabled to read Venus AXI
-	 * registers. If not skip AXI HALT.
-	 */
+/* // change here for power off in unknow reason, 20150422
+	if (venus_hfi_power_enable(device)) {
+		dprintk(VIDC_ERR, "%s: Failed to enable power\n", __func__);
+		return 0;
+	}
+*/
+/*
+ * Driver needs to make sure that clocks are enabled to read Venus AXI
+ * registers. If not skip AXI HALT.
+ */
 	if (device->clk_state != ENABLED_PREPARED) {
 		dprintk(VIDC_WARN,
 			"Clocks are OFF, skipping AXI HALT\n");
@@ -1482,12 +1487,13 @@ static inline int venus_hfi_power_off(struct venus_hfi_device *device)
 		dprintk(VIDC_DBG, "Power already disabled\n");
 		return 0;
 	}
-
+	//add this for power off in unknow reson, 20150422
 	rc = venus_hfi_halt_axi(device);
 	if (rc) {
 		dprintk(VIDC_WARN, "Failed to halt AXI\n");
 		return 0;
 	}
+	//add end
 
 	dprintk(VIDC_DBG, "Entering power collapse\n");
 	rc = venus_hfi_tzbsp_set_video_state(TZBSP_VIDEO_STATE_SUSPEND);
@@ -2249,8 +2255,6 @@ static int venus_hfi_core_init(void *device)
 	struct hfi_cmd_sys_init_packet pkt;
 	struct hfi_cmd_sys_get_property_packet version_pkt;
 	int rc = 0;
-	struct list_head *ptr, *next;
-	struct hal_session *session = NULL;
 	struct venus_hfi_device *dev;
 
 	if (device) {
@@ -2263,20 +2267,7 @@ static int venus_hfi_core_init(void *device)
 	venus_hfi_set_state(dev, VENUS_STATE_INIT);
 
 	dev->intr_status = 0;
-
-	mutex_lock(&dev->session_lock);
-	list_for_each_safe(ptr, next, &dev->sess_head) {
-		/* This means that session list is not empty. Kick stale
-		 * sessions out of our valid instance list, but keep the
-		 * list_head inited so that list_del (in the future, called
-		 * by session_clean()) will be valid. When client doesn't close
-		 * them, then it is a genuine leak which driver can't fix. */
-		session = list_entry(ptr, struct hal_session, list);
-		list_del_init(&session->list);
-	}
 	INIT_LIST_HEAD(&dev->sess_head);
-	mutex_unlock(&dev->session_lock);
-
 	venus_hfi_set_registers(dev);
 
 	if (!dev->hal_client) {
@@ -3136,12 +3127,21 @@ static void venus_hfi_pm_hndlr(struct work_struct *work)
 err_power_off:
 skip_power_off:
 
-	/*
-	* When power collapse is escaped, driver no need to inform Venus.
-	* Venus is self-sufficient to come out of the power collapse at
-	* any stage. Driver can skip power collapse and continue with
-	* normal execution.
-	*/
+	/* Reset PC_READY bit as power_off is skipped, if set by Venus */
+/* // delete this for power off in unkown reason
+	ctrl_status = venus_hfi_read_register(device, VIDC_CPU_CS_SCIACMDARG0);
+	if (ctrl_status & VIDC_CPU_CS_SCIACMDARG0_HFI_CTRL_PC_READY) {
+		ctrl_status &= ~(VIDC_CPU_CS_SCIACMDARG0_HFI_CTRL_PC_READY);
+		venus_hfi_write_register(device, VIDC_CPU_CS_SCIACMDARG0,
+			ctrl_status);
+	}
+*/
+/*
+* When power collapse is escaped, driver no need to inform Venus.
+* Venus is self-sufficient to come out of the power collapse at
+* any stage. Driver can skip power collapse and continue with
+* normal execution.
+*/
 
 	/* Cancel pending delayed works if any */
 	cancel_delayed_work(&venus_hfi_pm_work);
@@ -4017,13 +4017,15 @@ static void venus_hfi_unload_fw(void *dev)
 		flush_workqueue(device->venus_pm_workq);
 		subsystem_put(device->resources.fw.cookie);
 		venus_hfi_interface_queues_release(dev);
+		/* IOMMU operations need to be done before AXI halt.*/
+		//venus_hfi_iommu_detach(device);//delete it for power off in unkown reason, 20150422
 		/* Halt the AXI to make sure there are no pending transactions.
 		 * Clocks should be unprepared after making sure axi is halted.
 		 */
 		if (venus_hfi_halt_axi(device))
 			dprintk(VIDC_WARN, "Failed to halt AXI\n");
-		/* Detach IOMMU only when AXI is halted */
-		venus_hfi_iommu_detach(device);
+		/* IOMMU operations need to be done before AXI halt.*/
+		venus_hfi_iommu_detach(device);//add it for power off in unkown reason, 20150422
 		venus_hfi_disable_unprepare_clks(device);
 		venus_hfi_disable_regulators(device);
 		device->power_enabled = false;
@@ -4074,59 +4076,47 @@ exit:
 	return rc;
 }
 
-static int venus_hfi_get_fw_info(void *dev, struct hal_fw_info *fw_info)
+static int venus_hfi_get_fw_info(void *dev, enum fw_info info)
 {
-	int rc = 0, i = 0, j = 0;
+	int rc = 0;
 	struct venus_hfi_device *device = dev;
-	u32 smem_block_size = 0;
-	u8 *smem_table_ptr;
-	char version[VENUS_VERSION_LENGTH];
-	const u32 version_string_size = VENUS_VERSION_LENGTH;
-	const u32 smem_image_index_venus = 14 * 128;
 
-	if (!device || !fw_info) {
-		dprintk(VIDC_ERR,
-			"%s Invalid paramter: device = %p fw_info = %p\n",
-				__func__, device, fw_info);
+	if (!device) {
+		dprintk(VIDC_ERR, "%s Invalid paramter: %p\n",
+			__func__, device);
 		return -EINVAL;
 	}
 
-	smem_table_ptr = smem_get_entry(SMEM_IMAGE_VERSION_TABLE,
-			&smem_block_size, 0, SMEM_ANY_HOST_FLAG);
-	if (smem_table_ptr &&
-			((smem_image_index_venus +
-			  version_string_size) <= smem_block_size))
-		memcpy(version,
-			smem_table_ptr + smem_image_index_venus,
-			version_string_size);
-
-	while (version[i++] != 'V' && i < version_string_size)
-		;
-
-	for (i--; i < version_string_size && j < version_string_size; i++)
-		fw_info->version[j++] = version[i];
-	fw_info->version[version_string_size - 1] = '\0';
-	dprintk(VIDC_DBG, "F/W version retrieved : %s\n", fw_info->version);
-
-	fw_info->base_addr = (u32)device->hal_data->firmware_base;
-	if ((phys_addr_t)fw_info->base_addr !=
-		device->hal_data->firmware_base) {
-		dprintk(VIDC_INFO,
+	switch (info) {
+	case FW_BASE_ADDRESS:
+		rc = (u32)device->hal_data->firmware_base;
+		if ((phys_addr_t)rc != device->hal_data->firmware_base) {
+			dprintk(VIDC_INFO,
 				"%s: firmware_base (0x%pa) truncated to 0x%x",
-				__func__, &device->hal_data->firmware_base,
-				fw_info->base_addr);
-	}
+				__func__, &device->hal_data->firmware_base, rc);
+		}
+		break;
 
-	fw_info->register_base = (u32)device->res->register_base;
-	if ((phys_addr_t)fw_info->register_base != device->res->register_base) {
-		dprintk(VIDC_INFO,
+	case FW_REGISTER_BASE:
+		rc = (u32)device->res->register_base;
+		if ((phys_addr_t)rc != device->res->register_base) {
+			dprintk(VIDC_INFO,
 				"%s: register_base (0x%pa) truncated to 0x%x",
-				__func__, &device->res->register_base,
-				fw_info->register_base);
-	}
+				__func__, &device->res->register_base, rc);
+		}
+		break;
 
-	fw_info->register_size = device->hal_data->register_size;
-	fw_info->irq = device->hal_data->irq;
+	case FW_REGISTER_SIZE:
+		rc = device->hal_data->register_size;
+		break;
+
+	case FW_IRQ:
+		rc = device->hal_data->irq;
+		break;
+
+	default:
+		dprintk(VIDC_ERR, "Invalid fw info requested\n");
+	}
 	return rc;
 }
 
@@ -4196,7 +4186,6 @@ static void *venus_hfi_add_device(u32 device_id,
 		INIT_LIST_HEAD(&hal_ctxt.dev_head);
 
 	INIT_LIST_HEAD(&hdevice->list);
-	INIT_LIST_HEAD(&hdevice->sess_head);
 	list_add_tail(&hdevice->list, &hal_ctxt.dev_head);
 	hal_ctxt.dev_count++;
 

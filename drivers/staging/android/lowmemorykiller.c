@@ -89,6 +89,9 @@ static int enable_adaptive_lmk;
 module_param_named(enable_adaptive_lmk, enable_adaptive_lmk, int,
 	S_IRUGO | S_IWUSR);
 
+static unsigned long vmp;
+module_param_named(vmp, vmp, ulong, S_IRUGO);
+
 /*
  * This parameter controls the behaviour of LMK when vmpressure is in
  * the range of 90-94. Adaptive lmk triggers based on number of file
@@ -136,6 +139,7 @@ static int lmk_vmpressure_notifier(struct notifier_block *nb,
 	if (!enable_adaptive_lmk)
 		return 0;
 
+	vmp = pressure;
 	if (pressure >= 95) {
 		other_file = global_page_state(NR_FILE_PAGES) -
 			global_page_state(NR_SHMEM) -
