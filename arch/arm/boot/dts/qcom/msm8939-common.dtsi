@@ -51,7 +51,7 @@
 			linux,reserve-contiguous-region;
 			linux,reserve-region;
 			linux,remove-completely;
-			reg = <0x0 0x86800000 0x0 0x05500000>;
+			reg = <0x0 0x86800000 0x0 0x05600000>;
 			label = "modem_adsp_mem";
 		};
 
@@ -59,8 +59,14 @@
 			linux,reserve-contiguous-region;
 			linux,reserve-region;
 			linux,remove-completely;
-			reg = <0x0 0x8bd00000 0x0 0x0600000>;
+			reg = <0x0 0x8be00000 0x0 0x0600000>;
 			label = "peripheral_mem";
+		};
+
+		mba_mem: mba_region@0 {
+			linux,reserve-contiguous-region;
+			reg = <0 0 0 0x0200000>;
+			label = "mba_mem";
 		};
 
 		venus_mem: venus_region@0 {
@@ -1244,6 +1250,7 @@
 
 		qcom,firmware-name = "modem";
 		qcom,pil-self-auth;
+		qcom,pil-mba-region;
 		qcom,sysmon-id = <0>;
 		qcom,ssctl-instance-id = <0x12>;
 
@@ -1257,6 +1264,11 @@
 		/* GPIO output to mss */
 		qcom,gpio-force-stop = <&smp2pgpio_ssr_smp2p_1_out 0 0>;
 		linux,contiguous-region = <&modem_adsp_mem>;
+
+		qcom,mba-mem@0 {
+			compatible = "qcom,pil-mba-mem";
+			linux,contiguous-region = <&mba_mem>;
+		};
 	};
 
 	pcm0: qcom,msm-pcm {
