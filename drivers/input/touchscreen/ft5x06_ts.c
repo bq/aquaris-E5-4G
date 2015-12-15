@@ -798,8 +798,11 @@ static int ft5x06_ts_resume(struct device *dev)
 	int err;
 
 #ifdef CONFIG_FTS_GESTURE
-	if(ft5x06_gesture_close_export()==1)
+	if(ft5x06_gesture_close_export()==1) {
+		if (usb_online)
+			ft5x0x_write_reg(data->client,FT_REG_FREQ_HOP,0x01);
 		return 0;
+	}
 #endif
 
 	if (!data->suspended) {

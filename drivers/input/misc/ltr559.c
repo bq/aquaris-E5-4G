@@ -1280,6 +1280,9 @@ int ltr559_get_ps_value_for_double_tap(void)
 {
 	int tp_double_tap = 1;
 
+	if (!double_tap_data)
+		return 0;
+
 	if (!double_tap_data->ps_open_state) {
 		ltr559_ps_enable(double_tap_data->client,1);
 		msleep(20);//wait for wakeup
