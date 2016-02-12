@@ -26,6 +26,8 @@ extern uint8_t g_imx214_otp_module_id;
 extern uint8_t g_ov5670_otp_module_id ;
 extern uint8_t g_s5k3l2_otp_module_id;
 extern uint8_t g_s5k5e2_otp_module_id;
+extern uint8_t g_otp_driver_ic_id;
+
 static void msm_sensor_adjust_mclk(struct msm_camera_power_ctrl_t *ctrl)
 {
 	int idx;
@@ -1324,17 +1326,38 @@ int msm_sensor_check_id(struct msm_sensor_ctrl_t *s_ctrl)
 		rc = s_ctrl->func_tbl->sensor_match_id(s_ctrl);
 	else
 		rc = msm_sensor_match_id(s_ctrl);
-	if((rc == 0) && (s_ctrl->sensordata->sensor_name != NULL) && ((strcmp(s_ctrl->sensordata->sensor_name,"imx214_8916") == 0) || (strcmp(s_ctrl->sensordata->sensor_name,"imx214_8916_truly")) == 0))
+	if( (rc == 0) && (s_ctrl->sensordata->sensor_name != NULL) 
+		&&((strcmp(s_ctrl->sensordata->sensor_name,"imx214_8916") == 0) 
+	// gpg now we do not support this module
+	//		|| (strcmp(s_ctrl->sensordata->sensor_name,"imx214_8916_truly") == 0)
+			|| (strcmp(s_ctrl->sensordata->sensor_name,"imx214_8916_cm9886qr") == 0)
+			|| (strcmp(s_ctrl->sensordata->sensor_name,"imx214_cma846") == 0)
+			) )
 	{
 		pr_err("%s:g_imx214_otp_module_id = %x\n", __func__,g_imx214_otp_module_id);
 		if((strcmp(s_ctrl->sensordata->sensor_name,"imx214_8916") == 0) && (g_imx214_otp_module_id == 0x7))
 		{
 			pr_err("%s:it is ofilm imx214\n", __func__);	
 		}
+		// gpg now we do not support this module
+		#if 0
 		else if((strcmp(s_ctrl->sensordata->sensor_name,"imx214_8916_truly") == 0) && (g_imx214_otp_module_id == 0x2))
 		{
 			pr_err("%s:it is truly imx214\n", __func__);	
 		}
+		#endif 
+		else if((strcmp(s_ctrl->sensordata->sensor_name,"imx214_8916_cm9886qr") == 0) 
+			&& (g_imx214_otp_module_id == 0x2)
+			&& (g_otp_driver_ic_id == 0x02) ) // ADI driver IC by gpg
+		{
+			pr_err("%s:it is imx214_8916_cm9886qr\n", __func__);	
+		}
+		else if((strcmp(s_ctrl->sensordata->sensor_name,"imx214_cma846") == 0) 
+			&& (g_imx214_otp_module_id == 0x2)
+			&& (g_otp_driver_ic_id == 0x01) ) // DW driver IC by gpg
+		{
+			pr_err("%s:it is imx214_cma846\n", __func__);	
+		}		
 		else
 		{
 			pr_err("%s:it is not support imx214 s_ctrl->sensordata->sensor_name =%s\n", __func__,s_ctrl->sensordata->sensor_name);
