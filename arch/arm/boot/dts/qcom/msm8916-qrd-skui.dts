@@ -66,6 +66,11 @@
 			qcom,awake-min-soc;
 			qcom,cfg-current-limited = <1200>;
 
+			qcom,warm-bat-mv = <4100>;
+			qcom,warm-bat-ma = <600>;
+			qcom,cool-bat-ma = <600>;
+			qcom,battery-ovp-supported;
+
 			qcom,otp-hard-jeita-config;
 			qcom,otp-hot-bat-decidegc = <500>;
 			qcom,otp-cold-bat-decidegc = <(-50)>;//<(-150)>;
