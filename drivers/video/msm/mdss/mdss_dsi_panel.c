@@ -35,6 +35,12 @@
 #define MIN_REFRESH_RATE 48
 #define DEFAULT_MDP_TRANSFER_TIME 14000
 
+#define LCM_SUPPORT_READ_VERSION
+#ifdef LCM_SUPPORT_READ_VERSION
+char g_lcm_id[128];
+#endif
+
+
 DEFINE_LED_TRIGGER(bl_led_trigger);
 
 void mdss_dsi_panel_pwm_cfg(struct mdss_dsi_ctrl_pdata *ctrl)
@@ -536,19 +542,31 @@ static void mdss_dsi_panel_switch_mode(struct mdss_panel_data *pdata,
 	return;
 }
 
+struct mdss_dsi_ctrl_pdata *w_reg;
+
+#ifdef CONFIG_FTS_GESTURE
+extern int ft5x06_gesture_open_export(void);
+extern int ft5x06_gesture_close_export(void);
+#endif
+
 static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 							u32 bl_level)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
 	struct mdss_dsi_ctrl_pdata *sctrl = NULL;
-
+   	static u32 old_bl_level=0;
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
 		return;
 	}
-
+	
+	if (!mdss_panel_get_boot_cfg() ) 	{
+		bl_level = 0;	
+	}
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
+	
+	w_reg=ctrl_pdata;
 
 	/*
 	 * Some backlight controllers specify a minimum duty cycle
@@ -559,6 +577,23 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 	if ((bl_level < pdata->panel_info.bl_min) && (bl_level != 0))
 		bl_level = pdata->panel_info.bl_min;
 
+	if(bl_level==0 || (old_bl_level==0 && bl_level!=0)){
+		pr_info("%s, bl_level=%d\n",__func__,bl_level);
+	}
+
+#ifdef CONFIG_TOUCHSCREEN_FT5X06
+	if(old_bl_level==0 && bl_level != 0)
+	{
+		msleep(68);
+	}
+#endif
+#ifdef CONFIG_FTS_GESTURE
+	if(old_bl_level==0 && bl_level != 0)
+	{
+		ft5x06_gesture_close_export();
+	}
+#endif
+	
 	switch (ctrl_pdata->bklt_ctrl) {
 	case BL_WLED:
 		led_trigger_event(bl_led_trigger, bl_level);
@@ -595,6 +630,7 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 			__func__);
 		break;
 	}
+	old_bl_level = bl_level;
 }
 
 static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
@@ -1835,6 +1871,51 @@ static int mdss_panel_parse_dt(struct device_node *np,
 error:
 	return -EINVAL;
 }
+#ifdef LCM_SUPPORT_READ_VERSION
+static int mdss_panel_parse_panel_name(struct device_node *node)
+{
+	const char *name;
+
+	name = of_get_property(node,
+						//"label", NULL);
+						"qcom,mdss-dsi-panel-name", NULL);
+	strcpy(g_lcm_id, name);
+	return 0;
+}
+
+static ssize_t msm_fb_lcd_name(struct device *dev,
+				  struct device_attribute *attr, char *buf)
+{
+	ssize_t ret = 0;
+
+	sprintf(buf, "%s\n", g_lcm_id);
+	ret = strlen(buf) + 1;
+
+	return ret;
+}
+
+static DEVICE_ATTR(lcd_name, 0644, msm_fb_lcd_name, NULL);
+
+static struct kobject *msm_lcd_name;
+static int msm_lcd_name_create_sysfs(void)
+{
+	int ret ;
+
+	msm_lcd_name = kobject_create_and_add("android_lcd", NULL);
+	if (msm_lcd_name == NULL) {
+		pr_info("msm_lcd_name_create_sysfs	failed!\n");
+		ret = -ENOMEM;
+		return ret ;
+	}
+
+	ret = sysfs_create_file(msm_lcd_name, &dev_attr_lcd_name.attr);
+	if (ret) {
+		pr_info("%s failed\n",__func__);
+		kobject_del(msm_lcd_name);
+	}
+	return 0 ;
+}
+#endif
 
 int mdss_dsi_panel_init(struct device_node *node,
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata,
@@ -1861,6 +1942,13 @@ int mdss_dsi_panel_init(struct device_node *node,
 		pr_info("%s: Panel Name = %s\n", __func__, panel_name);
 		strlcpy(&pinfo->panel_name[0], panel_name, MDSS_MAX_PANEL_LEN);
 	}
+	#ifdef LCM_SUPPORT_READ_VERSION
+		rc = mdss_panel_parse_panel_name(node);
+		if (rc) {
+			pr_err("fail to parse panel label\n");
+			return rc;
+		}
+	#endif
 	rc = mdss_panel_parse_dt(node, ctrl_pdata);
 	if (rc) {
 		pr_err("%s:%d panel dt parse failed\n", __func__, __LINE__);
@@ -1883,6 +1971,10 @@ int mdss_dsi_panel_init(struct device_node *node,
 	ctrl_pdata->low_power_config = mdss_dsi_panel_low_power_config;
 	ctrl_pdata->panel_data.set_backlight = mdss_dsi_panel_bl_ctrl;
 	ctrl_pdata->switch_mode = mdss_dsi_panel_switch_mode;
+
+	#ifdef LCM_SUPPORT_READ_VERSION
+		msm_lcd_name_create_sysfs();
+	#endif
 
 	return 0;
 }
