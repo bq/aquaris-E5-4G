@@ -22,6 +22,12 @@ DEFINE_MSM_MUTEX(msm_actuator_mutex);
 #undef CDBG
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
 #define MAX_QVALUE  4096
+#ifdef CONFIG_VEGETALTE_COMMON
+uint16_t inf_code = 0;
+uint16_t macro_code = 0;
+uint16_t inf_adj_otp = 0;
+uint16_t macro_adj_otp = 0;
+#endif
 static struct v4l2_file_operations msm_actuator_v4l2_subdev_fops;
 
 #define PARK_LENS_LONG_STEP 7
@@ -83,6 +89,13 @@ static void msm_actuator_parse_i2c_params(struct msm_actuator_ctrl_t *a_ctrl,
 	uint16_t value = 0;
 	uint32_t size = a_ctrl->reg_tbl_size, i = 0;
 	struct msm_camera_i2c_reg_array *i2c_tbl = a_ctrl->i2c_reg_tbl;
+#ifdef CONFIG_VEGETALTE_COMMON
+	int16_t pos_value = next_lens_position;
+	inf_code = 404;
+	macro_code = 693;
+	inf_adj_otp = 20;
+	macro_adj_otp = 100;
+ #endif
 	CDBG("Enter\n");
 	for (i = 0; i < size; i++) {
 		/* check that the index into i2c_tbl cannot grow larger that
@@ -114,6 +127,71 @@ static void msm_actuator_parse_i2c_params(struct msm_actuator_ctrl_t *a_ctrl,
 					i2c_byte1 = write_arr[i].reg_addr;
 					i2c_byte2 = (value & 0xFF00) >> 8;
 				}
+			} else {
+				i2c_byte1 = (value & 0xFF00) >> 8;
+				i2c_byte2 = value & 0xFF;
+			}
+		} else if (write_arr[i].reg_write_type == MSM_ACTUATOR_WRITE_DAC_AK7345) {
+			value = (next_lens_position <<
+				write_arr[i].data_shift) |
+				((hw_dword & write_arr[i].hw_mask) >>
+				write_arr[i].hw_shift);
+			if (write_arr[i].reg_addr != 0xFFFF) {
+				i2c_byte1 = write_arr[i].reg_addr;
+				i2c_byte2 = value;
+				if (size != (i+1)) {
+					i2c_byte2 = (value>>1) & 0xFF;
+					CDBG("byte1:0x%x, byte2:0x%x\n",
+						i2c_byte1, i2c_byte2);
+                                        i2c_tbl[a_ctrl->i2c_tbl_index].
+                                                reg_addr = i2c_byte1;
+                                        i2c_tbl[a_ctrl->i2c_tbl_index].
+                                                reg_data = i2c_byte2;
+                                        i2c_tbl[a_ctrl->i2c_tbl_index].
+                                                delay = 0;
+                                        a_ctrl->i2c_tbl_index++;
+                                        i++;
+                                        i2c_byte1 = write_arr[i].reg_addr;
+                                        i2c_byte2 = (value & 0x1) << 7;
+				}
+			}
+		} else if (write_arr[i].reg_write_type == MSM_ACTUATOR_WRITE_DAC_DW9800W) {
+			if(macro_code <= inf_code)
+			{
+				pr_err("ERROR ! af:macro_code:%d,inf_code:%d\n", macro_code,inf_code);
+				return ;
+			}
+			if(macro_code> 1023 - macro_adj_otp)
+			{
+				macro_code = 1023 - macro_adj_otp;
+			}
+			pos_value = (next_lens_position*((macro_code+macro_adj_otp)-(inf_code-inf_adj_otp))/1024+(inf_code-inf_adj_otp));
+		
+
+                        value = (pos_value <<
+                                write_arr[i].data_shift) |
+                                ((hw_dword & write_arr[i].hw_mask) >>
+                                write_arr[i].hw_shift);
+
+                        if (write_arr[i].reg_addr != 0xFFFF) {
+                                i2c_byte1 = write_arr[i].reg_addr;
+                                i2c_byte2 = value;
+                                if (size != (i+1)) {
+					i2c_byte2 = (value & 0xFF00) >> 8;
+                                     //   CDBG("lj byte1:0x%x, byte2:0x%x\n",
+                                       //         i2c_byte1, i2c_byte2);
+                                        i2c_tbl[a_ctrl->i2c_tbl_index].
+                                                reg_addr = i2c_byte1;
+                                        i2c_tbl[a_ctrl->i2c_tbl_index].
+                                                reg_data = i2c_byte2;
+                                        i2c_tbl[a_ctrl->i2c_tbl_index].
+                                                delay = 0;
+                                        a_ctrl->i2c_tbl_index++;
+                                        i++;
+                                        i2c_byte1 = write_arr[i].reg_addr;
+                                        i2c_byte2 = (value & 0xFF);
+                                }
+				//CDBG("lj --GPG--byte1:0x%x, byte2:0x%x, value:%d\n",i2c_byte1, i2c_byte2,value);
 			} else {
 				i2c_byte1 = (value & 0xFF00) >> 8;
 				i2c_byte2 = value & 0xFF;
@@ -322,6 +400,13 @@ static int32_t msm_actuator_move_focus(
 		dest_step_pos);
 		return -EFAULT;
 	}
+/* drv:monkey test system crash*/
+	if (a_ctrl->step_position_table == NULL) {
+		pr_err("%s:Step position table is not initialed %d \n"
+				,__func__, __LINE__);
+		return -EFAULT;
+	}
+
 	curr_lens_pos = a_ctrl->step_position_table[a_ctrl->curr_step_pos];
 	a_ctrl->i2c_tbl_index = 0;
 	CDBG("curr_step_pos =%d dest_step_pos =%d curr_lens_pos=%d\n",
@@ -381,6 +466,7 @@ static int32_t msm_actuator_park_lens(struct msm_actuator_ctrl_t *a_ctrl)
 {
 	int32_t rc = 0;
 	uint16_t next_lens_pos = 0;
+	uint16_t medium_lens_pos = a_ctrl->initial_code;//just used for mid entry actuator
 	struct msm_camera_i2c_reg_setting reg_setting;
 
 	a_ctrl->i2c_tbl_index = 0;
@@ -399,6 +485,55 @@ static int32_t msm_actuator_park_lens(struct msm_actuator_ctrl_t *a_ctrl)
 		a_ctrl->park_lens.max_step = a_ctrl->max_code_size;
 
 	next_lens_pos = a_ctrl->step_position_table[a_ctrl->curr_step_pos];
+
+	if(a_ctrl->initial_position_type == ACTUATOR_MEDIUM){
+		/*If it's mid entry type actuator, the final lens position is medium_lens_pos instead of zero when Vaf is power down.*/
+		while (next_lens_pos != medium_lens_pos) {
+			/* conditions which help to reduce park lens time */
+			if(next_lens_pos>medium_lens_pos){
+				if ((next_lens_pos-medium_lens_pos) > (a_ctrl->park_lens.max_step * PARK_LENS_LONG_STEP)) {
+					next_lens_pos = next_lens_pos - (a_ctrl->park_lens.max_step * PARK_LENS_LONG_STEP);
+				} else if ((next_lens_pos-medium_lens_pos) > (a_ctrl->park_lens.max_step * PARK_LENS_MID_STEP)) {
+					next_lens_pos = next_lens_pos - (a_ctrl->park_lens.max_step * PARK_LENS_MID_STEP);
+				} else if ((next_lens_pos-medium_lens_pos) > (a_ctrl->park_lens.max_step * PARK_LENS_SMALL_STEP)) {
+					next_lens_pos = next_lens_pos - (a_ctrl->park_lens.max_step * PARK_LENS_SMALL_STEP);
+				} else {
+					next_lens_pos = ((next_lens_pos-medium_lens_pos) > a_ctrl->park_lens.max_step) ?
+						(next_lens_pos - a_ctrl->park_lens.max_step) : medium_lens_pos;
+				}
+			}else{
+				if ((medium_lens_pos-next_lens_pos) > (a_ctrl->park_lens.max_step * PARK_LENS_LONG_STEP)) {
+					next_lens_pos = next_lens_pos + (a_ctrl->park_lens.max_step * PARK_LENS_LONG_STEP);
+				} else if ((medium_lens_pos-next_lens_pos) > (a_ctrl->park_lens.max_step * PARK_LENS_MID_STEP)) {
+					next_lens_pos = next_lens_pos + (a_ctrl->park_lens.max_step * PARK_LENS_MID_STEP);
+				} else if ((medium_lens_pos-next_lens_pos) > (a_ctrl->park_lens.max_step * PARK_LENS_SMALL_STEP)) {
+					next_lens_pos = next_lens_pos + (a_ctrl->park_lens.max_step * PARK_LENS_SMALL_STEP);
+				} else {
+					next_lens_pos = ((medium_lens_pos-next_lens_pos) > a_ctrl->park_lens.max_step) ?
+						(next_lens_pos + a_ctrl->park_lens.max_step) : medium_lens_pos;
+				}
+			}
+			a_ctrl->func_tbl->actuator_parse_i2c_params(a_ctrl,
+				next_lens_pos, a_ctrl->park_lens.hw_params,
+				a_ctrl->park_lens.damping_delay);
+
+			reg_setting.reg_setting = a_ctrl->i2c_reg_tbl;
+			reg_setting.size = a_ctrl->i2c_tbl_index;
+			reg_setting.data_type = a_ctrl->i2c_data_type;
+
+			rc = a_ctrl->i2c_client.i2c_func_tbl->
+				i2c_write_table_w_microdelay(
+				&a_ctrl->i2c_client, &reg_setting);
+			if (rc < 0) {
+				pr_err("%s Failed I2C write Line %d\n",
+					__func__, __LINE__);
+				return rc;
+			}
+			a_ctrl->i2c_tbl_index = 0;
+			/* Use typical damping time delay to avoid tick sound */
+			usleep_range(10000, 12000);
+		}
+	}else{
 	while (next_lens_pos) {
 		/* conditions which help to reduce park lens time */
 		if (next_lens_pos > (a_ctrl->park_lens.max_step *
@@ -442,6 +577,7 @@ static int32_t msm_actuator_park_lens(struct msm_actuator_ctrl_t *a_ctrl)
 		/* Use typical damping time delay to avoid tick sound */
 		usleep_range(10000, 12000);
 	}
+	}
 
 	return 0;
 }
@@ -452,6 +588,7 @@ static int32_t msm_actuator_init_step_table(struct msm_actuator_ctrl_t *a_ctrl,
 	int16_t code_per_step = 0;
 	uint32_t qvalue = 0;
 	int16_t cur_code = 0;
+	int16_t start_code = 0;
 	uint16_t step_index = 0, region_index = 0;
 	uint16_t step_boundary = 0;
 	uint32_t max_code_size = 1;
@@ -488,7 +625,14 @@ static int32_t msm_actuator_init_step_table(struct msm_actuator_ctrl_t *a_ctrl,
 	if (a_ctrl->step_position_table == NULL)
 		return -ENOMEM;
 
-	cur_code = set_info->af_tuning_params.initial_code;
+	/*If there is af OTP, the start_code is infinity_code, else it will be zero.
+	    If it's mid entry type, the initial_code will be medium_lens_postion,
+	    so initial_code shouldn't be used for initing step_position_table.
+	    The start_code is infinity_code, it's used for initing step_position_table. */
+	start_code = (set_info->af_tuning_params.initial_position_type == ACTUATOR_MEDIUM) ?
+					set_info->af_tuning_params.start_code : set_info->af_tuning_params.initial_code;
+	cur_code = start_code;
+
 	a_ctrl->step_position_table[step_index++] = cur_code;
 	for (region_index = 0;
 		region_index < a_ctrl->region_size;
@@ -514,7 +658,7 @@ static int32_t msm_actuator_init_step_table(struct msm_actuator_ctrl_t *a_ctrl,
 				cur_code = step_index * code_per_step / qvalue;
 			else
 				cur_code = step_index * code_per_step;
-			cur_code += set_info->af_tuning_params.initial_code;
+			cur_code += start_code;//modified for compatible with mid entry actuator
 			if (cur_code < max_code_size) {
 				a_ctrl->step_position_table[step_index] =
 					cur_code;
@@ -542,8 +686,10 @@ static int32_t msm_actuator_set_default_focus(
 	int32_t rc = 0;
 	CDBG("Enter\n");
 
-	if (a_ctrl->curr_step_pos != 0)
-		rc = a_ctrl->func_tbl->actuator_move_focus(a_ctrl, move_params);
+	/*dest_step_pos must be different from curr_step_pos when open camera, whatever the initial curr_step_pos value is.*/
+	move_params->dest_step_pos = a_ctrl->curr_step_pos + 1;
+
+	rc = a_ctrl->func_tbl->actuator_move_focus(a_ctrl, move_params);
 	CDBG("Exit\n");
 	return rc;
 }
@@ -784,11 +930,18 @@ static int32_t msm_actuator_set_param(struct msm_actuator_ctrl_t *a_ctrl,
 
 	/* Park lens data */
 	a_ctrl->park_lens = set_info->actuator_params.park_lens;
+
 	a_ctrl->initial_code = set_info->af_tuning_params.initial_code;
+	a_ctrl->initial_position_type = set_info->af_tuning_params.initial_position_type;
 	if (a_ctrl->func_tbl->actuator_init_step_table)
 		rc = a_ctrl->func_tbl->
 			actuator_init_step_table(a_ctrl, set_info);
 
+	/*when af power up, the initial curr_step_pos should be corresponding to the actual lens postion.
+	    If it's mid entry type, the initial curr_step_pos will be medium_lens_pos, else will be zero.*/
+	if(a_ctrl->initial_position_type == ACTUATOR_MEDIUM)
+		a_ctrl->curr_step_pos = a_ctrl->total_steps>>1;
+	else
 	a_ctrl->curr_step_pos = 0;
 	a_ctrl->curr_region_index = 0;
 	CDBG("Exit\n");
@@ -1035,6 +1188,14 @@ static long msm_actuator_subdev_do_ioctl(
 			actuator_data.cfg.set_info.af_tuning_params
 				.initial_code =
 				u32->cfg.set_info.af_tuning_params.initial_code;
+
+			actuator_data.cfg.set_info.af_tuning_params
+				.start_code =
+				u32->cfg.set_info.af_tuning_params.start_code;
+
+			actuator_data.cfg.set_info.af_tuning_params
+				.initial_position_type =
+				u32->cfg.set_info.af_tuning_params.initial_position_type;
 
 			actuator_data.cfg.set_info.af_tuning_params.pwd_step =
 				u32->cfg.set_info.af_tuning_params.pwd_step;

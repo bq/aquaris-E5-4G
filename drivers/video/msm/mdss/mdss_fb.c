@@ -1173,7 +1173,7 @@ void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 
 	if ((((mdss_fb_is_power_off(mfd) && mfd->dcm_state != DCM_ENTER)
 		|| !mfd->bl_updated) && !IS_CALIB_MODE_BL(mfd)) ||
-		mfd->panel_info->cont_splash_enabled) {
+		(mfd->panel_info->cont_splash_enabled && bkl_lvl == 0)) {
 		mfd->unset_bl_level = bkl_lvl;
 		return;
 	} else {
@@ -1354,6 +1354,21 @@ static int mdss_fb_blank_blank(struct msm_fb_data_type *mfd,
 	return ret;
 }
 
+#if  defined(CONFIG_PICMT_COMMON)
+static bool boot_mode_charge;
+static int __init mdss_fb_boot_mode(char *opt)
+{
+	if (!opt || !*opt)
+	return 1;
+
+	if (!strncmp(opt, "charger", 7)) {
+	boot_mode_charge = true;
+	}
+	return 1;
+}
+__setup("androidboot.mode=", mdss_fb_boot_mode);
+#endif
+
 static int mdss_fb_blank_unblank(struct msm_fb_data_type *mfd)
 {
 	int ret = 0;
@@ -1401,6 +1416,10 @@ static int mdss_fb_blank_unblank(struct msm_fb_data_type *mfd)
 				msecs_to_jiffies(mfd->idle_time));
 	}
 
+#if  defined(CONFIG_PICMT_COMMON)
+	if (boot_mode_charge)
+	goto error;
+#endif
 	/* Reset the backlight only if the panel was off */
 	if (mdss_panel_is_power_off(cur_power_state)) {
 		mutex_lock(&mfd->bl_lock);
