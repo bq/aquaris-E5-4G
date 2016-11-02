@@ -156,6 +156,7 @@ static void msm_actuator_parse_i2c_params(struct msm_actuator_ctrl_t *a_ctrl,
 				}
 			}
 		} else if (write_arr[i].reg_write_type == MSM_ACTUATOR_WRITE_DAC_DW9800W) {
+#ifdef CONFIG_VEGETALTE_COMMON
 			if(macro_code <= inf_code)
 			{
 				pr_err("ERROR ! af:macro_code:%d,inf_code:%d\n", macro_code,inf_code);
@@ -196,6 +197,7 @@ static void msm_actuator_parse_i2c_params(struct msm_actuator_ctrl_t *a_ctrl,
 				i2c_byte1 = (value & 0xFF00) >> 8;
 				i2c_byte2 = value & 0xFF;
 			}
+#endif
 		} else {
 			i2c_byte1 = write_arr[i].reg_addr;
 			i2c_byte2 = (hw_dword & write_arr[i].hw_mask) >>
